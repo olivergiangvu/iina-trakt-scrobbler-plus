@@ -1769,7 +1769,7 @@ async function finalizeCurrentMedia(reason) {
   lastSourceSignature = "";
   resetCorrectionState();
   queueSidebarRefresh(false);
-  if (reason === "end-file" || reason === "window-will-close") {
+  if (reason === "end-file" || reason === "window-will-close" || reason === "mpv.shutdown") {
     await flushScrobbleQueue(reason, 3000);
     if (currentMedia || lastSourceSignature) {
       log("New media became active during end-file flush; preserving new playback state");
