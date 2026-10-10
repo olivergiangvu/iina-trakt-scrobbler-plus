@@ -580,12 +580,12 @@ function bindSidebarMessaging() {
   sidebar.onMessage("copy_playback_diagnostics", function() {
     (async function() {
       try {
-        var text = playbackDiagnostics.build(
+        var text = JSON.stringify(JSON.parse(playbackDiagnostics.build(
           getCurrentSource(),
           currentMedia && currentMedia.parsed,
           currentMedia && currentMedia.traktTargetLabel,
           PLUGIN_VERSION
-        );
+        )));
         // AppleScript clipboard helper, same IINA-sanctioned interface used by auth.
         var escaped = text.replace(/\\/g, "\\\\").replace(/"/g, '\\"')
           .replace(/\r/g, " ").replace(/\n/g, "\\n");
