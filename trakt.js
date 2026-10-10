@@ -26,6 +26,7 @@ var runtime = {
 	logger: function () {},
 	notify: function () {},
 	tokenCache: undefined,
+	tokenRefreshPromise: null,
 	searchCache: null,
 	authPromise: null,
 	authPrompt: "",
@@ -970,21 +971,30 @@ async function ensureAccessToken(options) {
 	}
 
 	if (token && token.refresh_token) {
-		try {
-			return await refreshAccessToken(token);
-		} catch (error) {
-			log(
-				"Token refresh failed: " +
-					(error && error.message ? error.message : String(error)),
-			);
-			// Network failure, 429/1015 or 5xx must NOT wipe a valid refresh token.
-			if (!error || !error.statusCode || error.statusCode >= 500 ||
-				error.code === "TRAKT_COOLDOWN" || error.code === "TRAKT_OFFLINE") {
-				throw error;
-			}
-			if (error.statusCode !== 400 && error.statusCode !== 401) throw error;
-			clearToken();
+		// Multiple sidebar/history/scrobble calls can coincide at token expiry.
+		// Only refresh once; rotating a refresh token twice causes forced re-auth.
+		if (!runtime.tokenRefreshPromise) {
+			runtime.tokenRefreshPromise = (async function() {
+				try {
+					return await refreshAccessToken(token);
+				} catch (error) {
+					log("Token refresh failed: " + (error && error.message ? error.message : String(error)));
+					// Rate limits, network errors and 5xx are recoverable. Keep OAuth.
+					if (!error || !error.statusCode || error.statusCode >= 500 ||
+						error.code === "TRAKT_COOLDOWN" || error.code === "TRAKT_OFFLINE") throw error;
+					if (error.statusCode !== 400 && error.statusCode !== 401) throw error;
+					clearToken();
+					throw createAuthRequiredError();
+				}
+			})();
+			var inFlight = runtime.tokenRefreshPromise;
+			inFlight.then(function() {
+				if (runtime.tokenRefreshPromise === inFlight) runtime.tokenRefreshPromise = null;
+			}, function() {
+				if (runtime.tokenRefreshPromise === inFlight) runtime.tokenRefreshPromise = null;
+			});
 		}
+		return runtime.tokenRefreshPromise;
 	}
 
 	if (settings.interactive) {
