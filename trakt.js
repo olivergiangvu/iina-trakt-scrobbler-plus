@@ -655,7 +655,9 @@ async function getRecentHistory(options) {
 		!settings.force &&
 		runtime.recentHistory &&
 		runtime.recentHistoryFetchedAt &&
-		Date.now() - runtime.recentHistoryFetchedAt < HISTORY_CACHE_TTL_MS
+		Date.now() - runtime.recentHistoryFetchedAt < HISTORY_CACHE_TTL_MS &&
+		(!runtime.recentHistory.error ||
+			(runtime.apiGate && runtime.apiGate.status().mode !== "online"))
 	) {
 		return runtime.recentHistory;
 	}
@@ -742,14 +744,14 @@ async function getViewerProfile(options) {
 	try {
 		response = await authedRequest("GET", USER_SETTINGS_PATH);
 	} catch (error) {
-		runtime.viewerProfileFetchedAt = Date.now();
+		runtime.viewerProfileFetchedAt = runtime.viewerProfile ? Date.now() : 0;
 		if ((error.code === "TRAKT_COOLDOWN" || error.code === "TRAKT_OFFLINE") &&
 			runtime.viewerProfile) return runtime.viewerProfile;
 		throw error;
 	}
 
 	if (response.statusCode >= 400) {
-		runtime.viewerProfileFetchedAt = Date.now();
+		runtime.viewerProfileFetchedAt = runtime.viewerProfile ? Date.now() : 0;
 		throw new Error(
 			response.body.error_description ||
 				response.body.error ||
