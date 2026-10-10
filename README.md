@@ -1,64 +1,47 @@
-# Trakt Scrobbler
+# Trakt Scrobbler Plus for IINA
 
-Trakt Scrobbler is an IINA plugin that scrobbles local movies and episodes to Trakt. It parses file names with `guessit-js`, matches them on Trakt, and keeps track of playback as you watch.
+An enhanced fork of [i3p9/iina-trakt-scrobbler](https://github.com/i3p9/iina-trakt-scrobbler) with initial support for **Remux / AIOStreams streaming URLs**.
 
-## Install
+**Current public test version: v0.2.0-beta.1.** This is an early test build, not a fully validated stable release.
 
-The best way to install it is from IINA itself.
+## Install directly from IINA (recommended)
 
-- Open `Plugins` in IINA, choose `Install from GitHub`
-- Paste `i3p9/iina-trakt-scrobbler`, and install it
-- Restart IINA, and you should see the Trakt Scrobbler sidebar in the sidebar list. Click it, and follow the instructions to authenticate with Trakt.
-- Keyboard shortcut for trakt sidebar: `⌘+T`
-  That is also the best way to get future updates.
+1. On **your Mac**, open **IINA → Settings → Plugins**.
+2. Choose **Install from GitHub**.
+3. Enter: `olivergiangvu/iina-trakt-scrobbler-plus`
+4. Install, restart IINA, open the **Trakt+** sidebar and authenticate.
+5. **Disable scrobbling in the original Trakt Scrobbler** while testing Plus; otherwise both plugins can report the same playback.
 
-If you prefer, you can also download the `.iinaplgz` package from GitHub Releases and install that manually.
+No Mac Terminal or HomeDocker/SSH commands are required for installation.
 
-## Features
+Alternative: download the `.iinaplgz` file from [GitHub Releases](https://github.com/olivergiangvu/iina-trakt-scrobbler-plus/releases) and open it with IINA.
 
-- Trakt device auth
-- Movie and episode parsing with `guessit-js`
-- Automatic Trakt matching
-- `start`, `pause`, and `stop` scrobbling
-- Preview and fast-pause guards
-- Live sidebar with auth, playback, and scrobble status
+## What Plus currently adds
 
-<img width="364" height="458" alt="image" src="https://github.com/user-attachments/assets/eecc409f-08e8-402d-9bca-dbe22c046453" />
+- Detects `torrent_name`, `filename`, and related query parameters before trying encoded stream paths.
+- Extracts IMDb references such as `media_id=tt11247158`.
+- Uses IMDb-first lookup on Trakt for eligible movies/shows.
+- Verifies season and episode existence before scrobbling.
+- Keeps the original file-based Guessit parser, scrobble monitoring, sidebar, history and manual correction.
+- Uses its own IINA plugin identifier and token Keychain service.
 
-## Todo
+**Not yet included:** the TMDB-based identification engine and a true manual season/episode editor. These are planned next. Manual correction in this beta still has the original limitations if episode detection is wrong.
 
-- Cache playback locally when a scrobble cannot be sent, then retry or reconcile it later
-- Add a manual search / correction flow in the sidebar for cases where a file is misidentified
-- Show when a plugin update is available in the sidebar
-- Show recent scrobble history in the sidebar with option to remove incorrect scrobbles
+## Supported test example
 
-## Development
+`The.Legend.of.Vox.Machina.S02E04.WEBDL...&media_id=tt11247158&media_type=series`
 
-Stage the plugin for local testing:
+The plugin should identify **The Legend of Vox Machina S02E04** rather than an encoded token or S01E25. Live IINA verification is pending.
 
-```bash
-./scripts/stage-plugin.sh
-```
+## Releases and auto-update
 
-Link it into IINA:
+GitHub Actions tests source files and automatically packages an installable `.iinaplgz` asset whenever a **new version** is merged to `main`.
+Each release must increment both `version` (semantic display version) and the integer `ghVersion` in `Info.json`. IINA detects updates through `ghRepo` and `ghVersion`.
 
-```bash
-/Applications/IINA.app/Contents/MacOS/iina-plugin link "$(pwd)/.build/iina-trakt-scrobbler.iinaplugin"
-```
+Developers can follow [MAC-only testing and rollback instructions](docs/PLUS_BETA_TESTING.md).
 
-Build a release package:
+## Attribution and license
 
-```bash
-./scripts/pack-release.sh
-```
+Fork of [i3p9/iina-trakt-scrobbler](https://github.com/i3p9/iina-trakt-scrobbler), originally authored by Fahim and distributed under **GPL-3.0**. Stream URL metadata concepts are inspired by [Zain-Imam/iina-episode-info](https://github.com/Zain-Imam/iina-episode-info) (MIT).
 
-## Notes
-
-- Tokens are stored in the macOS keychain when possible, with an `@data` fallback during development.
-- Search results are cached in `@data/trakt-cache.json`.
-- Debug logs are written to `@data/debug.log`.
-- Log file location in disk (for debugging): `"$HOME/Library/Application Support/com.colliderli.iina/plugins/.data/io.github.fahim.iinatraktscrobbler/debug.log"`
-
-## Acknowledgements
-
-Inspired by [trakt-scrobbler](https://github.com/iamkroot/trakt-scrobbler)
+The original GPL-3.0 license is retained. This fork is independent and is not an official release of the upstream project.
