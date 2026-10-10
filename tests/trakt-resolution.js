@@ -664,13 +664,12 @@ async function run() {
       kind: "episode",
       title: "Arrested Development",
       subtitle: "Show · 2003",
-      detail: "S01E06 - Visiting Ours · title match",
+      detail: "Choose Season and Episode below before applying",
       year: 2003,
       posterUrl: "https://media.trakt.tv/posters/arrested-development-medium.jpg.webp"
     });
     assert.deepStrictEqual(calls, [
-      "GET /shows/arrested-development?extended=full",
-      "GET /shows/4589/seasons/1/episodes/6"
+      "GET /shows/arrested-development?extended=full"
     ]);
   });
 
