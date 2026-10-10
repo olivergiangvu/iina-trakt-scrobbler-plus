@@ -66,3 +66,26 @@ The original GPL-3.0 license is retained. This fork is independent and is not an
 - Sudden app termination may prevent an immediate stop API request; the local unacknowledged checkpoint is retried on next plugin launch or while idle after Trakt recovers (up to 48 hours).
 - Rate limiting is local to this IINA plugin, not globally coordinated with the separate HomeDocker Trakt Bridge process.
 - Never store stream URLs or Trakt authorization tokens in the stop journal. Existing `@data` plugin storage is used.
+
+## v0.2.4 beta — Sync Queue Dashboard
+
+This beta is built from a feature branch. **v0.2.3 remains the stable release.**
+It adds a list of durable, final-stop progress updates awaiting Trakt confirmation
+(Pending / Syncing) and the latest 12 confirmed stop updates (Recently Synced).
+Last failure reason/time is visible in the Trakt API status. Records are locally
+bounded, and the recent-sync record expires after seven days.
+
+**Retry Now** respects the existing API cooldown and is disabled during playback,
+while an earlier retry is running, or when disconnected. Automatic 30-second
+recovery remains enabled. Only final `stop` records are replayed; we do not
+replay stale `start` events.
+
+**Beta installation:** download the `.iinaplgz` asset from the v0.2.4-beta.1
+[GitHub prerelease](https://github.com/olivergiangvu/iina-trakt-scrobbler-plus/releases/tag/v0.2.4-beta.1)
+and open it with IINA on the **Mac**. Using Install from GitHub
+normally selects the *latest stable* release, so it may remain at v0.2.3.
+No Terminal, SSH, HomeDocker stack edits or bridge changes are needed.
+
+**Validation plan:** IINA sidebar should show Pending and Recently Synced,
+Retry Now should be disabled when the API is rate limited or the player is active,
+and quit/resume progress should still flow through the existing Trakt Bridge.
