@@ -43,6 +43,7 @@ jobs:
           node --check trakt.js
           node --check stream-source.js
           node --check playback-identity.js
+          node --check stop-journal.js
           node --check monitor.js
           node --check tests/stream-source.js
 
@@ -50,6 +51,7 @@ jobs:
         run: |
           node tests/stream-source.js
           node tests/playback-identity.js
+          node tests/stop-journal.js
           node tests/parser-smoke.js
           node tests/trakt-resolution.js
           node tests/monitor-state.js
@@ -69,6 +71,7 @@ jobs:
           unzip -Z1 "$OUTPUT" | grep -qx 'Info.json'
           unzip -Z1 "$OUTPUT" | grep -qx 'stream-source.js'
           unzip -Z1 "$OUTPUT" | grep -qx 'playback-identity.js'
+          unzip -Z1 "$OUTPUT" | grep -qx 'stop-journal.js'
           unzip -Z1 "$OUTPUT" | grep -qx 'parser.iina.js'
           echo "path=$OUTPUT" >> "$GITHUB_OUTPUT"
 
@@ -85,8 +88,10 @@ jobs:
             exit 0
           fi
           cat > release-notes.md <<'NOTES'
-          ## Trakt Scrobbler Plus — playback matching fix
-          - Correct media identification using mpv's human-readable filename/media-title before encoded stream paths.
+          ## Trakt Scrobbler Plus — reliable Trakt resume/watched stop
+          - Finalize Trakt scrobble on IINA window close; persist pending stop checkpoint before network request.
+          - Retry interrupted Trakt stop updates after the next IINA launch, retaining resume progress or watched status.
+          - Retain mpv filename and multilingual episode recognition fixes.
           - Fix Manual Search / Trakt slug lookup; choose season and episode before applying a verified match.
           - IMDb-first Trakt lookup with episode verification, while keeping existing guessit file parsing as fallback.
           - Independent IINA plugin ID and authentication storage from upstream.
