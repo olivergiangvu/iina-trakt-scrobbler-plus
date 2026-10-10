@@ -829,6 +829,11 @@
         </div>
         <p id="scrobble-target" class="scrobble-target">No target</p>
         <p id="scrobble-detail" class="scrobble-detail">Waiting for playback.</p>
+        <div style="display:flex; justify-content:space-between; gap:8px; margin-top:10px;">
+          <span class="small">Trakt API</span>
+          <span id="network-status" class="small" aria-live="polite">Online</span>
+        </div>
+        <p id="network-detail" class="small" hidden></p>
       </div>
     </section>
 
@@ -942,6 +947,12 @@
           duration: 0,
           preview: false,
           fastPause: false
+        },
+        network: {
+          mode: "online",
+          retryInSeconds: 0,
+          pendingFinalizations: 0,
+          lastFailure: ""
         },
         scrobble: {
           status: "idle",
@@ -1106,6 +1117,7 @@
           if (scrobble.reason === "missing-trakt-match") return "Title not matched";
           return "Skipped";
         }
+        if (scrobble.status === "deferred") return "Waiting to sync";
         if (scrobble.status === "failed") return "Trakt error";
         if (scrobble.status === "disabled") return "Scrobbling off";
         return "Waiting";
@@ -1124,6 +1136,7 @@
           if (scrobble.reason === "missing-trakt-match") return "Try a cleaner file name.";
           return "Skipped.";
         }
+        if (scrobble.status === "deferred") return scrobble.detail || "Will retry when Trakt reconnects.";
         if (scrobble.status === "failed") return scrobble.detail || "Failed.";
         if (scrobble.status === "disabled") return "No updates will be sent.";
         return "Waiting for playback.";
@@ -1466,6 +1479,22 @@
         setHidden("scrobble-detail", !detail);
       }
 
+      function renderNetwork() {
+        var net = state.network || {};
+        var mode = net.mode || "online";
+        var pending = Math.max(0, Number(net.pendingFinalizations || 0));
+        var seconds = Math.max(0, Math.ceil(Number(net.retryInSeconds || 0)));
+        var caption = mode === "rate_limited" ? "Rate limited"
+          : mode === "offline" ? "Offline / retrying"
+          : pending ? "Recovering" : "Online";
+        var detail = mode !== "online"
+          ? "Retry in " + seconds + "s; " + pending + " saved stop update(s)."
+          : pending ? pending + " saved stop update(s) awaiting confirmation." : "";
+        setText("network-status", caption);
+        setText("network-detail", detail);
+        setHidden("network-detail", !detail);
+      }
+
       function renderCorrection() {
         var correction = state.correction || {};
         var open = !!correction.active;
@@ -1673,6 +1702,7 @@
         renderAuth();
         renderPlayback();
         renderScrobble();
+        renderNetwork();
         renderCorrection();
         renderHistory();
         renderProvider();
