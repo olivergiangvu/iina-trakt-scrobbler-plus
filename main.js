@@ -1,14 +1,15 @@
 const { core, event, file, preferences, utils, sidebar, menu } = iina;
 
 var parser = require("./parser.iina.js");
+var streamSource = require("./stream-source.js");
 var monitor = require("./monitor.js");
 var trakt = require("./trakt.js");
-var PLUGIN_VERSION = "0.1.36";
+var PLUGIN_VERSION = "0.2.0-beta.1";
 var DEBUG_LOG_PATH = "@data/debug.log";
 var MAX_DEBUG_LOG_CHARS = 200000;
 var POLL_INTERVAL_MS = 2000;
 var UI_POLL_INTERVAL_MS = 750;
-var PLUGIN_SIDEBAR_ID = "plugin:io.github.fahim.iinatraktscrobbler";
+var PLUGIN_SIDEBAR_ID = "plugin:io.github.olivergiangvu.iinatraktscrobblerplus";
 var currentMedia = null;
 var lastSourceSignature = "";
 var playbackState = createPlaybackState();
@@ -1050,7 +1051,8 @@ function cloneMediaInfo(mediaInfo) {
     year: mediaInfo.year,
     season: mediaInfo.season,
     episode: mediaInfo.episode,
-    episodeTitle: mediaInfo.episodeTitle
+    episodeTitle: mediaInfo.episodeTitle,
+    imdb: mediaInfo.imdb || ""
   };
 }
 
@@ -1138,13 +1140,27 @@ function playbackConfig() {
 
 function identifyCurrentMedia() {
   var source = getCurrentSource();
-  appendDebugLog("[IINATraktScrobbler] Parser attempt source=" + (source.url || source.title || ""));
-  var parsed = parser.parseMediaFromSource(source.url, source.title);
+  var streamIdentity = streamSource.extract(source.url, source.title);
+  // Prefer a clean torrent/file name over encoded tokens in the URL path.
+  var parsed = streamIdentity.name
+    ? parser.parseMediaFromSource(streamIdentity.name, streamIdentity.name)
+    : null;
+  if (!parsed || (parsed.kind !== "movie" && parsed.kind !== "episode")) {
+    parsed = parser.parseMediaFromSource(source.url, source.title);
+  }
+  appendDebugLog("[IINATraktScrobblerPlus] Source identity: " +
+    (streamIdentity.nameSource || "default") +
+    (streamIdentity.imdb ? " imdb=" + streamIdentity.imdb : "") +
+    (parsed ? " kind=" + parsed.kind : " unparsed"));
   logGuessitFailureOnce();
+  var mediaInfo = mediaInfoFromParsed(parsed);
+  if (mediaInfo && streamIdentity.imdb) {
+    mediaInfo.imdb = streamIdentity.imdb;
+  }
   currentMedia = parsed ? {
     source: source,
     parsed: parsed,
-    mediaInfo: mediaInfoFromParsed(parsed),
+    mediaInfo: mediaInfo,
     traktTargetLabel: "",
     identifiedAt: new Date().toISOString()
   } : null;

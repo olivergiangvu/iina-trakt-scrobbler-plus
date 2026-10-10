@@ -7,7 +7,7 @@ var TOKEN_PATH = "/oauth/token";
 var USER_SETTINGS_PATH = "/users/settings";
 var TOKEN_FALLBACK_PATH = "@data/trakt-token.json";
 var CACHE_PATH = "@data/trakt-cache.json";
-var KEYCHAIN_SERVICE = "io.github.fahim.iinatraktscrobbler";
+var KEYCHAIN_SERVICE = "io.github.olivergiangvu.iinatraktscrobblerplus";
 var KEYCHAIN_ACCOUNT = "trakt-oauth";
 var AUTH_COOLDOWN_MS = 30000;
 var TOKEN_REFRESH_MARGIN_SECONDS = 60;
@@ -95,17 +95,11 @@ function writeJson(path, value) {
 }
 
 function getClientId() {
-	return (
-		traktKeys.getId() ||
-		String(pref("trakt_client_id", "") || "").trim()
-	);
+	return String(pref("trakt_client_id", "") || "").trim() || traktKeys.getId();
 }
 
 function getClientSecret() {
-	return (
-		traktKeys.getSecret() ||
-		String(pref("trakt_client_secret", "") || "").trim()
-	);
+	return String(pref("trakt_client_secret", "") || "").trim() || traktKeys.getSecret();
 }
 
 function hasCredentials() {
@@ -113,7 +107,10 @@ function hasCredentials() {
 }
 
 function usingEmbeddedCredentials() {
-	return traktKeys.hasEmbeddedCredentials();
+	return !(
+		String(pref("trakt_client_id", "") || "").trim() &&
+		String(pref("trakt_client_secret", "") || "").trim()
+	) && traktKeys.hasEmbeddedCredentials();
 }
 
 function credentialMode() {
@@ -1033,6 +1030,16 @@ function searchCacheKey(title, year) {
 	);
 }
 
+function mediaCacheKey(mediaInfo) {
+  var title = mediaInfo.type === "episode"
+    ? (mediaInfo.showTitle || mediaInfo.title)
+    : mediaInfo.title;
+  var titleKey = searchCacheKey(title, mediaInfo.year || "");
+  var imdb = String(mediaInfo.imdb || "").trim().toLowerCase();
+  // Never share a cache entry with a different IMDb identity.
+  return /^tt\d{6,10}$/.test(imdb) ? "imdb:" + imdb + "|" + titleKey : titleKey;
+}
+
 function normalizeTitle(value) {
 	return String(value || "")
 		.toLowerCase()
@@ -1487,6 +1494,26 @@ async function resolveEpisodeIds(mediaInfo, bucket, key) {
 		);
 	}
 
+	var imdb = String(mediaInfo.imdb || "").trim().toLowerCase();
+	if (/^tt\d{6,10}$/.test(imdb)) {
+		// Trakt accepts IMDb identities on its show detail endpoint.
+		var identifiedShow = await fetchShowByReference(imdb);
+		if (identifiedShow && identifiedShow.ids && identifiedShow.ids.trakt) {
+			var direct = await verifyEpisodeCandidate(identifiedShow.ids.trakt, mediaInfo);
+			if (!direct) {
+				// An explicit ID + invalid episode must not fall back to a guessed show.
+				log("Trakt IMDb identity has no matching episode: " + episodeIdentityLabel(mediaInfo));
+				bucket[key] = -1;
+				saveSearchCache();
+				return null;
+			}
+			bucket[key] = createVerifiedEpisodeCacheEntry(direct.trakt);
+			saveSearchCache();
+			log("Trakt resolved show by IMDb reference " + imdb);
+			return { trakt: direct.trakt };
+		}
+	}
+
 	var title = mediaInfo.showTitle || mediaInfo.title;
 	var year = mediaInfo.year || "";
 	var results = await search(title, "show", year || undefined, 5);
@@ -1741,7 +1768,7 @@ async function applyMatchOverride(mediaInfo, candidate) {
 	var year = mediaInfo.year || "";
 	var bucket =
 		mediaInfo.type === "episode" ? cache.show : cache.movie;
-	var key = searchCacheKey(title, year);
+	var key = mediaCacheKey(mediaInfo);
 
 	if (mediaInfo.type === "episode") {
 		var verified = await verifyEpisodeCandidate(traktId, mediaInfo);
@@ -1775,7 +1802,7 @@ async function getTraktIds(mediaInfo) {
 			: mediaInfo.title;
 	var year = mediaInfo.year || "";
 	var bucket = type === "episode" ? cache.show : cache.movie;
-	var key = searchCacheKey(title, year);
+	var key = mediaCacheKey(mediaInfo);
 	var cached = bucket[key];
 	var cachedId = readCachedTraktId(cached);
 
@@ -1787,6 +1814,18 @@ async function getTraktIds(mediaInfo) {
 	}
 	if (cachedId > 0) {
 		return { trakt: cachedId };
+	}
+
+	var imdb = String(mediaInfo.imdb || "").trim().toLowerCase();
+	if (type === "movie" && /^tt\d{6,10}$/.test(imdb)) {
+		var identifiedMovie = await fetchMovieByReference(imdb);
+		if (identifiedMovie && identifiedMovie.ids && identifiedMovie.ids.trakt) {
+			var directId = Number(identifiedMovie.ids.trakt);
+			bucket[key] = directId;
+			saveSearchCache();
+			log("Trakt resolved movie by IMDb reference " + imdb);
+			return { trakt: directId };
+		}
 	}
 
 	var requiredType = type === "episode" ? "show" : "movie";

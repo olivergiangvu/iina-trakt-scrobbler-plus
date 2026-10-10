@@ -95,6 +95,57 @@ function test(name, fn) {
 }
 
 async function run() {
+  await test("resolves Remux episode by its IMDb show ID before fuzzy title search", async function() {
+    const store = {};
+    const logs = [];
+    store[TOKEN_PATH] = JSON.stringify(makeToken());
+    const { trakt, calls } = loadFreshTrakt(store, function(request) {
+      if (request.url.pathname === "/shows/tt11247158") {
+        return { statusCode: 200, body: {
+          title: "The Legend of Vox Machina",
+          ids: { trakt: 4242, imdb: "tt11247158" }
+        }};
+      }
+      if (request.url.pathname === "/shows/4242/seasons/2/episodes/4") {
+        return { statusCode: 200, body: { title: "Those Who Walk Away", season: 2, number: 4 } };
+      }
+      throw new Error("Unexpected Trakt request: " + request.url.pathname);
+    }, logs);
+
+    const mediaInfo = { type: "episode", title: "The Legend of Vox Machina",
+      showTitle: "The Legend of Vox Machina", season: 2, episode: 4, imdb: "tt11247158" };
+    assert.deepStrictEqual(await trakt.getTraktIds(mediaInfo), { trakt: 4242 });
+    assert.deepStrictEqual(await trakt.prepareScrobblePayload(mediaInfo), {
+      show: { ids: { trakt: 4242 } }, episode: { season: 2, number: 4 }
+    });
+    assert.strictEqual(calls.filter(function(c) { return c.includes("/search/"); }).length, 0);
+    const cache = JSON.parse(store[CACHE_PATH]);
+    assert.deepStrictEqual(cache.show["imdb:tt11247158|the legend of vox machina|"], {
+      trakt: 4242, verified: true
+    });
+  });
+
+  await test("does not scrobble non-existent episode even with IMDb ID", async function() {
+    const store = {};
+    const logs = [];
+    store[TOKEN_PATH] = JSON.stringify(makeToken());
+    const { trakt, calls } = loadFreshTrakt(store, function(request) {
+      if (request.url.pathname === "/shows/tt11247158") {
+        return { statusCode: 200, body: { title: "The Legend of Vox Machina", ids: { trakt: 4242 } } };
+      }
+      if (request.url.pathname === "/shows/4242/seasons/1/episodes/25") {
+        return { statusCode: 404, body: {} };
+      }
+      throw new Error("Unexpected Trakt request: " + request.url.pathname);
+    }, logs);
+    const ids = await trakt.getTraktIds({
+      type: "episode", title: "The Legend of Vox Machina",
+      showTitle: "The Legend of Vox Machina", season: 1, episode: 25, imdb: "tt11247158"
+    });
+    assert.strictEqual(ids, null);
+    assert.strictEqual(calls.filter(function(c) { return c.includes("/search/"); }).length, 0);
+  });
+
   await test("repairs a stale cached show id by verifying episode candidates", async function() {
     const store = {};
     const logs = [];
