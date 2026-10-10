@@ -22,6 +22,8 @@ jobs:
         run: node tests/playback-identity.js
       - name: Trakt stop checkpoint journal tests
         run: node tests/stop-journal.js
+      - name: Trakt API rate limit and outage tests
+        run: node tests/trakt-api-gate.js
       - name: Parser smoke tests
         run: node tests/parser-smoke.js
       - name: Trakt resolution tests
