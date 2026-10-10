@@ -2,7 +2,7 @@
 
 An enhanced fork of [i3p9/iina-trakt-scrobbler](https://github.com/i3p9/iina-trakt-scrobbler) with initial support for **Remux / AIOStreams streaming URLs**.
 
-**Current public test version: v0.2.2-beta.1.** This is an early test build, not a fully validated stable release.
+**Current public test version: v0.2.3-beta.1.** This is an early test build, not a fully validated stable release.
 
 ## Install directly from IINA (recommended)
 
@@ -24,6 +24,8 @@ Alternative: download the `.iinaplgz` file from [GitHub Releases](https://github
 - Uses IMDb-first lookup on Trakt for eligible movies/shows.
 - Verifies season and episode existence before scrobbling.
 - Sends a final Trakt stop when the IINA window closes, and writes a local checkpoint before network transmission so it can retry a failed/aborted stop after relaunch.
+- Trakt API write requests are serialized and paced (1.35 seconds apart), with persistent, bounded backoff on 429/Cloudflare 1015, short outage cooldown, and a 30-second background retry scan for saved stops when no playback is active.
+- Sidebar shows connection status, retry countdown and unacknowledged stop count; Profile/History reads are cached and UI requests coalesced.
 - Includes **Manual Correction**: show search and Trakt slug lookup work even if the parsed episode is wrong. Enter the correct Season/Episode, select the series and confirm only when Trakt verifies the episode.
 - Keeps the original file-based Guessit parser, scrobble monitoring, sidebar and history.
 - Uses its own IINA plugin identifier and token Keychain service.
@@ -61,5 +63,6 @@ The original GPL-3.0 license is retained. This fork is independent and is not an
 
 - This stores checkpoints **only on playback stop**, not every 10 seconds while watching. Trakt live watching status does not include a continuously updated resume point.
 - This release does not automatically push progress to AIOStreams. Whether AIOStreams imports Trakt's paused progress is a separate integration concern.
-- Sudden app termination may prevent an immediate stop API request; the local unacknowledged checkpoint is retried on next plugin launch (up to 48 hours).
+- Sudden app termination may prevent an immediate stop API request; the local unacknowledged checkpoint is retried on next plugin launch or while idle after Trakt recovers (up to 48 hours).
+- Rate limiting is local to this IINA plugin, not globally coordinated with the separate HomeDocker Trakt Bridge process.
 - Never store stream URLs or Trakt authorization tokens in the stop journal. Existing `@data` plugin storage is used.
