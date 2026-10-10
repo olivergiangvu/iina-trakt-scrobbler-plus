@@ -6,8 +6,9 @@ var playbackIdentity = require("./playback-identity.js");
 var monitor = require("./monitor.js");
 var stopJournalModule = require("./stop-journal.js");
 var syncHistoryModule = require("./sync-history.js");
+var playbackDiagnostics = require("./playback-diagnostics.js");
 var trakt = require("./trakt.js");
-var PLUGIN_VERSION = "0.2.4-beta.1";
+var PLUGIN_VERSION = "0.2.4-beta.2";
 var DEBUG_LOG_PATH = "@data/debug.log";
 var MAX_DEBUG_LOG_CHARS = 200000;
 var POLL_INTERVAL_MS = 2000;
@@ -574,6 +575,34 @@ function bindSidebarMessaging() {
   sidebar.onMessage("refresh", function() {
     log("Sidebar requested refresh");
     queueSidebarRefresh(true);
+  });
+
+  sidebar.onMessage("copy_playback_diagnostics", function() {
+    (async function() {
+      try {
+        var text = playbackDiagnostics.build(
+          getCurrentSource(),
+          currentMedia && currentMedia.parsed,
+          currentMedia && currentMedia.traktTargetLabel,
+          PLUGIN_VERSION
+        );
+        // AppleScript clipboard helper, same IINA-sanctioned interface used by auth.
+        var escaped = text.replace(/\\/g, "\\\\").replace(/"/g, '\\"')
+          .replace(/\r/g, " ").replace(/\n/g, "\\n");
+        var result = await utils.exec("/usr/bin/osascript", [
+          "-e", 'set the clipboard to "' + escaped + '"'
+        ]);
+        var ok = result && result.status === 0;
+        sidebar.postMessage("diagnostics_copy_status", {
+          ok: !!ok,
+          message: ok ? "Safe diagnostics copied. Paste them into ChatGPT." :
+            "Copy failed. Try again."
+        });
+      } catch (error) {
+        log("Safe diagnostics clipboard unavailable: " + errStr(error));
+        sidebar.postMessage("diagnostics_copy_status", {ok:false, message:"Clipboard unavailable."});
+      }
+    })();
   });
 
   sidebar.onMessage("retry_pending_stops", function() {
