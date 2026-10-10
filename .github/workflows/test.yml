@@ -26,6 +26,8 @@ jobs:
         run: node tests/trakt-api-gate.js
       - name: OAuth rate-limit integration tests
         run: node tests/trakt-network-integration.js
+      - name: OAuth single-flight refresh tests
+        run: node tests/trakt-oauth-singleflight.js
       - name: Parser smoke tests
         run: node tests/parser-smoke.js
       - name: Trakt resolution tests
