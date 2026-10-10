@@ -1876,3 +1876,9 @@ event.on("iina.window-will-close", wrapEvent("iina.window-will-close", function(
   }
   return finalizeCurrentMedia("window-will-close");
 }));
+
+// Additional late safety net for IINA builds that skip the window lifecycle
+// event during process shutdown. The journal prevents loss across teardown.
+event.on("mpv.shutdown", wrapEvent("mpv.shutdown", function() {
+  return finalizeCurrentMedia("mpv.shutdown");
+}));
