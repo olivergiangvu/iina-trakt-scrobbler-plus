@@ -1528,6 +1528,13 @@
         var detail = mode !== "online"
           ? "Retry in " + seconds + "s; " + pending + " saved stop update(s)."
           : pending ? pending + " saved stop update(s) awaiting confirmation." : "";
+        if (net.lastFailure) {
+          var issue = String(net.lastFailure).replace(/_/g, " ");
+          var http = Number(net.lastHttpStatus || 0);
+          detail += (detail ? " " : "") + "Last issue: " + issue +
+            (http ? " (HTTP " + http + ")" : "") +
+            (net.lastFailureAt ? " · " + formatUpdatedAt(net.lastFailureAt) : "") + ".";
+        }
         setText("network-status", caption);
         setText("network-detail", detail);
         setHidden("network-detail", !detail);
