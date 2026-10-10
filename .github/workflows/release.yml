@@ -54,6 +54,7 @@ jobs:
           node tests/playback-identity.js
           node tests/stop-journal.js
           node tests/trakt-api-gate.js
+          node tests/trakt-network-integration.js
           node tests/parser-smoke.js
           node tests/trakt-resolution.js
           node tests/monitor-state.js
