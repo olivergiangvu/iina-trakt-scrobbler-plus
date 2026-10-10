@@ -1097,13 +1097,24 @@ function mediaCacheKey(mediaInfo) {
 }
 
 function normalizeTitle(value) {
-	return String(value || "")
-		.toLowerCase()
-		.replace(/&/g, " and ")
+	var text = String(value || "").toLowerCase();
+	if (typeof text.normalize === "function") {
+		text = text.normalize("NFKD").replace(/[\u0300-\u036f]/g, "");
+	}
+	return text.replace(/&/g, " and ")
 		.replace(/['’]/g, "")
 		.replace(/[^a-z0-9]+/g, " ")
 		.replace(/\s+/g, " ")
 		.trim();
+}
+
+// Trakt's relevance score is not sufficient proof of media identity.
+// For title-only matching, refuse translations or partial phrase overlap
+// unless a trusted external ID is present. Localized names can use Manual Match.
+function titleIdentityMatches(requested, candidate) {
+	var left = normalizeTitle(requested);
+	var right = normalizeTitle(candidate);
+	return !!left && !!right && left === right;
 }
 
 function readCachedTraktId(value) {
@@ -1817,7 +1828,7 @@ async function applyMatchOverride(mediaInfo, candidate) {
 
 		bucket[key] = createVerifiedEpisodeCacheEntry(traktId);
 	} else if (mediaInfo.type === "movie") {
-		bucket[key] = traktId;
+		bucket[key] = { trakt: traktId, manual: true };
 	} else {
 		throw new Error("Unsupported media type for override.");
 	}
@@ -1850,7 +1861,21 @@ async function getTraktIds(mediaInfo) {
 		return resolveEpisodeIds(mediaInfo, bucket, key);
 	}
 	if (cachedId > 0) {
-		return { trakt: cachedId };
+		if (cached && typeof cached === "object" &&
+			(cached.manual === true || cached.titleVerified === true || cached.imdbVerified === true)) {
+			return { trakt: cachedId };
+		}
+		// Legacy numeric cache may hold an unrelated top Trakt result.
+		// Revalidate title once; do not silently replay a known false positive.
+		var oldMatch = await fetchMovieByReference(cachedId);
+		if (oldMatch && oldMatch.title && titleIdentityMatches(title, oldMatch.title)) {
+			bucket[key] = { trakt: cachedId, titleVerified: true };
+			saveSearchCache();
+			return { trakt: cachedId };
+		}
+		delete bucket[key];
+		saveSearchCache();
+		log("Rejected legacy movie cache due to title mismatch: " + String(title || ""));
 	}
 
 	var imdb = String(mediaInfo.imdb || "").trim().toLowerCase();
@@ -1858,7 +1883,7 @@ async function getTraktIds(mediaInfo) {
 		var identifiedMovie = await fetchMovieByReference(imdb);
 		if (identifiedMovie && identifiedMovie.ids && identifiedMovie.ids.trakt) {
 			var directId = Number(identifiedMovie.ids.trakt);
-			bucket[key] = directId;
+			bucket[key] = { trakt: directId, imdbVerified: true };
 			saveSearchCache();
 			log("Trakt resolved movie by IMDb reference " + imdb);
 			return { trakt: directId };
@@ -1890,6 +1915,13 @@ async function getTraktIds(mediaInfo) {
 		return null;
 	}
 
+	if (type === "movie" &&
+		!titleIdentityMatches(title, first[requiredType].title)) {
+		log("Trakt search result rejected: requested title and top candidate do not match.");
+		// Do not negative-cache localization: Manual Match remains available.
+		return null;
+	}
+
 	var traktId = Number(first[requiredType].ids.trakt || 0);
 	if (!traktId) {
 		bucket[key] = -1;
@@ -1897,7 +1929,7 @@ async function getTraktIds(mediaInfo) {
 		return null;
 	}
 
-	bucket[key] = traktId;
+	bucket[key] = { trakt: traktId, titleVerified: true };
 	saveSearchCache();
 	return { trakt: traktId };
 }
