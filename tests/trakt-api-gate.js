@@ -24,7 +24,7 @@ async function run() {
   const cf = async()=>({statusCode:403,headers:{},rawBody:"<html>Error code: 1015</html>"});
   await assert.rejects(guard.request("POST",cf),e=>e.reason==="cloudflare_1015");
   assert.ok(guard.status().retryInSeconds>=120);
-  now+=121000;
+  now+=(guard.status().retryInSeconds * 1000 + 1000);
   await guard.request("GET",good);
   assert.equal(guard.status().mode,"online");
   const failed = async()=>{throw new Error("connection refused");};
