@@ -1,0 +1,24 @@
+name: Node smoke tests
+
+on:
+  push:
+    branches: [main, feature/remux-stream-identity-v1]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Stream URL tests
+        run: node tests/stream-source.js
+      - name: Parser smoke tests
+        run: node tests/parser-smoke.js
+      - name: Trakt resolution tests
+        run: node tests/trakt-resolution.js
