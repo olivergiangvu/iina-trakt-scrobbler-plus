@@ -63,6 +63,8 @@ function createCorrectionState() {
     error: "",
     mediaLabel: "",
     mediaKey: "",
+    season: "",
+    episode: "",
     results: []
   };
 }
@@ -321,6 +323,8 @@ function cloneCorrectionState(state) {
     error: String(source.error || ""),
     mediaLabel: String(source.mediaLabel || ""),
     mediaKey: String(source.mediaKey || ""),
+    season: String(source.season !== undefined && source.season !== null ? source.season : ""),
+    episode: String(source.episode !== undefined && source.episode !== null ? source.episode : ""),
     results: Array.isArray(source.results)
       ? source.results.map(function(result) {
           return {
@@ -595,13 +599,15 @@ function bindSidebarMessaging() {
 
   sidebar.onMessage("choose_correction", function(payload) {
     var traktId = payload && payload.trakt ? Number(payload.trakt) : 0;
+    var season = payload && payload.season;
+    var episode = payload && payload.episode;
     if (!traktId) {
       return;
     }
 
     log("Sidebar requested correction apply " + traktId);
     authActionChain = authActionChain.then(function() {
-      return applyCorrectionChoice(traktId);
+      return applyCorrectionChoice(traktId, season, episode);
     }).catch(function(error) {
       log("Sidebar correction apply failed: " + errStr(error));
       correctionState = Object.assign(cloneCorrectionState(correctionState), {
@@ -711,6 +717,8 @@ async function openCorrectionFlow(query) {
     error: "",
     mediaLabel: correctionMediaLabel(),
     mediaKey: currentMediaKey(),
+    season: currentMedia.mediaInfo.type === "episode" ? String(currentMedia.mediaInfo.season) : "",
+    episode: currentMedia.mediaInfo.type === "episode" ? String(currentMedia.mediaInfo.episode) : "",
     results: []
   };
   queueSidebarRefresh(false);
@@ -862,12 +870,28 @@ async function lookupCorrectionReference(reference) {
   queueSidebarRefresh(false);
 }
 
-async function applyCorrectionChoice(traktId) {
+async function applyCorrectionChoice(traktId, season, episode) {
   if (!currentMedia || !currentMedia.mediaInfo) {
     return;
   }
 
   var mediaInfo = cloneMediaInfo(currentMedia.mediaInfo);
+  if (mediaInfo.type === "episode") {
+    var chosenSeason = Number(season);
+    var chosenEpisode = Number(episode);
+    if (season === "" || episode === "" || !Number.isInteger(chosenSeason) ||
+        !Number.isInteger(chosenEpisode) || chosenSeason < 0 || chosenSeason > 100 ||
+        chosenEpisode < 1 || chosenEpisode > 9999) {
+      correctionState = Object.assign(cloneCorrectionState(correctionState), {
+        active: true, busy: false, error: "Enter a valid Season (0–100) and Episode (1–9999)."
+      });
+      queueSidebarRefresh(false);
+      return;
+    }
+    mediaInfo.season = chosenSeason;
+    mediaInfo.episode = chosenEpisode;
+    mediaInfo.episodeTitle = "";
+  }
   var mediaKey = currentMediaKey();
   var chosenId = Number(traktId || 0);
   if (!chosenId) {
@@ -891,6 +915,11 @@ async function applyCorrectionChoice(traktId) {
     }
 
     if (currentMedia) {
+      if (chosenResult && chosenResult.title) {
+        mediaInfo.title = chosenResult.title;
+        if (mediaInfo.type === "episode") mediaInfo.showTitle = chosenResult.title;
+      }
+      currentMedia.mediaInfo = mediaInfo;
       currentMedia.traktTargetLabel = correctionResultLabel(chosenResult, mediaInfo);
     }
     log("Applied manual Trakt match " + chosenId + " for " + mediaLabel(mediaInfo));
