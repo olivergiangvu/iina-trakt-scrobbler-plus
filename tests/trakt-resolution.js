@@ -76,6 +76,10 @@ function loadFreshTrakt(store, routeHandler, logs) {
     logger(message) {
       logs.push(String(message));
     },
+    apiGate: {
+      request(_method, send) { return send(); },
+      status() { return {mode: "online", retryInSeconds: 0}; }
+    },
     notify() {}
   });
 
