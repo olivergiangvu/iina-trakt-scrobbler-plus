@@ -17,10 +17,26 @@ function create(file, options) {
       Number.isFinite(entry.createdAt) && entry.createdAt <= now() + 60000 &&
       now() - entry.createdAt <= MAX_AGE_MS;
   }
+  function mediaKey(media) {
+    var id = String(media.imdb || media.showTitle || media.title || "").trim().toLowerCase();
+    return media.type === "episode"
+      ? "episode|" + id + "|" + Number(media.season) + "|" + Number(media.episode)
+      : "movie|" + id + "|" + Number(media.year || 0);
+  }
+  function latestOnly(entries) {
+    var seen = Object.create(null), result = [];
+    for (var i = entries.length - 1; i >= 0; i--) {
+      var key = mediaKey(entries[i].mediaInfo);
+      if (seen[key]) continue;
+      seen[key] = true;
+      result.unshift(entries[i]);
+    }
+    return result.slice(-MAX_ENTRIES);
+  }
   function load() {
     try {
       var saved = file.exists(path) ? JSON.parse(file.read(path)) : [];
-      return Array.isArray(saved) ? saved.filter(valid).slice(-MAX_ENTRIES) : [];
+      return Array.isArray(saved) ? latestOnly(saved.filter(valid)) : [];
     } catch (_error) { return []; }
   }
   function save(entries) {
@@ -57,7 +73,9 @@ function create(file, options) {
     };
     var queue = load();
     queue.push(data);
-    return save(queue) ? data : null;
+    // Latest stop for the same item wins, avoiding stale resume overwrites
+    // and unnecessary Trakt writes after an outage.
+    return save(latestOnly(queue)) ? data : null;
   }
   function acknowledge(id) {
     if (!id) return false;
