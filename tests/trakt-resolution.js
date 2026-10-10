@@ -344,7 +344,7 @@ async function run() {
     assert.deepStrictEqual(calls, []);
   });
 
-  await test("returns verified manual correction candidates for episodes", async function() {
+  await test("lists manual correction candidates even if guessed episode cannot be validated", async function() {
     const store = {};
     const logs = [];
     store[CACHE_PATH] = JSON.stringify({ movie: {}, show: {} });
@@ -409,15 +409,58 @@ async function run() {
 
     assert.deepStrictEqual(results, [
       {
+        trakt: 111,
+        kind: "episode",
+        title: "Arrested Development",
+        subtitle: "Show · 2003",
+        detail: "Choose Season and Episode below before applying",
+        year: 2003,
+        posterUrl: ""
+      },
+      {
         trakt: 222,
         kind: "episode",
         title: "Arrested Development",
         subtitle: "Show · 2003",
-        detail: "S01E06 - Visiting Ours · title match",
+        detail: "Choose Season and Episode below before applying",
         year: 2003,
         posterUrl: "https://media.trakt.tv/posters/arrested-medium.jpg.webp"
       }
     ]);
+  });
+
+  await test("manual search returns a show even when parsed S02E90 does not exist", async function() {
+    const store = {};
+    const logs = [];
+    store[TOKEN_PATH] = JSON.stringify(makeToken());
+    const { trakt, calls } = loadFreshTrakt(store, function(request) {
+      if (request.url.pathname === "/search/show") {
+        return { statusCode: 200, body: [{
+          score: 10, show: { title: "The Legend of Vox Machina", ids: { trakt: 900 } }
+        }] };
+      }
+      if (request.url.pathname === "/shows/the-legend-of-vox-machina") {
+        return { statusCode: 200, body: {
+          title: "The Legend of Vox Machina", ids: { trakt: 900 }
+        }};
+      }
+      if (request.url.pathname === "/shows/900/seasons/2/episodes/6") {
+        return { statusCode: 200, body: {
+          title: "Into Rimecleft", season: 2, number: 6
+        }};
+      }
+      throw Error("Unexpected request: " + request.url.pathname);
+    }, logs);
+    const bad = { type: "episode", title: "Encoded", showTitle: "Encoded", season: 2, episode: 90 };
+    const candidates = await trakt.searchCorrectionCandidates(bad, "vox machina", 8);
+    assert.equal(candidates.length, 1);
+    assert.equal(candidates[0].trakt, 900);
+    const slug = await trakt.lookupCorrectionReference(bad, "the-legend-of-vox-machina");
+    assert.equal(slug.trakt, 900);
+    const corrected = Object.assign({}, bad, { season: 2, episode: 6, showTitle: "The Legend of Vox Machina" });
+    await trakt.applyMatchOverride(corrected, 900);
+    assert.equal(calls.filter(x => x.includes("/seasons/2/episodes/90")).length, 0);
+    assert.equal(calls.filter(x => x.includes("/seasons/2/episodes/6")).length, 1);
   });
 
   await test("stores a manual episode override as a verified cache entry", async function() {
