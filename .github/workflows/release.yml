@@ -42,12 +42,14 @@ jobs:
           node --check main.js
           node --check trakt.js
           node --check stream-source.js
+          node --check playback-identity.js
           node --check monitor.js
           node --check tests/stream-source.js
 
       - name: Test URL/stream metadata, parser, and Trakt resolution
         run: |
           node tests/stream-source.js
+          node tests/playback-identity.js
           node tests/parser-smoke.js
           node tests/trakt-resolution.js
           node tests/monitor-state.js
@@ -66,6 +68,7 @@ jobs:
           unzip -t "$OUTPUT" >/dev/null
           unzip -Z1 "$OUTPUT" | grep -qx 'Info.json'
           unzip -Z1 "$OUTPUT" | grep -qx 'stream-source.js'
+          unzip -Z1 "$OUTPUT" | grep -qx 'playback-identity.js'
           unzip -Z1 "$OUTPUT" | grep -qx 'parser.iina.js'
           echo "path=$OUTPUT" >> "$GITHUB_OUTPUT"
 
@@ -82,15 +85,16 @@ jobs:
             exit 0
           fi
           cat > release-notes.md <<'NOTES'
-          ## Trakt Scrobbler Plus — initial public beta
-          - Stream identity support for Remux/AIOStreams query parameters such as `torrent_name` and IMDb `media_id`.
+          ## Trakt Scrobbler Plus — playback matching fix
+          - Correct media identification using mpv's human-readable filename/media-title before encoded stream paths.
+          - Fix Manual Search / Trakt slug lookup; choose season and episode before applying a verified match.
           - IMDb-first Trakt lookup with episode verification, while keeping existing guessit file parsing as fallback.
           - Independent IINA plugin ID and authentication storage from upstream.
           - Source and code credits: i3p9/iina-trakt-scrobbler (GPL-3.0), inspired by Zain-Imam/iina-episode-info (MIT).
 
           **Beta test:** IINA → Settings → Plugins → Install from GitHub → `olivergiangvu/iina-trakt-scrobbler-plus`.
           Disable scrobbling in the original plugin during testing to prevent duplicate playback events.
-          TMDB-first resolution and season/episode manual correction are planned, not included here.
+          TMDB API-based lookup and persistent per-URL override storage are planned separately.
           NOTES
           # IINA's GitHub installer uses the latest published release; mark this
           # public testing version as the repository's latest release even though
