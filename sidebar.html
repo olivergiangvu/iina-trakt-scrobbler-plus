@@ -851,6 +851,15 @@
             </div>
           </div>
           <p id="correction-status" class="correction-status">Search Trakt for a better match.</p>
+          <div id="correction-episode-editor" class="correction-query-row" hidden>
+            <label style="flex:1; min-width:0; font-size:12px">Season
+              <input id="correction-season" class="text-input" type="number" min="0" max="100" step="1" placeholder="2">
+            </label>
+            <label style="flex:1; min-width:0; font-size:12px">Episode
+              <input id="correction-episode" class="text-input" type="number" min="1" max="9999" step="1" placeholder="6">
+            </label>
+          </div>
+          <p id="correction-episode-help" class="caption" hidden>Correct Season/Episode first, then select Use. The episode must exist on Trakt.</p>
           <div id="correction-results" class="correction-results" hidden></div>
           <div class="correction-reference">
             <p class="correction-reference-label">Know the exact Trakt ID or slug?</p>
@@ -1463,6 +1472,8 @@
         var busy = !!correction.busy;
         var input = document.getElementById("correction-query");
         var referenceInput = document.getElementById("correction-reference");
+        var seasonInput = document.getElementById("correction-season");
+        var episodeInput = document.getElementById("correction-episode");
         var resultsRoot = document.getElementById("correction-results");
         var searchButton = document.getElementById("correction-search-button");
         var referenceButton = document.getElementById("correction-reference-button");
@@ -1492,6 +1503,16 @@
 
         if (referenceInput && document.activeElement !== referenceInput) {
           referenceInput.value = correction.reference || "";
+        }
+        var episodeMode = !!(state.playback && state.playback.available &&
+          (correction.mediaLabel || "").match(/S\d+E\d+/i));
+        setHidden("correction-episode-editor", !episodeMode);
+        setHidden("correction-episode-help", !episodeMode);
+        if (seasonInput && document.activeElement !== seasonInput) {
+          seasonInput.value = correction.season != null ? String(correction.season) : "";
+        }
+        if (episodeInput && document.activeElement !== episodeInput) {
+          episodeInput.value = correction.episode != null ? String(correction.episode) : "";
         }
 
         if (openButton) {
@@ -1578,7 +1599,9 @@
               event.preventDefault();
               event.stopPropagation();
               requestAction("choose_correction", {
-                trakt: result.trakt
+                trakt: result.trakt,
+                season: (document.getElementById("correction-season") || {}).value,
+                episode: (document.getElementById("correction-episode") || {}).value
               });
             };
 
