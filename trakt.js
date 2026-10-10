@@ -796,12 +796,17 @@ async function refreshAccessToken(token) {
 	});
 
 	if (response.statusCode !== 200) {
-		clearToken();
-		throw new Error(
+		var err = new Error(
 			response.body.error_description ||
 				response.body.error ||
-				"Trakt token refresh failed",
+				"Trakt token refresh failed"
 		);
+		err.statusCode = response.statusCode;
+		// Keep credentials through temporary Trakt outages; only reject invalid refresh.
+		if (response.statusCode === 400 || response.statusCode === 401) {
+			clearToken();
+		}
+		throw err;
 	}
 
 	saveToken(response.body);
@@ -970,6 +975,12 @@ async function ensureAccessToken(options) {
 				"Token refresh failed: " +
 					(error && error.message ? error.message : String(error)),
 			);
+			// Network failure, 429/1015 or 5xx must NOT wipe a valid refresh token.
+			if (!error || !error.statusCode || error.statusCode >= 500 ||
+				error.code === "TRAKT_COOLDOWN" || error.code === "TRAKT_OFFLINE") {
+				throw error;
+			}
+			if (error.statusCode !== 400 && error.statusCode !== 401) throw error;
 			clearToken();
 		}
 	}
