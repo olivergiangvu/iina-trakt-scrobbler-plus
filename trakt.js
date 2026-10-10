@@ -50,6 +50,7 @@ function configure(options) {
 	if (settings.preferences)
 		runtime.preferences = settings.preferences;
 	if (settings.utils) runtime.utils = settings.utils;
+	if (settings.apiGate) runtime.apiGate = settings.apiGate;
 	if (typeof settings.logger === "function")
 		runtime.logger = settings.logger;
 	if (typeof settings.notify === "function")
