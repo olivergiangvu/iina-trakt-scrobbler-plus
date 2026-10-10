@@ -7,25 +7,38 @@ function compact(value, max) {
   return v.slice(0, max || 220);
 }
 function safeURL(value) {
-  if (!/^https?:\/\//i.test(String(value || ""))) return null;
-  try {
-    var parsed = new URL(value);
-    var segments = parsed.pathname.split("/").filter(Boolean).slice(0, 18);
-    return {
-      scheme: parsed.protocol.replace(":", ""),
-      host: parsed.hostname,
-      pathShape: "/" + segments.map(function(p) {
-        try { p = decodeURIComponent(p); } catch (_) {}
-        if (/^\d{1,4}$/.test(p)) return p;
-        if (/^(?:streaming_provider|playback|torbox|realdebrid|debrid|mediafusion|stream|streams|video|file|files|resolve|api|v1|v2|m3u8)$/i.test(p)) return p;
-        return "[redacted]";
-      }).join("/"),
-      queryKeys: Array.from(parsed.searchParams.keys()).slice(0, 30).map(function(k) {
-        return compact(k, 32);
-      }),
-      imdb: ["media_id","imdb","imdb_id"].map(k=>parsed.searchParams.get(k)).find(v=>/^tt\d{6,10}$/i.test(v || "")) || ""
-    };
-  } catch (_) { return {format: "url", error: "parse failed"}; }
+  var raw = String(value || "");
+  var parts = raw.match(/^(https?):\/\/([^/?#]+)(\/[^?#]*)?(\?[^#]*)?/i);
+  if (!parts) return null;
+  var pathname = parts[3] || "/";
+  var tokens = pathname.split("/").filter(Boolean).slice(0, 18);
+  var query = String(parts[4] || "").replace(/^\?/, "");
+  var entries = query ? query.split("&").slice(0, 30).map(function(x) {
+    var mark = x.indexOf("=");
+    var key = mark < 0 ? x : x.slice(0, mark);
+    var val = mark < 0 ? "" : x.slice(mark + 1);
+    try { key = decodeURIComponent(key); } catch (_) {}
+    try { val = decodeURIComponent(val); } catch (_) {}
+    return [key, val];
+  }) : [];
+  var imdb = "";
+  for (var i=0; i<entries.length; i++) {
+    if (/^(media_id|imdb|imdb_id)$/i.test(entries[i][0]) && /^tt\d{6,10}$/i.test(entries[i][1])) {
+      imdb = entries[i][1]; break;
+    }
+  }
+  return {
+    scheme: parts[1].toLowerCase(),
+    host: parts[2].replace(/:\d+$/, "").toLowerCase(),
+    pathShape: "/" + tokens.map(function(token) {
+      try { token = decodeURIComponent(token); } catch (_) {}
+      if (/^\d{1,4}$/.test(token)) return token;
+      if (/^(?:streaming_provider|playback|torbox|realdebrid|debrid|mediafusion|stream|streams|video|file|files|resolve|api|v1|v2|m3u8)$/i.test(token)) return token;
+      return "[redacted]";
+    }).join("/"),
+    queryKeys: entries.map(function(entry) { return compact(entry[0], 32); }),
+    imdb: imdb
+  };
 }
 function build(source, parsed, target, version) {
   var s = source || {}, p = parsed || {}, urls = [];
