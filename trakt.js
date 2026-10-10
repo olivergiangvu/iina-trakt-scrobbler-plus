@@ -678,9 +678,10 @@ async function getRecentHistory(options) {
 				error: "",
 			};
 		}
+		var existing = runtime.recentHistory || { items: [], fetchedAt: "" };
 		runtime.recentHistory = {
-			items: [],
-			fetchedAt: "",
+			items: existing.items || [],
+			fetchedAt: existing.fetchedAt || "",
 			error: String(error && error.message ? error.message : error),
 		};
 		runtime.recentHistoryFetchedAt = Date.now();
@@ -741,6 +742,8 @@ async function getViewerProfile(options) {
 		response = await authedRequest("GET", USER_SETTINGS_PATH);
 	} catch (error) {
 		runtime.viewerProfileFetchedAt = Date.now();
+		if ((error.code === "TRAKT_COOLDOWN" || error.code === "TRAKT_OFFLINE") &&
+			runtime.viewerProfile) return runtime.viewerProfile;
 		throw error;
 	}
 
