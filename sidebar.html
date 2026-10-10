@@ -911,6 +911,17 @@
       </div>
     </section>
 
+    <section id="diagnostics-section" class="section">
+      <div class="section-head"><p class="section-label">Playback Diagnostics</p></div>
+      <div class="section-body">
+        <div class="sync-headline">
+          <span class="sync-meta">Share metadata without stream credentials</span>
+          <button id="copy-playback-diagnostics" class="secondary" type="button">Copy Diagnostics</button>
+        </div>
+        <p id="diagnostics-feedback" class="sync-note" hidden></p>
+      </div>
+    </section>
+
     <section id="history-section" class="section">
       <div class="section-head">
         <p class="section-label">Watch History</p>
@@ -1818,6 +1829,14 @@
       bindStatusOsdToggle("status-osd-toggle");
       bindSelectableInput("device-code");
       bindAction("open-correction-button", "open_correction");
+      bindLocalAction("copy-playback-diagnostics", function() {
+        if (!stateReady || !state.playback || !state.playback.available) {
+          setText("diagnostics-feedback", "Start playback first, then copy diagnostics.");
+          setHidden("diagnostics-feedback", false);
+          return;
+        }
+        send("copy_playback_diagnostics");
+      });
       bindLocalAction("sync-queue-retry", function() {
         var q = state.syncQueue || {};
         if (!stateReady || !q.canRetry || q.flushing) return;
@@ -1889,6 +1908,10 @@
       }
 
       if (window.iina && typeof iina.onMessage === "function") {
+        iina.onMessage("diagnostics_copy_status", function(reply) {
+          setText("diagnostics-feedback", reply && reply.message || "Copy finished.");
+          setHidden("diagnostics-feedback", false);
+        });
         iina.onMessage("state", function (payload) {
           var nextState = payload || state;
           var nextAuth = nextState.auth || {};
