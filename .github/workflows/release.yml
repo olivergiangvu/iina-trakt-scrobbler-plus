@@ -92,6 +92,13 @@ jobs:
             echo "Release $TAG already exists; increment Info.json version and ghVersion for the next release."
             exit 0
           fi
+          if [[ "$TAG" == *-* ]]; then
+            RELEASE_CHANNEL="Beta"
+            RELEASE_ARGS=(--prerelease)
+          else
+            RELEASE_CHANNEL="Stable"
+            RELEASE_ARGS=(--latest)
+          fi
           cat > release-notes.md <<'NOTES'
           ## Trakt Scrobbler Plus — API resilience and sync status
           - Pace and serialize Trakt write requests; recognize HTTP 429 and Cloudflare 1015 with persisted bounded cooldown.
@@ -103,15 +110,15 @@ jobs:
           - Independent IINA plugin ID and authentication storage from upstream.
           - Source and code credits: i3p9/iina-trakt-scrobbler (GPL-3.0), inspired by Zain-Imam/iina-episode-info (MIT).
 
-          **Beta test:** IINA → Settings → Plugins → Install from GitHub → `olivergiangvu/iina-trakt-scrobbler-plus`.
-          Disable scrobbling in the original plugin during testing to prevent duplicate playback events.
+          **Install/update on Mac:** IINA → Settings → Plugins → Install from GitHub → `olivergiangvu/iina-trakt-scrobbler-plus`.
+          The v0.2.3 stable line was promoted from v0.2.3-beta.1 after field verification of resume, IINA ⌘Q stop, and network recovery. Playback and Trakt API code is unchanged aside from the displayed version.
+          Keep the original Trakt plugin's scrobbling disabled to prevent duplicate playback events.
           TMDB API-based lookup and persistent per-URL override storage are planned separately.
           NOTES
-          # IINA's GitHub installer uses the latest published release; mark this
-          # public testing version as the repository's latest release even though
-          # its version name has a beta suffix.
+          # Keep pre-releases visible as canaries without silently replacing
+          # the latest stable distribution used by IINA.
           gh release create "$TAG" "$ASSET" \
             --target "$GITHUB_SHA" \
-            --title "$TAG — public test build" \
+            --title "$TAG — $RELEASE_CHANNEL" \
             --notes-file release-notes.md \
-            --latest
+            "${RELEASE_ARGS[@]}"
