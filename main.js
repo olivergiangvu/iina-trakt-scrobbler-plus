@@ -4,8 +4,9 @@ var parser = require("./parser.iina.js");
 var streamSource = require("./stream-source.js");
 var playbackIdentity = require("./playback-identity.js");
 var monitor = require("./monitor.js");
+var stopJournalModule = require("./stop-journal.js");
 var trakt = require("./trakt.js");
-var PLUGIN_VERSION = "0.2.1-beta.1";
+var PLUGIN_VERSION = "0.2.2-beta.1";
 var DEBUG_LOG_PATH = "@data/debug.log";
 var MAX_DEBUG_LOG_CHARS = 200000;
 var POLL_INTERVAL_MS = 2000;
@@ -27,6 +28,7 @@ var authActionChain = Promise.resolve();
 var sidebarRefreshChain = Promise.resolve();
 var lastScrobbleStatus = createScrobbleStatus();
 var correctionState = createCorrectionState();
+var stopJournal = stopJournalModule.create(file);
 
 function createPlaybackState() {
   return {
@@ -1362,7 +1364,7 @@ function setScrobblingEnabled(enabled) {
   });
 }
 
-function queueScrobble(verb, snapshot) {
+function queueScrobble(verb, snapshot, options) {
   if (!isScrobblingEnabled()) {
     setScrobbleStatus({
       status: "disabled",
@@ -1395,6 +1397,15 @@ function queueScrobble(verb, snapshot) {
   }
 
   playbackState.lastScrobbleKey = scrobbleKey;
+  // A synchronous write-ahead record survives app termination before curl can finish.
+  // An acknowledged Trakt stop removes it. Do not include stream URLs or OAuth data.
+  var journalId = options && options.journalId ? String(options.journalId) : "";
+  if (effectiveVerb === "stop" && !journalId) {
+    var savedFinalization = stopJournal.record(payload);
+    journalId = savedFinalization ? savedFinalization.id : "";
+    if (savedFinalization) log("Saved Trakt stop checkpoint (progress=" + payload.progress.toFixed(2) + "%)");
+    else log("Unable to persist Trakt stop checkpoint; attempting direct send");
+  }
   setScrobbleStatus({
     status: "queued",
     verb: effectiveVerb,
@@ -1425,6 +1436,9 @@ function queueScrobble(verb, snapshot) {
     try {
       var result = await trakt.scrobble(effectiveVerb, payload.mediaInfo, payload.progress);
       if (result && result.ok) {
+        if (journalId) {
+          stopJournal.acknowledge(journalId);
+        }
         var traktAction = successfulScrobbleAction(effectiveVerb, result);
         var traktProgress = successfulScrobbleProgress(payload.progress, result);
         var matchedLabel = labelFromTraktScrobbleBody(result.body, payload.mediaInfo) || scrobbleTargetLabel(payload);
@@ -1484,6 +1498,8 @@ function queueScrobble(verb, snapshot) {
       }
 
       if (result && result.duplicate) {
+        // Trakt 409 already recorded an identical scrobble; do not replay it.
+        if (journalId) stopJournal.acknowledge(journalId);
         setScrobbleStatus({
           status: "duplicate",
           verb: effectiveVerb,
@@ -1546,6 +1562,23 @@ function queueScrobble(verb, snapshot) {
       progress: payload.progress
     });
     log("Scrobble queue failure: " + errStr(error));
+  });
+}
+
+function replaySavedFinalizations() {
+  var saved = stopJournal.pending();
+  if (!saved.length) return;
+  log("Replaying " + saved.length + " unacknowledged Trakt stop checkpoint(s)");
+  saved.forEach(function(entry) {
+    queueScrobble("stop", {
+      state: monitor.State.Stopped,
+      progress: entry.progress,
+      duration: 0,
+      position: 0,
+      updatedAt: entry.createdAt / 1000,
+      mediaInfo: entry.mediaInfo,
+      traktTargetLabel: ""
+    }, { journalId: entry.id });
   });
 }
 
@@ -1736,8 +1769,8 @@ async function finalizeCurrentMedia(reason) {
   lastSourceSignature = "";
   resetCorrectionState();
   queueSidebarRefresh(false);
-  if (reason === "end-file") {
-    await flushScrobbleQueue("end-file", 2500);
+  if (reason === "end-file" || reason === "window-will-close" || reason === "mpv.shutdown") {
+    await flushScrobbleQueue(reason, 3000);
     if (currentMedia || lastSourceSignature) {
       log("New media became active during end-file flush; preserving new playback state");
       return;
@@ -1803,6 +1836,7 @@ persistAuthStatus();
 registerMenuItems();
 ensurePollTimer();
 ensureUiPollTimer();
+replaySavedFinalizations();
 
 event.on("iina.window-loaded", wrapEvent("iina.window-loaded", function() {
   initializeSidebar();
@@ -1827,4 +1861,24 @@ event.on("mpv.duration.changed", wrapEvent("mpv.duration.changed", function() {
 
 event.on("mpv.end-file", wrapEvent("mpv.end-file", function() {
   return finalizeCurrentMedia("end-file");
+}));
+
+// This fires before the IINA player window is torn down. Save stop checkpoint
+// synchronously so that an interrupted network request is replayed next launch.
+event.on("iina.window-will-close", wrapEvent("iina.window-will-close", function() {
+  if (playbackState.prevSnapshot && playbackState.prevSnapshot.state !== monitor.State.Stopped) {
+    var latest = buildLiveSnapshot();
+    if (latest && latest.progress >= 1 &&
+        monitor.mediaKey(latest.mediaInfo) === monitor.mediaKey(playbackState.prevSnapshot.mediaInfo) &&
+        !monitor.shouldIgnoreEndRollover(playbackState.prevSnapshot, latest)) {
+      playbackState.prevSnapshot = latest;
+    }
+  }
+  return finalizeCurrentMedia("window-will-close");
+}));
+
+// Additional late safety net for IINA builds that skip the window lifecycle
+// event during process shutdown. The journal prevents loss across teardown.
+event.on("mpv.shutdown", wrapEvent("mpv.shutdown", function() {
+  return finalizeCurrentMedia("mpv.shutdown");
 }));

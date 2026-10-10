@@ -20,6 +20,8 @@ jobs:
         run: node tests/stream-source.js
       - name: Playback metadata identity tests
         run: node tests/playback-identity.js
+      - name: Trakt stop checkpoint journal tests
+        run: node tests/stop-journal.js
       - name: Parser smoke tests
         run: node tests/parser-smoke.js
       - name: Trakt resolution tests
