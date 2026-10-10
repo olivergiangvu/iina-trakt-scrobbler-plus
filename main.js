@@ -909,16 +909,17 @@ async function applyCorrectionChoice(traktId, season, episode) {
     var chosenResult = (correctionState.results || []).find(function(result) {
       return Number(result.trakt || 0) === chosenId;
     }) || null;
+    // Cache and playback use the same canonical title after manual selection.
+    if (chosenResult && chosenResult.title) {
+      mediaInfo.title = chosenResult.title;
+      if (mediaInfo.type === "episode") mediaInfo.showTitle = chosenResult.title;
+    }
     await trakt.applyMatchOverride(mediaInfo, chosenId);
     if (mediaKey !== currentMediaKey()) {
       return;
     }
 
     if (currentMedia) {
-      if (chosenResult && chosenResult.title) {
-        mediaInfo.title = chosenResult.title;
-        if (mediaInfo.type === "episode") mediaInfo.showTitle = chosenResult.title;
-      }
       currentMedia.mediaInfo = mediaInfo;
       currentMedia.traktTargetLabel = correctionResultLabel(chosenResult, mediaInfo);
     }
