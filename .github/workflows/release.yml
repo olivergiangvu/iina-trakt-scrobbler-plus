@@ -1,0 +1,102 @@
+name: Publish IINA plugin release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    name: Test, package and publish
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout release source
+        uses: actions/checkout@v4
+
+      - name: Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Validate release metadata
+        id: version
+        shell: bash
+        run: |
+          node - <<'NODE'
+          const assert = require('node:assert/strict');
+          const fs = require('node:fs');
+          const info = JSON.parse(fs.readFileSync('Info.json', 'utf8'));
+          assert.equal(info.ghRepo, 'olivergiangvu/iina-trakt-scrobbler-plus');
+          assert.equal(info.identifier, 'io.github.olivergiangvu.iinatraktscrobblerplus');
+          assert.ok(Number.isInteger(info.ghVersion) && info.ghVersion >= 1);
+          assert.match(info.version, /^\d+\.\d+\.\d+(?:-beta\.\d+)?$/);
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, 'version=' + info.version + '\n');
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, 'tag=v' + info.version + '\n');
+          NODE
+
+      - name: Syntax validation
+        run: |
+          node --check main.js
+          node --check trakt.js
+          node --check stream-source.js
+          node --check monitor.js
+          node --check tests/stream-source.js
+
+      - name: Test URL/stream metadata, parser, and Trakt resolution
+        run: |
+          node tests/stream-source.js
+          node tests/parser-smoke.js
+          node tests/trakt-resolution.js
+          node tests/monitor-state.js
+
+      - name: Stage and pack IINA plugin
+        id: package
+        shell: bash
+        run: |
+          set -euo pipefail
+          STAGE="$(./scripts/stage-plugin.sh)"
+          OUTPUT="$GITHUB_WORKSPACE/Trakt-Scrobbler-Plus-v${{ steps.version.outputs.version }}.iinaplgz"
+          (
+            cd "$STAGE"
+            zip -q -r "$OUTPUT" .
+          )
+          unzip -t "$OUTPUT" >/dev/null
+          unzip -Z1 "$OUTPUT" | grep -qx 'Info.json'
+          unzip -Z1 "$OUTPUT" | grep -qx 'stream-source.js'
+          unzip -Z1 "$OUTPUT" | grep -qx 'parser.iina.js'
+          echo "path=$OUTPUT" >> "$GITHUB_OUTPUT"
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+          ASSET: ${{ steps.package.outputs.path }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists; increment Info.json version and ghVersion for the next release."
+            exit 0
+          fi
+          cat > release-notes.md <<'NOTES'
+          ## Trakt Scrobbler Plus — initial public beta
+          - Stream identity support for Remux/AIOStreams query parameters such as `torrent_name` and IMDb `media_id`.
+          - IMDb-first Trakt lookup with episode verification, while keeping existing guessit file parsing as fallback.
+          - Independent IINA plugin ID and authentication storage from upstream.
+          - Source and code credits: i3p9/iina-trakt-scrobbler (GPL-3.0), inspired by Zain-Imam/iina-episode-info (MIT).
+
+          **Beta test:** IINA → Settings → Plugins → Install from GitHub → `olivergiangvu/iina-trakt-scrobbler-plus`.
+          Disable scrobbling in the original plugin during testing to prevent duplicate playback events.
+          TMDB-first resolution and season/episode manual correction are planned, not included here.
+          NOTES
+          # IINA's GitHub installer uses the latest published release; mark this
+          # public testing version as the repository's latest release even though
+          # its version name has a beta suffix.
+          gh release create "$TAG" "$ASSET" \
+            --target "$GITHUB_SHA" \
+            --title "$TAG — public test build" \
+            --notes-file release-notes.md \
+            --latest
