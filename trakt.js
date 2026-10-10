@@ -95,17 +95,11 @@ function writeJson(path, value) {
 }
 
 function getClientId() {
-	return (
-		traktKeys.getId() ||
-		String(pref("trakt_client_id", "") || "").trim()
-	);
+	return String(pref("trakt_client_id", "") || "").trim() || traktKeys.getId();
 }
 
 function getClientSecret() {
-	return (
-		traktKeys.getSecret() ||
-		String(pref("trakt_client_secret", "") || "").trim()
-	);
+	return String(pref("trakt_client_secret", "") || "").trim() || traktKeys.getSecret();
 }
 
 function hasCredentials() {
@@ -113,7 +107,10 @@ function hasCredentials() {
 }
 
 function usingEmbeddedCredentials() {
-	return traktKeys.hasEmbeddedCredentials();
+	return !(
+		String(pref("trakt_client_id", "") || "").trim() &&
+		String(pref("trakt_client_secret", "") || "").trim()
+	) && traktKeys.hasEmbeddedCredentials();
 }
 
 function credentialMode() {
