@@ -2,7 +2,7 @@ name: Node smoke tests
 
 on:
   push:
-    branches: [main, feature/remux-stream-identity-v1]
+    branches: [main, 'fix/**', 'feature/**']
   pull_request:
 
 permissions:
@@ -18,6 +18,8 @@ jobs:
           node-version: '22'
       - name: Stream URL tests
         run: node tests/stream-source.js
+      - name: Playback metadata identity tests
+        run: node tests/playback-identity.js
       - name: Parser smoke tests
         run: node tests/parser-smoke.js
       - name: Trakt resolution tests
