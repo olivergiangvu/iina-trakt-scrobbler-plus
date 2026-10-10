@@ -44,6 +44,7 @@ jobs:
           node --check stream-source.js
           node --check playback-identity.js
           node --check stop-journal.js
+          node --check trakt-api-gate.js
           node --check monitor.js
           node --check tests/stream-source.js
 
@@ -52,6 +53,9 @@ jobs:
           node tests/stream-source.js
           node tests/playback-identity.js
           node tests/stop-journal.js
+          node tests/trakt-api-gate.js
+          node tests/trakt-network-integration.js
+          node tests/trakt-oauth-singleflight.js
           node tests/parser-smoke.js
           node tests/trakt-resolution.js
           node tests/monitor-state.js
@@ -72,6 +76,7 @@ jobs:
           unzip -Z1 "$OUTPUT" | grep -qx 'stream-source.js'
           unzip -Z1 "$OUTPUT" | grep -qx 'playback-identity.js'
           unzip -Z1 "$OUTPUT" | grep -qx 'stop-journal.js'
+          unzip -Z1 "$OUTPUT" | grep -qx 'trakt-api-gate.js'
           unzip -Z1 "$OUTPUT" | grep -qx 'parser.iina.js'
           echo "path=$OUTPUT" >> "$GITHUB_OUTPUT"
 
@@ -88,8 +93,9 @@ jobs:
             exit 0
           fi
           cat > release-notes.md <<'NOTES'
-          ## Trakt Scrobbler Plus — reliable Trakt resume/watched stop
-          - Finalize Trakt scrobble on IINA window close; persist pending stop checkpoint before network request.
+          ## Trakt Scrobbler Plus — API resilience and sync status
+          - Pace and serialize Trakt write requests; recognize HTTP 429 and Cloudflare 1015 with persisted bounded cooldown.
+          - Collapse sidebar refresh requests, preserve cached history/profile when offline and recover saved stop checkpoints without reboot.
           - Retry interrupted Trakt stop updates after the next IINA launch, retaining resume progress or watched status.
           - Retain mpv filename and multilingual episode recognition fixes.
           - Fix Manual Search / Trakt slug lookup; choose season and episode before applying a verified match.

@@ -1,4 +1,5 @@
 var traktKeys = require("./trakt_keys.js");
+var apiGateModule = require("./trakt-api-gate.js");
 
 var API_ROOT = "https://api.trakt.tv";
 var DEVICE_CODE_PATH = "/oauth/device/code";
@@ -12,8 +13,8 @@ var KEYCHAIN_ACCOUNT = "trakt-oauth";
 var AUTH_COOLDOWN_MS = 30000;
 var TOKEN_REFRESH_MARGIN_SECONDS = 60;
 var SEARCH_SCORE_THRESHOLD = 5;
-var PROFILE_CACHE_TTL_MS = 5 * 60 * 1000;
-var HISTORY_CACHE_TTL_MS = 60 * 1000;
+var PROFILE_CACHE_TTL_MS = 15 * 60 * 1000;
+var HISTORY_CACHE_TTL_MS = 3 * 60 * 1000;
 var HISTORY_LOOKBACK_MS = 24 * 60 * 60 * 1000;
 var HISTORY_LIMIT = 12;
 var AUTH_REQUIRED_ERROR = "Trakt authorization required";
@@ -25,6 +26,7 @@ var runtime = {
 	logger: function () {},
 	notify: function () {},
 	tokenCache: undefined,
+	tokenRefreshPromise: null,
 	searchCache: null,
 	authPromise: null,
 	authPrompt: "",
@@ -33,6 +35,7 @@ var runtime = {
 	lastAuthFailureAt: 0,
 	lastAuthFailureMessage: "",
 	loggedCredentialMode: false,
+	apiGate: null,
 	viewerProfile: null,
 	viewerProfileFetchedAt: 0,
 	recentHistory: null,
@@ -41,10 +44,14 @@ var runtime = {
 
 function configure(options) {
 	var settings = options || {};
-	if (settings.file) runtime.file = settings.file;
+	if (settings.file) {
+		runtime.file = settings.file;
+		if (!runtime.apiGate) runtime.apiGate = apiGateModule.create({file: settings.file});
+	}
 	if (settings.preferences)
 		runtime.preferences = settings.preferences;
 	if (settings.utils) runtime.utils = settings.utils;
+	if (settings.apiGate) runtime.apiGate = settings.apiGate;
 	if (typeof settings.logger === "function")
 		runtime.logger = settings.logger;
 	if (typeof settings.notify === "function")
@@ -405,6 +412,25 @@ function earlyScrobbleReason(verb) {
 	return "pause-too-early";
 }
 
+function getApiStatus() {
+	return runtime.apiGate ? runtime.apiGate.status()
+		: { mode: "online", retryInSeconds: 0, queuedWrites: 0 };
+}
+
+function splitCurlHeaders(raw) {
+	var rest = String(raw || ""), headers = {};
+	for (var i = 0; i < 6; i++) {
+		var block = rest.match(/^HTTP\/[^\r\n]+\r?\n([\s\S]*?)\r?\n\r?\n/);
+		if (!block) break;
+		block[1].split(/\r?\n/).forEach(function(line) {
+			var colon = line.indexOf(":");
+			if (colon > 0) headers[line.slice(0, colon).trim().toLowerCase()] = line.slice(colon + 1).trim();
+		});
+		rest = rest.slice(block[0].length);
+	}
+	return { body: rest, headers: headers };
+}
+
 async function rawRequest(method, path, options) {
 	if (!runtime.utils || typeof runtime.utils.exec !== "function") {
 		throw new Error("utils.exec is unavailable");
@@ -416,6 +442,8 @@ async function rawRequest(method, path, options) {
 	var marker = "__IINA_TRAKT_STATUS__:";
 	var args = [
 		"-sS",
+		"-D",
+		"-",
 		"-L",
 		"--connect-timeout",
 		"5",
@@ -438,33 +466,32 @@ async function rawRequest(method, path, options) {
 	args.push("-w", "\n" + marker + "%{http_code}");
 	args.push(url);
 
-	log("HTTP " + String(method || "GET").toUpperCase() + " " + url);
-	var response = await runtime.utils.exec("/usr/bin/curl", args);
-	var stdout = response.stdout || "";
-	var stderr = response.stderr || "";
-	var markerIndex = stdout.lastIndexOf(marker);
-	var rawBody =
-		markerIndex >= 0
-			? stdout.slice(0, markerIndex).trim()
-			: stdout.trim();
-	var statusCode =
-		markerIndex >= 0
-			? parseInt(stdout.slice(markerIndex + marker.length).trim(), 10)
-			: 0;
-	var body = parseJson(rawBody);
-
-	if (response.status !== 0) {
-		throw new Error(
-			stderr || "curl failed with status " + response.status,
-		);
-	}
-
-	return {
-		statusCode: statusCode,
-		body: body,
-		rawBody: rawBody,
-		url: url,
+	// Central gate controls cooldown and serializes all POST/PUT/DELETE requests.
+	// Never retry a POST blindly: it may already have reached Trakt.
+	var send = async function() {
+		log("HTTP " + String(method || "GET").toUpperCase() + " " + url);
+		var response = await runtime.utils.exec("/usr/bin/curl", args);
+		var stdout = response.stdout || "";
+		var stderr = response.stderr || "";
+		var markerIndex = stdout.lastIndexOf(marker);
+		var rawPayload = markerIndex >= 0
+			? stdout.slice(0, markerIndex).trim() : stdout.trim();
+		var decoded = splitCurlHeaders(rawPayload);
+		var rawBody = decoded.body.trim();
+		var statusCode = markerIndex >= 0
+			? parseInt(stdout.slice(markerIndex + marker.length).trim(), 10) : 0;
+		if (response.status !== 0) {
+			throw new Error(stderr || "curl failed with status " + response.status);
+		}
+		return {
+			statusCode: statusCode,
+			body: parseJson(rawBody),
+			rawBody: rawBody,
+			headers: decoded.headers,
+			url: url
+		};
 	};
+	return runtime.apiGate ? runtime.apiGate.request(String(method || "GET").toUpperCase(), send) : send();
 }
 
 function getAuthStatus() {
@@ -629,7 +656,9 @@ async function getRecentHistory(options) {
 		!settings.force &&
 		runtime.recentHistory &&
 		runtime.recentHistoryFetchedAt &&
-		Date.now() - runtime.recentHistoryFetchedAt < HISTORY_CACHE_TTL_MS
+		Date.now() - runtime.recentHistoryFetchedAt < HISTORY_CACHE_TTL_MS &&
+		(!runtime.recentHistory.error ||
+			(runtime.apiGate && runtime.apiGate.status().mode !== "online"))
 	) {
 		return runtime.recentHistory;
 	}
@@ -653,9 +682,10 @@ async function getRecentHistory(options) {
 				error: "",
 			};
 		}
+		var existing = runtime.recentHistory || { items: [], fetchedAt: "" };
 		runtime.recentHistory = {
-			items: [],
-			fetchedAt: "",
+			items: existing.items || [],
+			fetchedAt: existing.fetchedAt || "",
 			error: String(error && error.message ? error.message : error),
 		};
 		runtime.recentHistoryFetchedAt = Date.now();
@@ -715,12 +745,14 @@ async function getViewerProfile(options) {
 	try {
 		response = await authedRequest("GET", USER_SETTINGS_PATH);
 	} catch (error) {
-		runtime.viewerProfileFetchedAt = Date.now();
+		runtime.viewerProfileFetchedAt = runtime.viewerProfile ? Date.now() : 0;
+		if ((error.code === "TRAKT_COOLDOWN" || error.code === "TRAKT_OFFLINE") &&
+			runtime.viewerProfile) return runtime.viewerProfile;
 		throw error;
 	}
 
 	if (response.statusCode >= 400) {
-		runtime.viewerProfileFetchedAt = Date.now();
+		runtime.viewerProfileFetchedAt = runtime.viewerProfile ? Date.now() : 0;
 		throw new Error(
 			response.body.error_description ||
 				response.body.error ||
@@ -767,12 +799,17 @@ async function refreshAccessToken(token) {
 	});
 
 	if (response.statusCode !== 200) {
-		clearToken();
-		throw new Error(
+		var err = new Error(
 			response.body.error_description ||
 				response.body.error ||
-				"Trakt token refresh failed",
+				"Trakt token refresh failed"
 		);
+		err.statusCode = response.statusCode;
+		// Keep credentials through temporary Trakt outages; only reject invalid refresh.
+		if (response.statusCode === 400 || response.statusCode === 401) {
+			clearToken();
+		}
+		throw err;
 	}
 
 	saveToken(response.body);
@@ -934,15 +971,30 @@ async function ensureAccessToken(options) {
 	}
 
 	if (token && token.refresh_token) {
-		try {
-			return await refreshAccessToken(token);
-		} catch (error) {
-			log(
-				"Token refresh failed: " +
-					(error && error.message ? error.message : String(error)),
-			);
-			clearToken();
+		// Multiple sidebar/history/scrobble calls can coincide at token expiry.
+		// Only refresh once; rotating a refresh token twice causes forced re-auth.
+		if (!runtime.tokenRefreshPromise) {
+			runtime.tokenRefreshPromise = (async function() {
+				try {
+					return await refreshAccessToken(token);
+				} catch (error) {
+					log("Token refresh failed: " + (error && error.message ? error.message : String(error)));
+					// Rate limits, network errors and 5xx are recoverable. Keep OAuth.
+					if (!error || !error.statusCode || error.statusCode >= 500 ||
+						error.code === "TRAKT_COOLDOWN" || error.code === "TRAKT_OFFLINE") throw error;
+					if (error.statusCode !== 400 && error.statusCode !== 401) throw error;
+					clearToken();
+					throw createAuthRequiredError();
+				}
+			})();
+			var inFlight = runtime.tokenRefreshPromise;
+			inFlight.then(function() {
+				if (runtime.tokenRefreshPromise === inFlight) runtime.tokenRefreshPromise = null;
+			}, function() {
+				if (runtime.tokenRefreshPromise === inFlight) runtime.tokenRefreshPromise = null;
+			});
 		}
+		return runtime.tokenRefreshPromise;
 	}
 
 	if (settings.interactive) {
@@ -2029,6 +2081,7 @@ module.exports = {
 	clearToken: clearToken,
 	clearRecentHistoryCache: clearRecentHistoryCache,
 	getAuthStatus: getAuthStatus,
+	getApiStatus: getApiStatus,
 	getRecentHistory: getRecentHistory,
 	getTokenInfo: getTokenInfo,
 	getViewerProfile: getViewerProfile,

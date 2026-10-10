@@ -6,11 +6,11 @@ var playbackIdentity = require("./playback-identity.js");
 var monitor = require("./monitor.js");
 var stopJournalModule = require("./stop-journal.js");
 var trakt = require("./trakt.js");
-var PLUGIN_VERSION = "0.2.2-beta.1";
+var PLUGIN_VERSION = "0.2.3-beta.1";
 var DEBUG_LOG_PATH = "@data/debug.log";
 var MAX_DEBUG_LOG_CHARS = 200000;
 var POLL_INTERVAL_MS = 2000;
-var UI_POLL_INTERVAL_MS = 750;
+var UI_POLL_INTERVAL_MS = 2000;
 var PLUGIN_SIDEBAR_ID = "plugin:io.github.olivergiangvu.iinatraktscrobblerplus";
 var currentMedia = null;
 var lastSourceSignature = "";
@@ -25,7 +25,10 @@ var guessitFailureLogged = false;
 var lastHandledAuthActionNonce = "";
 var lastAuthStatusSignature = "";
 var authActionChain = Promise.resolve();
-var sidebarRefreshChain = Promise.resolve();
+var sidebarRefreshActive = false;
+var sidebarRefreshForced = false;
+var stopReplayActive = false;
+var stopReplayTimer = null;
 var lastScrobbleStatus = createScrobbleStatus();
 var correctionState = createCorrectionState();
 var stopJournal = stopJournalModule.create(file);
@@ -452,25 +455,33 @@ async function buildSidebarPayload(forceProfileRefresh) {
     scrobble: cloneScrobbleStatus(lastScrobbleStatus),
     correction: correction,
     history: recentHistory,
+    network: Object.assign({}, (trakt.getApiStatus ? trakt.getApiStatus() : {mode:"online"}), {
+      pendingFinalizations: stopJournal.pending().length
+    }),
     generatedAt: new Date().toISOString()
   };
 }
 
 function queueSidebarRefresh(forceProfileRefresh) {
-  if (!sidebar || typeof sidebar.postMessage !== "function") {
-    return;
-  }
-
-  sidebarRefreshChain = sidebarRefreshChain.then(async function() {
-    var payload = await buildSidebarPayload(!!forceProfileRefresh);
+  if (!sidebar || typeof sidebar.postMessage !== "function") return;
+  // One in-flight refresh; coalesce fast playback/UI events rather than
+  // accumulating hundreds of async sidebar tasks during network stalls.
+  if (forceProfileRefresh) sidebarRefreshForced = true;
+  if (sidebarRefreshActive) return;
+  sidebarRefreshActive = true;
+  var force = sidebarRefreshForced;
+  sidebarRefreshForced = false;
+  (async function() {
     try {
+      var payload = await buildSidebarPayload(force);
       sidebar.postMessage("state", payload);
     } catch (error) {
-      log("Sidebar postMessage failed: " + errStr(error));
+      log("Sidebar refresh failed: " + errStr(error));
+    } finally {
+      sidebarRefreshActive = false;
+      if (sidebarRefreshForced) queueSidebarRefresh(false);
     }
-  }).catch(function(error) {
-    log("Sidebar refresh failed: " + errStr(error));
-  });
+  })();
 }
 
 function bindSidebarMessaging() {
@@ -1392,7 +1403,7 @@ function queueScrobble(verb, snapshot, options) {
     String(Math.round(payload.progress * 100) / 100)
   ].join("|");
 
-  if (playbackState.lastScrobbleKey === scrobbleKey) {
+  if (playbackState.lastScrobbleKey === scrobbleKey && !(options && options.journalId)) {
     return;
   }
 
@@ -1535,12 +1546,15 @@ function queueScrobble(verb, snapshot, options) {
       });
       log("Scrobble returned no actionable result for " + scrobbleTargetLabel(payload));
     } catch (error) {
+      var deferred = error && (error.code === "TRAKT_COOLDOWN" || error.code === "TRAKT_OFFLINE");
       setScrobbleStatus({
-        status: "failed",
+        status: deferred ? "deferred" : "failed",
         verb: effectiveVerb,
         mediaLabel: scrobbleTargetLabel(payload),
-        detail: errStr(error),
-        reason: "",
+        detail: deferred
+          ? ("Trakt temporarily unavailable. " + (journalId ? "Final progress queued for recovery." : "Waiting for connection."))
+          : errStr(error),
+        reason: deferred ? error.code : "",
         progress: payload.progress
       });
       log("Scrobble failed for " + scrobbleTargetLabel(payload) + ": " + errStr(error));
@@ -1565,21 +1579,38 @@ function queueScrobble(verb, snapshot, options) {
   });
 }
 
-function replaySavedFinalizations() {
-  var saved = stopJournal.pending();
-  if (!saved.length) return;
-  log("Replaying " + saved.length + " unacknowledged Trakt stop checkpoint(s)");
-  saved.forEach(function(entry) {
-    queueScrobble("stop", {
-      state: monitor.State.Stopped,
-      progress: entry.progress,
-      duration: 0,
-      position: 0,
-      updatedAt: entry.createdAt / 1000,
-      mediaInfo: entry.mediaInfo,
-      traktTargetLabel: ""
-    }, { journalId: entry.id });
-  });
+async function replaySavedFinalizations() {
+  if (stopReplayActive || !isScrobblingEnabled()) return;
+  // A previous stop must never be replayed while a newer playback is active.
+  if (currentMedia && playbackState.prevSnapshot &&
+      playbackState.prevSnapshot.state !== monitor.State.Stopped) return;
+  var network = trakt.getApiStatus ? trakt.getApiStatus() : { mode: "online" };
+  if (network.mode !== "online") return;
+  var pending = stopJournal.pending();
+  if (!pending.length) return;
+  stopReplayActive = true;
+  try {
+    log("Replaying " + pending.length + " unacknowledged Trakt stop checkpoint(s)");
+    for (var i = 0; i < pending.length; i++) {
+      if (trakt.getApiStatus && trakt.getApiStatus().mode !== "online") break;
+      if (currentMedia && playbackState.prevSnapshot &&
+          playbackState.prevSnapshot.state !== monitor.State.Stopped) break;
+      var entry = pending[i];
+      queueScrobble("stop", {
+        state: monitor.State.Stopped,
+        progress: entry.progress,
+        duration: 0,
+        position: 0,
+        updatedAt: entry.createdAt / 1000,
+        mediaInfo: entry.mediaInfo,
+        traktTargetLabel: ""
+      }, { journalId: entry.id });
+      await playbackState.scrobbleChain;
+    }
+  } finally {
+    stopReplayActive = false;
+    queueSidebarRefresh(false);
+  }
 }
 
 async function flushScrobbleQueue(reason, timeoutMs) {
@@ -1837,6 +1868,9 @@ registerMenuItems();
 ensurePollTimer();
 ensureUiPollTimer();
 replaySavedFinalizations();
+stopReplayTimer = setInterval(function() {
+  void replaySavedFinalizations();
+}, 30000);
 
 event.on("iina.window-loaded", wrapEvent("iina.window-loaded", function() {
   initializeSidebar();
