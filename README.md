@@ -2,7 +2,7 @@
 
 An enhanced fork of [i3p9/iina-trakt-scrobbler](https://github.com/i3p9/iina-trakt-scrobbler) with initial support for **Remux / AIOStreams streaming URLs**.
 
-**Current public test version: v0.2.3-beta.1.** This is an early test build, not a fully validated stable release.
+**Current stable release: v0.2.3.** Promoted without playback or Trakt API behavior changes after v0.2.3-beta.1 passed field validation for resume, ⌘Q finalization and network recovery. The linked HomeDocker Trakt Bridge remains separately managed.
 
 ## Install directly from IINA (recommended)
 
@@ -36,7 +36,7 @@ Alternative: download the `.iinaplgz` file from [GitHub Releases](https://github
 
 `The.Legend.of.Vox.Machina.S02E04.WEBDL...&media_id=tt11247158&media_type=series`
 
-The plugin should identify the correct S02E04/S02E06 from player metadata rather than guessing S01E25/S02E90 from encoded tokens. Live IINA verification is pending; if a localized title cannot be mapped by Trakt and no IMDb ID is available, choose the correct show and episode in Manual Correction.
+The plugin should identify the correct S02E04/S02E06 from player metadata rather than guessing S01E25/S02E90 from encoded tokens. Playback identification, resume and quit finalization have passed live IINA checks; when localized titles lack an IMDb ID, use Manual Correction.
 
 ## Releases and auto-update
 
