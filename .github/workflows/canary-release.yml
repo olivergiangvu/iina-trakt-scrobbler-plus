@@ -1,0 +1,99 @@
+name: Publish v0.2.4 canary prerelease
+
+on:
+  push:
+    branches: ['feature/sync-queue-v0.2.4']
+
+permissions:
+  contents: write
+
+jobs:
+  prerelease:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout canary branch
+        uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Check version and isolated canary metadata
+        shell: bash
+        run: |
+          node - <<'NODE'
+          const assert = require('node:assert/strict');
+          const info = require('./Info.json');
+          assert.equal(info.identifier, 'io.github.olivergiangvu.iinatraktscrobblerplus');
+          assert.equal(info.ghRepo, 'olivergiangvu/iina-trakt-scrobbler-plus');
+          assert.equal(info.version, '0.2.4-beta.1');
+          assert.equal(info.ghVersion, 6);
+          NODE
+
+      - name: Syntax and complete test suite
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check main.js
+          node --check trakt.js
+          node --check sync-history.js
+          node --check stop-journal.js
+          node --check trakt-api-gate.js
+          for t in tests/*.js; do
+            echo "RUN $t"
+            node "$t"
+          done
+
+      - name: Stage and package IINA extension
+        shell: bash
+        run: |
+          set -euo pipefail
+          STAGE="$(./scripts/stage-plugin.sh)"
+          ASSET="$GITHUB_WORKSPACE/Trakt-Scrobbler-Plus-v0.2.4-beta.1.iinaplgz"
+          (
+            cd "$STAGE"
+            zip -q -r "$ASSET" .
+          )
+          unzip -t "$ASSET" > /dev/null
+          for path in Info.json main.js sidebar.html stop-journal.js \
+                      sync-history.js trakt-api-gate.js playback-identity.js parser.iina.js; do
+            unzip -Z1 "$ASSET" | grep -qx "$path"
+          done
+          echo "ASSET=$ASSET" >> "$GITHUB_ENV"
+
+      - name: Publish prerelease (do not change latest stable)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="v0.2.4-beta.1"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "$TAG already exists; no destructive asset overwrite"
+            exit 0
+          fi
+          cat > notes.md <<'NOTES'
+          # Trakt Scrobbler Plus v0.2.4-beta.1 — Sync Queue Canary
+
+          - Pending / Syncing / Recently Synced final-stop dashboard.
+          - Safe **Retry Now** button: respects Trakt cooldown, network connectivity,
+            authentication, playback state and active sync guard.
+          - Local last-confirmed-stop audit with a 12-item / 7-day cap;
+            no stream URLs or OAuth secrets recorded.
+          - More informative Last API Error status, while retaining
+            v0.2.3 match, watched, resume and ⌘Q reliability.
+
+          **Beta install on Mac:** download the .iinaplgz asset below and open it
+          with IINA. Restart IINA. No Terminal and no HomeDocker changes.
+
+          The Latest Stable GitHub release remains **v0.2.3**. Installing from
+          GitHub in IINA can select stable rather than this prerelease.
+
+          Validate Pending/Syncing/Recently Synced, Retry lockouts and existing
+          HomeDocker Trakt Bridge propagation before promoting beta to stable.
+          NOTES
+          gh release create "$TAG" "$ASSET" \
+            --target "$GITHUB_SHA" \
+            --title "$TAG — Canary beta" \
+            --notes-file notes.md \
+            --prerelease
