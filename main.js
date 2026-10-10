@@ -2,9 +2,10 @@ const { core, event, file, preferences, utils, sidebar, menu } = iina;
 
 var parser = require("./parser.iina.js");
 var streamSource = require("./stream-source.js");
+var playbackIdentity = require("./playback-identity.js");
 var monitor = require("./monitor.js");
 var trakt = require("./trakt.js");
-var PLUGIN_VERSION = "0.2.0-beta.1";
+var PLUGIN_VERSION = "0.2.1-beta.1";
 var DEBUG_LOG_PATH = "@data/debug.log";
 var MAX_DEBUG_LOG_CHARS = 200000;
 var POLL_INTERVAL_MS = 2000;
@@ -62,6 +63,8 @@ function createCorrectionState() {
     error: "",
     mediaLabel: "",
     mediaKey: "",
+    season: "",
+    episode: "",
     results: []
   };
 }
@@ -320,6 +323,8 @@ function cloneCorrectionState(state) {
     error: String(source.error || ""),
     mediaLabel: String(source.mediaLabel || ""),
     mediaKey: String(source.mediaKey || ""),
+    season: String(source.season !== undefined && source.season !== null ? source.season : ""),
+    episode: String(source.episode !== undefined && source.episode !== null ? source.episode : ""),
     results: Array.isArray(source.results)
       ? source.results.map(function(result) {
           return {
@@ -594,13 +599,15 @@ function bindSidebarMessaging() {
 
   sidebar.onMessage("choose_correction", function(payload) {
     var traktId = payload && payload.trakt ? Number(payload.trakt) : 0;
+    var season = payload && payload.season;
+    var episode = payload && payload.episode;
     if (!traktId) {
       return;
     }
 
     log("Sidebar requested correction apply " + traktId);
     authActionChain = authActionChain.then(function() {
-      return applyCorrectionChoice(traktId);
+      return applyCorrectionChoice(traktId, season, episode);
     }).catch(function(error) {
       log("Sidebar correction apply failed: " + errStr(error));
       correctionState = Object.assign(cloneCorrectionState(correctionState), {
@@ -637,9 +644,20 @@ function wrapEvent(label, fn) {
 }
 
 function getCurrentSource() {
+  function mpvText(key) {
+    try {
+      return iina.mpv && typeof iina.mpv.getString === "function"
+        ? String(iina.mpv.getString(key) || "")
+        : "";
+    } catch (_error) { return ""; }
+  }
   return {
     url: String(core.status.url || ""),
-    title: String(core.status.title || "")
+    title: String(core.status.title || ""),
+    path: mpvText("path"),
+    filename: mpvText("filename"),
+    mediaTitle: mpvText("media-title"),
+    metadataTitle: mpvText("metadata/by-key/title")
   };
 }
 
@@ -699,6 +717,8 @@ async function openCorrectionFlow(query) {
     error: "",
     mediaLabel: correctionMediaLabel(),
     mediaKey: currentMediaKey(),
+    season: currentMedia.mediaInfo.type === "episode" ? String(currentMedia.mediaInfo.season) : "",
+    episode: currentMedia.mediaInfo.type === "episode" ? String(currentMedia.mediaInfo.episode) : "",
     results: []
   };
   queueSidebarRefresh(false);
@@ -850,12 +870,28 @@ async function lookupCorrectionReference(reference) {
   queueSidebarRefresh(false);
 }
 
-async function applyCorrectionChoice(traktId) {
+async function applyCorrectionChoice(traktId, season, episode) {
   if (!currentMedia || !currentMedia.mediaInfo) {
     return;
   }
 
   var mediaInfo = cloneMediaInfo(currentMedia.mediaInfo);
+  if (mediaInfo.type === "episode") {
+    var chosenSeason = Number(season);
+    var chosenEpisode = Number(episode);
+    if (season === "" || episode === "" || !Number.isInteger(chosenSeason) ||
+        !Number.isInteger(chosenEpisode) || chosenSeason < 0 || chosenSeason > 100 ||
+        chosenEpisode < 1 || chosenEpisode > 9999) {
+      correctionState = Object.assign(cloneCorrectionState(correctionState), {
+        active: true, busy: false, error: "Enter a valid Season (0–100) and Episode (1–9999)."
+      });
+      queueSidebarRefresh(false);
+      return;
+    }
+    mediaInfo.season = chosenSeason;
+    mediaInfo.episode = chosenEpisode;
+    mediaInfo.episodeTitle = "";
+  }
   var mediaKey = currentMediaKey();
   var chosenId = Number(traktId || 0);
   if (!chosenId) {
@@ -873,12 +909,18 @@ async function applyCorrectionChoice(traktId) {
     var chosenResult = (correctionState.results || []).find(function(result) {
       return Number(result.trakt || 0) === chosenId;
     }) || null;
+    // Cache and playback use the same canonical title after manual selection.
+    if (chosenResult && chosenResult.title) {
+      mediaInfo.title = chosenResult.title;
+      if (mediaInfo.type === "episode") mediaInfo.showTitle = chosenResult.title;
+    }
     await trakt.applyMatchOverride(mediaInfo, chosenId);
     if (mediaKey !== currentMediaKey()) {
       return;
     }
 
     if (currentMedia) {
+      currentMedia.mediaInfo = mediaInfo;
       currentMedia.traktTargetLabel = correctionResultLabel(chosenResult, mediaInfo);
     }
     log("Applied manual Trakt match " + chosenId + " for " + mediaLabel(mediaInfo));
@@ -1140,23 +1182,15 @@ function playbackConfig() {
 
 function identifyCurrentMedia() {
   var source = getCurrentSource();
-  var streamIdentity = streamSource.extract(source.url, source.title);
-  // Prefer a clean torrent/file name over encoded tokens in the URL path.
-  var parsed = streamIdentity.name
-    ? parser.parseMediaFromSource(streamIdentity.name, streamIdentity.name)
-    : null;
-  if (!parsed || (parsed.kind !== "movie" && parsed.kind !== "episode")) {
-    parsed = parser.parseMediaFromSource(source.url, source.title);
-  }
-  appendDebugLog("[IINATraktScrobblerPlus] Source identity: " +
-    (streamIdentity.nameSource || "default") +
-    (streamIdentity.imdb ? " imdb=" + streamIdentity.imdb : "") +
-    (parsed ? " kind=" + parsed.kind : " unparsed"));
+  var picked = playbackIdentity.identify(source, parser, streamSource);
+  var parsed = picked.parsed;
   logGuessitFailureOnce();
   var mediaInfo = mediaInfoFromParsed(parsed);
-  if (mediaInfo && streamIdentity.imdb) {
-    mediaInfo.imdb = streamIdentity.imdb;
+  if (mediaInfo && picked.imdb) {
+    mediaInfo.imdb = picked.imdb;
   }
+  log("Playback identification: " + (parsed ? parsedLabel(parsed) : "no confident match") +
+      " via " + picked.source + (picked.imdb ? " imdb=" + picked.imdb : ""));
   currentMedia = parsed ? {
     source: source,
     parsed: parsed,
@@ -1741,7 +1775,7 @@ function ensureUiPollTimer() {
 
 async function handleFileLoaded() {
   var source = getCurrentSource();
-  var signature = source.url || source.title;
+  var signature = source.path || source.url || source.filename || source.title;
   if (signature && signature === lastSourceSignature && currentMedia) {
     return;
   }

@@ -2,7 +2,7 @@
 
 An enhanced fork of [i3p9/iina-trakt-scrobbler](https://github.com/i3p9/iina-trakt-scrobbler) with initial support for **Remux / AIOStreams streaming URLs**.
 
-**Current public test version: v0.2.0-beta.1.** This is an early test build, not a fully validated stable release.
+**Current public test version: v0.2.1-beta.1.** This is an early test build, not a fully validated stable release.
 
 ## Install directly from IINA (recommended)
 
@@ -18,20 +18,22 @@ Alternative: download the `.iinaplgz` file from [GitHub Releases](https://github
 
 ## What Plus currently adds
 
-- Detects `torrent_name`, `filename`, and related query parameters before trying encoded stream paths.
+- Reads IINA/mpv's human-readable filename, media title and embedded metadata before falling back to encoded stream paths.
+- Detects `torrent_name`, `filename`, and related URL query parameters.
 - Extracts IMDb references such as `media_id=tt11247158`.
 - Uses IMDb-first lookup on Trakt for eligible movies/shows.
 - Verifies season and episode existence before scrobbling.
-- Keeps the original file-based Guessit parser, scrobble monitoring, sidebar, history and manual correction.
+- Includes **Manual Correction**: show search and Trakt slug lookup work even if the parsed episode is wrong. Enter the correct Season/Episode, select the series and confirm only when Trakt verifies the episode.
+- Keeps the original file-based Guessit parser, scrobble monitoring, sidebar and history.
 - Uses its own IINA plugin identifier and token Keychain service.
 
-**Not yet included:** the TMDB-based identification engine and a true manual season/episode editor. These are planned next. Manual correction in this beta still has the original limitations if episode detection is wrong.
+**Not yet included:** TMDB API-based matching for localized titles without a usable IMDb ID, and persistent per-stream manual override memory. These will require separate development.
 
 ## Supported test example
 
 `The.Legend.of.Vox.Machina.S02E04.WEBDL...&media_id=tt11247158&media_type=series`
 
-The plugin should identify **The Legend of Vox Machina S02E04** rather than an encoded token or S01E25. Live IINA verification is pending.
+The plugin should identify the correct S02E04/S02E06 from player metadata rather than guessing S01E25/S02E90 from encoded tokens. Live IINA verification is pending; if a localized title cannot be mapped by Trakt and no IMDb ID is available, choose the correct show and episode in Manual Correction.
 
 ## Releases and auto-update
 
