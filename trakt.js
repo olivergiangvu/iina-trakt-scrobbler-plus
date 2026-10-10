@@ -1442,7 +1442,7 @@ function normalizeEpisodeCorrectionCandidate(
 }
 
 function normalizeEpisodeCorrectionRecord(show, mediaInfo, verified) {
-	if (!show || !show.ids || !show.ids.trakt || !verified) {
+	if (!show || !show.ids || !show.ids.trakt) {
 		return null;
 	}
 
@@ -1451,11 +1451,9 @@ function normalizeEpisodeCorrectionRecord(show, mediaInfo, verified) {
 		kind: "episode",
 		title: String(show.title || "").trim(),
 		subtitle: show.year ? "Show · " + show.year : "Show",
-		detail: correctionEpisodeDetail(
-			mediaInfo,
-			verified.episode,
-			verified.titleMatched,
-		),
+		detail: verified
+			? correctionEpisodeDetail(mediaInfo, verified.episode, verified.titleMatched)
+			: "Choose Season and Episode below before applying",
 		year: show.year ? Number(show.year) : null,
 		posterUrl: posterUrlFromImages(show.images),
 	};
@@ -1687,19 +1685,9 @@ async function searchCorrectionCandidates(mediaInfo, query, limit) {
 			continue;
 		}
 
-		var verified = await verifyEpisodeCandidate(
-			show.ids.trakt,
-			mediaInfo,
-		);
-		if (!verified) {
-			continue;
-		}
-
-		var normalized = normalizeEpisodeCorrectionCandidate(
-			result,
-			mediaInfo,
-			verified,
-		);
+		// Manual title search must not require the *guessed* episode to exist.
+		// The user can correct the season/episode before applying the match.
+		var normalized = normalizeEpisodeCorrectionRecord(show, mediaInfo, null);
 		if (normalized) {
 			candidates.push(normalized);
 		}
@@ -1732,14 +1720,7 @@ async function lookupCorrectionReference(mediaInfo, reference) {
 			return null;
 		}
 
-		var showReference =
-			show.ids && show.ids.trakt
-				? String(show.ids.trakt)
-				: resolvedReference;
-		var verified = await verifyEpisodeCandidate(showReference, mediaInfo);
-		return verified
-			? normalizeEpisodeCorrectionRecord(show, mediaInfo, verified)
-			: null;
+		return normalizeEpisodeCorrectionRecord(show, mediaInfo, null);
 	}
 
 	return null;
