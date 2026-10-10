@@ -1,4 +1,5 @@
 var traktKeys = require("./trakt_keys.js");
+var apiGateModule = require("./trakt-api-gate.js");
 
 var API_ROOT = "https://api.trakt.tv";
 var DEVICE_CODE_PATH = "/oauth/device/code";
@@ -33,6 +34,7 @@ var runtime = {
 	lastAuthFailureAt: 0,
 	lastAuthFailureMessage: "",
 	loggedCredentialMode: false,
+	apiGate: null,
 	viewerProfile: null,
 	viewerProfileFetchedAt: 0,
 	recentHistory: null,
@@ -41,7 +43,10 @@ var runtime = {
 
 function configure(options) {
 	var settings = options || {};
-	if (settings.file) runtime.file = settings.file;
+	if (settings.file) {
+		runtime.file = settings.file;
+		if (!runtime.apiGate) runtime.apiGate = apiGateModule.create({file: settings.file});
+	}
 	if (settings.preferences)
 		runtime.preferences = settings.preferences;
 	if (settings.utils) runtime.utils = settings.utils;
@@ -405,6 +410,25 @@ function earlyScrobbleReason(verb) {
 	return "pause-too-early";
 }
 
+function getApiStatus() {
+	return runtime.apiGate ? runtime.apiGate.status()
+		: { mode: "online", retryInSeconds: 0, queuedWrites: 0 };
+}
+
+function splitCurlHeaders(raw) {
+	var rest = String(raw || ""), headers = {};
+	for (var i = 0; i < 6; i++) {
+		var block = rest.match(/^HTTP\/[^\r\n]+\r?\n([\s\S]*?)\r?\n\r?\n/);
+		if (!block) break;
+		block[1].split(/\r?\n/).forEach(function(line) {
+			var colon = line.indexOf(":");
+			if (colon > 0) headers[line.slice(0, colon).trim().toLowerCase()] = line.slice(colon + 1).trim();
+		});
+		rest = rest.slice(block[0].length);
+	}
+	return { body: rest, headers: headers };
+}
+
 async function rawRequest(method, path, options) {
 	if (!runtime.utils || typeof runtime.utils.exec !== "function") {
 		throw new Error("utils.exec is unavailable");
@@ -416,6 +440,8 @@ async function rawRequest(method, path, options) {
 	var marker = "__IINA_TRAKT_STATUS__:";
 	var args = [
 		"-sS",
+		"-D",
+		"-",
 		"-L",
 		"--connect-timeout",
 		"5",
@@ -438,33 +464,32 @@ async function rawRequest(method, path, options) {
 	args.push("-w", "\n" + marker + "%{http_code}");
 	args.push(url);
 
-	log("HTTP " + String(method || "GET").toUpperCase() + " " + url);
-	var response = await runtime.utils.exec("/usr/bin/curl", args);
-	var stdout = response.stdout || "";
-	var stderr = response.stderr || "";
-	var markerIndex = stdout.lastIndexOf(marker);
-	var rawBody =
-		markerIndex >= 0
-			? stdout.slice(0, markerIndex).trim()
-			: stdout.trim();
-	var statusCode =
-		markerIndex >= 0
-			? parseInt(stdout.slice(markerIndex + marker.length).trim(), 10)
-			: 0;
-	var body = parseJson(rawBody);
-
-	if (response.status !== 0) {
-		throw new Error(
-			stderr || "curl failed with status " + response.status,
-		);
-	}
-
-	return {
-		statusCode: statusCode,
-		body: body,
-		rawBody: rawBody,
-		url: url,
+	// Central gate controls cooldown and serializes all POST/PUT/DELETE requests.
+	// Never retry a POST blindly: it may already have reached Trakt.
+	var send = async function() {
+		log("HTTP " + String(method || "GET").toUpperCase() + " " + url);
+		var response = await runtime.utils.exec("/usr/bin/curl", args);
+		var stdout = response.stdout || "";
+		var stderr = response.stderr || "";
+		var markerIndex = stdout.lastIndexOf(marker);
+		var rawPayload = markerIndex >= 0
+			? stdout.slice(0, markerIndex).trim() : stdout.trim();
+		var decoded = splitCurlHeaders(rawPayload);
+		var rawBody = decoded.body.trim();
+		var statusCode = markerIndex >= 0
+			? parseInt(stdout.slice(markerIndex + marker.length).trim(), 10) : 0;
+		if (response.status !== 0) {
+			throw new Error(stderr || "curl failed with status " + response.status);
+		}
+		return {
+			statusCode: statusCode,
+			body: parseJson(rawBody),
+			rawBody: rawBody,
+			headers: decoded.headers,
+			url: url
+		};
 	};
+	return runtime.apiGate ? runtime.apiGate.request(String(method || "GET").toUpperCase(), send) : send();
 }
 
 function getAuthStatus() {
@@ -2029,6 +2054,7 @@ module.exports = {
 	clearToken: clearToken,
 	clearRecentHistoryCache: clearRecentHistoryCache,
 	getAuthStatus: getAuthStatus,
+	getApiStatus: getApiStatus,
 	getRecentHistory: getRecentHistory,
 	getTokenInfo: getTokenInfo,
 	getViewerProfile: getViewerProfile,
