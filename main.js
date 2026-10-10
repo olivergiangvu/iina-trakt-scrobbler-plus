@@ -5,8 +5,9 @@ var streamSource = require("./stream-source.js");
 var playbackIdentity = require("./playback-identity.js");
 var monitor = require("./monitor.js");
 var stopJournalModule = require("./stop-journal.js");
+var syncHistoryModule = require("./sync-history.js");
 var trakt = require("./trakt.js");
-var PLUGIN_VERSION = "0.2.3";
+var PLUGIN_VERSION = "0.2.4-beta.1";
 var DEBUG_LOG_PATH = "@data/debug.log";
 var MAX_DEBUG_LOG_CHARS = 200000;
 var POLL_INTERVAL_MS = 2000;
@@ -32,6 +33,9 @@ var stopReplayTimer = null;
 var lastScrobbleStatus = createScrobbleStatus();
 var correctionState = createCorrectionState();
 var stopJournal = stopJournalModule.create(file);
+var syncHistory = syncHistoryModule.create(file);
+var activeStopSyncId = "";
+var syncQueueNotice = "";
 
 function createPlaybackState() {
   return {
@@ -407,6 +411,41 @@ function buildSidebarPlayback() {
   };
 }
 
+function isSyncReplayPlaybackActive() {
+  return !!(currentMedia && playbackState.prevSnapshot &&
+    playbackState.prevSnapshot.state !== monitor.State.Stopped);
+}
+
+// Sidebar gets only bounded metadata from the final-stop journal.
+function buildSyncQueueStatus() {
+  var api = trakt.getApiStatus ? trakt.getApiStatus() : {mode:"online"};
+  var isActive = isSyncReplayPlaybackActive();
+  var pending = stopJournal.pending().map(function(entry) {
+    return {
+      id: entry.id,
+      label: mediaLabel(entry.mediaInfo),
+      progress: Number(entry.progress || 0),
+      queuedAt: new Date(entry.createdAt).toISOString(),
+      syncing: entry.id === activeStopSyncId
+    };
+  });
+  return {
+    pending: pending,
+    recentlySynced: syncHistory.recent(),
+    flushing: !!stopReplayActive,
+    activeSyncId: activeStopSyncId,
+    notice: syncQueueNotice,
+    canRetry: !!pending.length && api.mode === "online" &&
+      !stopReplayActive && !activeStopSyncId && !isActive &&
+      isScrobblingEnabled() && trakt.getAuthStatus().connected,
+    blockedReason: isActive ? "Pause/stop the current playback first."
+      : api.mode !== "online" ? "Respecting Trakt cooldown."
+      : stopReplayActive || activeStopSyncId ? "Another sync is running."
+      : !isScrobblingEnabled() ? "Enable scrobbling first."
+      : !trakt.getAuthStatus().connected ? "Sign in to Trakt first." : ""
+  };
+}
+
 async function buildSidebarPayload(forceProfileRefresh) {
   var auth = persistAuthStatus();
   var viewerProfile = null;
@@ -458,6 +497,7 @@ async function buildSidebarPayload(forceProfileRefresh) {
     network: Object.assign({}, (trakt.getApiStatus ? trakt.getApiStatus() : {mode:"online"}), {
       pendingFinalizations: stopJournal.pending().length
     }),
+    syncQueue: buildSyncQueueStatus(),
     generatedAt: new Date().toISOString()
   };
 }
@@ -534,6 +574,33 @@ function bindSidebarMessaging() {
   sidebar.onMessage("refresh", function() {
     log("Sidebar requested refresh");
     queueSidebarRefresh(true);
+  });
+
+  sidebar.onMessage("retry_pending_stops", function() {
+    // Manual retry does not bypass server cooldown or interrupt playback.
+    var q = buildSyncQueueStatus();
+    if (!q.canRetry) {
+      syncQueueNotice = q.blockedReason || (q.pending.length ? "Retry is not available." : "Queue is already clear.");
+      queueSidebarRefresh(false);
+      return;
+    }
+    syncQueueNotice = "Retry requested. Sending saved stops in order.";
+    queueSidebarRefresh(false);
+    Promise.resolve().then(async function() {
+      await replaySavedFinalizations();
+      var remaining = stopJournal.pending().length;
+      var api = trakt.getApiStatus ? trakt.getApiStatus() : {mode:"online"};
+      syncQueueNotice = remaining
+        ? (api.mode === "online"
+          ? remaining + " stop update(s) still pending; automatic recovery remains enabled."
+          : "Trakt unavailable; retry will resume after cooldown.")
+        : "All pending final stops confirmed.";
+      queueSidebarRefresh(false);
+    }).catch(function(error) {
+      syncQueueNotice = "Retry failed; saved stops remain queued.";
+      log("Manual retry failed: " + errStr(error));
+      queueSidebarRefresh(false);
+    });
   });
 
   sidebar.onMessage("copy_auth_code", function() {
@@ -1435,6 +1502,7 @@ function queueScrobble(verb, snapshot, options) {
   }
   log("Scrobble " + effectiveVerb + " queued for " + scrobbleTargetLabel(payload) + " at " + payload.progress.toFixed(2) + "%");
   playbackState.scrobbleChain = playbackState.scrobbleChain.then(async function() {
+    if (journalId) activeStopSyncId = journalId;
     setScrobbleStatus({
       status: "sending",
       verb: effectiveVerb,
@@ -1448,7 +1516,9 @@ function queueScrobble(verb, snapshot, options) {
       var result = await trakt.scrobble(effectiveVerb, payload.mediaInfo, payload.progress);
       if (result && result.ok) {
         if (journalId) {
+          var completed = stopJournal.pending().find(function(item) { return item.id === journalId; });
           stopJournal.acknowledge(journalId);
+          if (completed) syncHistory.record(completed, "ok");
         }
         var traktAction = successfulScrobbleAction(effectiveVerb, result);
         var traktProgress = successfulScrobbleProgress(payload.progress, result);
@@ -1510,7 +1580,11 @@ function queueScrobble(verb, snapshot, options) {
 
       if (result && result.duplicate) {
         // Trakt 409 already recorded an identical scrobble; do not replay it.
-        if (journalId) stopJournal.acknowledge(journalId);
+        if (journalId) {
+          var duplicate = stopJournal.pending().find(function(item) { return item.id === journalId; });
+          stopJournal.acknowledge(journalId);
+          if (duplicate) syncHistory.record(duplicate, "duplicate");
+        }
         setScrobbleStatus({
           status: "duplicate",
           verb: effectiveVerb,
@@ -1563,6 +1637,7 @@ function queueScrobble(verb, snapshot, options) {
         missingCredentialsNoticeShown = true;
       }
     } finally {
+      if (journalId && activeStopSyncId === journalId) activeStopSyncId = "";
       persistAuthStatus();
       queueSidebarRefresh(false);
     }
