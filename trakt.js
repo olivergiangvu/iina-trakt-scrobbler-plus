@@ -417,6 +417,10 @@ async function rawRequest(method, path, options) {
 	var args = [
 		"-sS",
 		"-L",
+		"--connect-timeout",
+		"5",
+		"--max-time",
+		"12",
 		"-X",
 		String(method || "GET").toUpperCase(),
 		"-H",
