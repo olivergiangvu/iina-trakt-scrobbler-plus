@@ -52,6 +52,12 @@ jobs:
         run: node tests/fresh-trakt-resolution.js
       - name: First-playback async identity and UI contract
         run: node tests/fresh-integration-contract.js
+      - name: Resume protection safety decisions
+        run: node tests/resume-protection.js
+      - name: Read-only Trakt resume preflight regression
+        run: node tests/trakt-resume-preflight.js
+      - name: IINA resume guard / sidebar contract
+        run: node tests/resume-preflight-ui.js
       - name: Parser smoke tests
         run: node tests/parser-smoke.js
       - name: Trakt resolution tests
