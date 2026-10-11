@@ -17,12 +17,15 @@ var DEBUG_LOG_PATH = "@data/debug.log";
 var MAX_DEBUG_LOG_CHARS = 200000;
 var POLL_INTERVAL_MS = 2000;
 var UI_POLL_INTERVAL_MS = 2000;
+// Limit playback-position-triggered WebView refreshes; keep event transitions instant.
+var PLAYBACK_SIDEBAR_MIN_INTERVAL_MS = 1000;
 var PLUGIN_SIDEBAR_ID = "plugin:io.github.olivergiangvu.iinatraktscrobblerplus";
 var currentMedia = null;
 var lastSourceSignature = "";
 var playbackState = createPlaybackState();
 var pollTimer = null;
 var uiPollTimer = null;
+var lastPlaybackSidebarRefreshAt = 0;
 var sidebarHandlersBound = false;
 var firstScrobbleNoticeShown = false;
 var missingCredentialsNoticeShown = false;
@@ -405,9 +408,11 @@ function registerMenuItems() {
 }
 
 function currentResumeStatus() {
-  if (!currentMedia || !currentMedia.resumeGate)
-    return {status:"checking",blocked:true,canRestore:false,
-      message:"Waiting for a verified Trakt resume check."};
+  if (!currentMedia)
+    return {status:"idle",blocked:false,canRestore:false,message:""};
+  if (!currentMedia.resumeGate)
+    return Object.assign({blocked:true,canRestore:false},
+      resumeProtection.pendingIdentityStatus(currentMedia.mediaInfo,currentMedia.freshState));
   var state=currentMedia.resumeGate.snapshot();
   var position=Number(core.status.position||0);
   var duration=Number(core.status.duration||0);
@@ -426,7 +431,9 @@ function currentResumeStatus() {
 }
 function beginResumeCheck(target) {
   if (!target || !target.mediaInfo || target.mediaInfo.unresolvedShow ||
-      target.freshState==="resolving" || target.freshState==="conflict") return;
+      (target.mediaInfo.type==="episode" &&
+       /^unknown series$/i.test(String(target.mediaInfo.showTitle||""))) ||
+      ["resolving","conflict","rejected"].includes(target.freshState)) return;
   var gate=resumeProtection.create();
   target.resumeGate=gate;
   var inspectedInfo=target.mediaInfo;
@@ -1789,12 +1796,18 @@ function queueScrobble(verb, snapshot, options) {
     var check=currentGate?currentGate.decision(Number(payload.progress)):null;
     if (!check || check.blocked) {
       var reason=check?check.reason:"resume-check-pending";
-      setScrobbleStatus({status:"deferred",verb:verb,
+      var pendingIdentity=!currentGate
+        ? resumeProtection.pendingIdentityStatus(
+            currentMedia&&currentMedia.mediaInfo,currentMedia&&currentMedia.freshState)
+        : null;
+      var requiresMatch=!!(pendingIdentity&&pendingIdentity.status==="needs-match");
+      setScrobbleStatus({status:requiresMatch?"unmatched":"deferred",verb:verb,
         mediaLabel:scrobbleTargetLabel(payload),
         detail:reason==="remote-ahead"
           ? "Resume Protection: seek to saved Trakt point before syncing."
+          : pendingIdentity ? pendingIdentity.message
           : "Resume Protection: waiting for verified Trakt resume.",
-        reason:"resume-guard",progress:payload.progress});
+        reason:requiresMatch?"missing-trakt-match":"resume-guard",progress:payload.progress});
       return;
     }
   }
@@ -2207,15 +2220,28 @@ function processTransition(prevSnapshot, currentSnapshot, reason) {
   });
 }
 
+function refreshPlaybackSidebar(reason) {
+  // The time-pos event can fire many times per second. Rate-limit only these
+  // passive UI updates, not pause/stop/identity/auth/queue transitions.
+  if (reason === "time-pos.changed") {
+    var now=Date.now();
+    if (now-lastPlaybackSidebarRefreshAt<PLAYBACK_SIDEBAR_MIN_INTERVAL_MS) return;
+    lastPlaybackSidebarRefreshAt=now;
+  } else {
+    lastPlaybackSidebarRefreshAt=Date.now();
+  }
+  queueSidebarRefresh(false);
+}
+
 function handleStatusUpdate(reason) {
   if (!currentMedia || !currentMedia.mediaInfo) {
-    queueSidebarRefresh(false);
+    refreshPlaybackSidebar(reason);
     return;
   }
 
   var currentSnapshot = buildLiveSnapshot();
   if (!currentSnapshot) {
-    queueSidebarRefresh(false);
+    refreshPlaybackSidebar(reason);
     return;
   }
 
@@ -2226,12 +2252,12 @@ function handleStatusUpdate(reason) {
       mediaLabel(prevSnapshot.mediaInfo) +
       " at " + currentSnapshot.progress.toFixed(2) + "%"
     );
-    queueSidebarRefresh(false);
+    refreshPlaybackSidebar(reason);
     return;
   }
   processTransition(prevSnapshot, currentSnapshot, reason || "status");
   playbackState.prevSnapshot = currentSnapshot;
-  queueSidebarRefresh(false);
+  refreshPlaybackSidebar(reason);
 }
 
 async function finalizeCurrentMedia(reason) {
