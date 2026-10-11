@@ -7,8 +7,9 @@ var monitor = require("./monitor.js");
 var stopJournalModule = require("./stop-journal.js");
 var syncHistoryModule = require("./sync-history.js");
 var playbackDiagnostics = require("./playback-diagnostics.js");
+var mediaFusion = require("./mediafusion-identity.js");
 var trakt = require("./trakt.js");
-var PLUGIN_VERSION = "0.2.4-beta.2";
+var PLUGIN_VERSION = "0.2.4-beta.3";
 var DEBUG_LOG_PATH = "@data/debug.log";
 var MAX_DEBUG_LOG_CHARS = 200000;
 var POLL_INTERVAL_MS = 2000;
@@ -35,6 +36,7 @@ var lastScrobbleStatus = createScrobbleStatus();
 var correctionState = createCorrectionState();
 var stopJournal = stopJournalModule.create(file);
 var syncHistory = syncHistoryModule.create(file);
+var mediaFusionShowCache = mediaFusion.create(file);
 var activeStopSyncId = "";
 var syncQueueNotice = "";
 
@@ -999,7 +1001,8 @@ async function applyCorrectionChoice(traktId, season, episode) {
     }
     mediaInfo.season = chosenSeason;
     mediaInfo.episode = chosenEpisode;
-    mediaInfo.episodeTitle = "";
+    // Keep localized episode title for display, but do not use it as a show title.
+    mediaInfo.episodeTitle = mediaInfo.episodeTitle || "";
   }
   var mediaKey = currentMediaKey();
   var chosenId = Number(traktId || 0);
@@ -1023,6 +1026,10 @@ async function applyCorrectionChoice(traktId, season, episode) {
       mediaInfo.title = chosenResult.title;
       if (mediaInfo.type === "episode") mediaInfo.showTitle = chosenResult.title;
     }
+    if (mediaInfo.type === "episode") {
+      mediaInfo.unresolvedShow = false;
+      mediaInfo.manualTraktId = chosenId;
+    }
     await trakt.applyMatchOverride(mediaInfo, chosenId);
     if (mediaKey !== currentMediaKey()) {
       return;
@@ -1031,6 +1038,13 @@ async function applyCorrectionChoice(traktId, season, episode) {
     if (currentMedia) {
       currentMedia.mediaInfo = mediaInfo;
       currentMedia.traktTargetLabel = correctionResultLabel(chosenResult, mediaInfo);
+      // An explicit show selection can safely apply to the same torrent/season
+      // but never to a different torrent or season without new verification.
+      if (currentMedia.episodeRoute && mediaInfo.type === "episode" &&
+          chosenResult && chosenResult.title &&
+          chosenSeason === currentMedia.episodeRoute.season) {
+        mediaFusionShowCache.remember(currentMedia.episodeRoute, chosenId, chosenResult.title);
+      }
     }
     log("Applied manual Trakt match " + chosenId + " for " + mediaLabel(mediaInfo));
     resetCorrectionState();
@@ -1134,7 +1148,9 @@ function mediaInfoFromParsed(parsed) {
       year: parsed.year || null,
       season: parsed.season,
       episode: parsed.episode,
-      episodeTitle: parsed.episodeTitle || ""
+      episodeTitle: parsed.episodeTitle || "",
+      unresolvedShow: !!parsed.unresolvedShow,
+      manualTraktId: Number(parsed.manualTraktId || 0)
     };
   }
 
@@ -1203,6 +1219,8 @@ function cloneMediaInfo(mediaInfo) {
     season: mediaInfo.season,
     episode: mediaInfo.episode,
     episodeTitle: mediaInfo.episodeTitle,
+    unresolvedShow: !!mediaInfo.unresolvedShow,
+    manualTraktId: Number(mediaInfo.manualTraktId || 0),
     imdb: mediaInfo.imdb || ""
   };
 }
@@ -1216,7 +1234,8 @@ function currentMediaKey() {
 function defaultCorrectionQuery(mediaInfo) {
   if (!mediaInfo) return "";
   if (mediaInfo.type === "episode") {
-    return String(mediaInfo.showTitle || mediaInfo.title || "").trim();
+    return mediaInfo.unresolvedShow ? "" :
+      String(mediaInfo.showTitle || mediaInfo.title || "").trim();
   }
   return String(mediaInfo.title || "").trim();
 }
@@ -1293,6 +1312,16 @@ function identifyCurrentMedia() {
   var source = getCurrentSource();
   var picked = playbackIdentity.identify(source, parser, streamSource);
   var parsed = picked.parsed;
+  var episodeRoute = picked.episodeRoute || null;
+  if (parsed && parsed.unresolvedShow && episodeRoute) {
+    var packMatch = mediaFusionShowCache.find(episodeRoute);
+    if (packMatch) {
+      parsed.showTitle = packMatch.title;
+      parsed.unresolvedShow = false;
+      parsed.manualTraktId = packMatch.trakt;
+      parsed.parserSource = "mediafusion-confirmed-pack";
+    }
+  }
   logGuessitFailureOnce();
   var mediaInfo = mediaInfoFromParsed(parsed);
   if (mediaInfo && picked.imdb) {
@@ -1303,6 +1332,7 @@ function identifyCurrentMedia() {
   currentMedia = parsed ? {
     source: source,
     parsed: parsed,
+    episodeRoute: episodeRoute,
     mediaInfo: mediaInfo,
     traktTargetLabel: "",
     identifiedAt: new Date().toISOString()
@@ -1325,8 +1355,11 @@ function identifyCurrentMedia() {
     status: isScrobblingEnabled() ? "ready" : "disabled",
     verb: "",
     mediaLabel: currentMedia && currentMedia.mediaInfo ? mediaLabel(currentMedia.mediaInfo) : parsedLabel(parsed),
-    detail: isScrobblingEnabled() ? "Watching for playback changes." : "Scrobbling is turned off.",
-    reason: isScrobblingEnabled() ? "" : "disabled"
+    detail: mediaInfo && mediaInfo.unresolvedShow
+      ? "MediaFusion S/E verified; select the show using Correct Match."
+      : isScrobblingEnabled() ? "Watching for playback changes." : "Scrobbling is turned off.",
+    reason: mediaInfo && mediaInfo.unresolvedShow ? "missing-trakt-match" :
+      isScrobblingEnabled() ? "" : "disabled"
   });
   log("Parsed " + parsedLabel(parsed) + " via " + (parsed.parserSource || "unknown"));
   debugOsd("Parsed " + parsedLabel(parsed));
