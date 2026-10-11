@@ -1283,7 +1283,21 @@ async function autoLookup(d) {
   var fast=null,reply={url:forUrl,info:null,query:"",reason:""};
   // Identity first. TMDB is an enhancement, not a single point of failure.
   try {
-    var hints=alHints(),readings=await alReadings(hints,alSplitLink(hints.path||hints.url||""));
+    var hints=alHints(),ids=episodePlusIdentity.inspectUrls(hints);
+    if(ids.conflict){
+      sidebar.postMessage("autoLookupResult",{url:forUrl,info:null,reason:"Conflicting explicit playback IDs; manual match required"});
+      return;
+    }
+    var readings=await alReadings(hints,alSplitLink(hints.path||hints.url||""));
+    // Provider URL route and readable filename must not disagree on episode position.
+    var conflictingPosition=readings.some(function(rd){var p=rd&&rd.p;
+      return p&&p.episode!=null&&p.season!=null&&
+        ((ids.season!=null&&p.season!==ids.season)||(ids.episode!=null&&p.episode!==ids.episode));
+    });
+    if(conflictingPosition){
+      sidebar.postMessage("autoLookupResult",{url:forUrl,info:null,reason:"Playback route disagrees with the filename's season/episode"});
+      return;
+    }
     fast=episodePlusIdentity.identify(hints,readings,alNorm);
     if(fast&&currentVideoUrl===forUrl){
       fast.info.auto={from:fast.from};
@@ -1295,6 +1309,15 @@ async function autoLookup(d) {
   try {
     var out=await alLookup(alHints(),alSeconds);
     reply.info=out.info||null;reply.query=out.query||"";reply.reason=out.reason||"";
+    if(reply.info&&fast){
+      var before=fast.info,after=reply.info;
+      var nameBefore=before.isMovie?before.epTitle:before.showTitle;
+      var nameAfter=after.isMovie?after.epTitle:after.showTitle;
+      if(before.isMovie!==after.isMovie||before.code!==after.code||alNorm(nameBefore)!==alNorm(nameAfter)){
+        sidebar.postMessage("autoLookupConflict",{url:forUrl,reason:"TMDB external ID does not match the parsed title/episode"});
+        return;
+      }
+    }
     if(reply.info){
       reply.phase="verified";reply.info.metadataPending=false;reply.info.identitySource="TMDB verified";
       reply.info.auto={from:out.from||(fast&&fast.from)||"TMDB"};

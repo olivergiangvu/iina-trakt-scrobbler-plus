@@ -1,0 +1,44 @@
+"use strict";
+const assert=require("assert");
+const fs=require("fs");
+const path=require("path");
+const vm=require("vm");
+const {identify,inspectUrls}=require("../episode-plus-identity.js");
+const norm=s=>String(s||"").toLowerCase().replace(/[^a-z0-9]+/g,"");
+function ep(title,s,e,source){return {p:{title,season:s,episode:e,year:null,episodeTitle:"Bless Your Dead Little Hearts"},source:source||"filename",weak:false};}
+const hash="a".repeat(40);
+const comet="https://comet.feels.legal/a/playback/"+hash+"/0/0/3/1?media_id=tt6517102&media_type=series&torrent_name=Castlevania.S03E01.Bless.Your.Dead.Little.Hearts.1080p.REMUX.mkv";
+const found=identify({path:comet,url:comet},[ep("Castlevania",3,1)],norm);
+assert(found&&found.info&&!found.info.isMovie);
+assert.equal(found.info.code,"S03E01");
+assert.equal(found.info.parentImdbId,"tt6517102");
+assert.strictEqual(found.info.metadataPending,true);
+assert.equal(found.info.showTitle,"Castlevania");
+assert.equal(found.info.identitySource,"IMDb + filename");
+assert(!identify({path:comet},[ep("Castlevania",3,2)],norm),"Route mismatch must block");
+assert(!identify({path:comet},[ep("Castlevania",3,1),ep("Vox Machina",3,1)],norm),"Show title conflict must block");
+assert(!identify({path:comet},[{p:{...ep("Castlevania",3,1).p,extra:true}}],norm),"Extras must be blocked");
+assert(inspectUrls({path:comet+"&imdb_id=tt9999999"}).conflict,"IMDb conflicts blocked");
+assert(!identify({path:"https://host.invalid/random/video.mkv"},[ep("Castlevania",3,1)],norm),"Opaque stream without external ID must not fake verification");
+const st="https://addon.invalid/stream/series/tt6517102:3:1.json";
+assert.equal(identify({url:st},[ep("Castlevania",3,1)],norm).info.code,"S03E01");
+assert(!identify({url:st},[ep("Castlevania",2,1)],norm));
+const movie={p:{title:"The Matrix",year:1999,season:null,episode:null,extra:false,lead:false,dated:false,seasonWords:false},weak:false,source:"link"};
+const movieId=identify({url:"https://example.invalid/watch?media_id=tt0133093&media_type=movie"},[movie],norm);
+assert(movieId&&movieId.info.isMovie&&movieId.info.imdbId==="tt0133093");
+const bad=inspectUrls({url:"https://foo.invalid/stream?media_id=tt6517102&media_type=movie&media_type=series"});
+assert(bad.conflict);
+const main=fs.readFileSync(path.join(__dirname,"../main.js"),"utf8");
+assert(main.includes('autoEnrichmentFailed'));assert(main.includes('autoLookupConflict'));
+const side=fs.readFileSync(path.join(__dirname,"../sidebar.html"),"utf8");
+const over=fs.readFileSync(path.join(__dirname,"../overlay.html"),"utf8");
+for(const [label,html] of [["sidebar",side],["overlay",over]]){
+ assert(html.includes("@media (prefers-color-scheme: light)"),label+" light mode");
+ assert(html.includes("@media (prefers-color-scheme: dark)")||html.includes("color-scheme: light dark"),label+" dark fallback");
+ const scripts=[...html.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/g)];
+ for(const item of scripts)new vm.Script(item[1],{filename:label});
+}
+const manifest=JSON.parse(fs.readFileSync(path.join(__dirname,"../Info.json"),"utf8"));
+assert.equal(manifest.identifier,"io.github.olivergiangvu.iinaepisodeinfoplus");
+assert(!manifest.ghRepo);
+console.log("Episode Info Plus: 16+ identity, integration and theme assertions PASS");

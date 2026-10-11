@@ -1,0 +1,17 @@
+name: Episode Info Plus beta validation
+on:
+  push:
+    branches:
+      - episode-info-plus-staging
+  workflow_dispatch:
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: JavaScript syntax
+        run: |
+          node --check main.js
+          node --check episode-plus-identity.js
+      - name: Identity, theme and sidebar syntax fixtures
+        run: node tests/episode-plus-identity.test.js
