@@ -9,9 +9,10 @@ var syncHistoryModule = require("./sync-history.js");
 var playbackDiagnostics = require("./playback-diagnostics.js");
 var mediaFusion = require("./mediafusion-identity.js");
 var freshIdentity = require("./fresh-identity.js");
+var resumeProtection = require("./resume-protection.js");
 var correctionMedia = require("./correction-media.js");
 var trakt = require("./trakt.js");
-var PLUGIN_VERSION = "0.2.5-beta.1";
+var PLUGIN_VERSION = "0.2.5-beta.2";
 var DEBUG_LOG_PATH = "@data/debug.log";
 var MAX_DEBUG_LOG_CHARS = 200000;
 var POLL_INTERVAL_MS = 2000;
@@ -403,6 +404,72 @@ function registerMenuItems() {
   }));
 }
 
+function currentResumeStatus() {
+  if (!currentMedia || !currentMedia.resumeGate)
+    return {status:"checking",blocked:true,canRestore:false,
+      message:"Waiting for a verified Trakt resume check."};
+  var state=currentMedia.resumeGate.snapshot();
+  var position=Number(core.status.position||0);
+  var duration=Number(core.status.duration||0);
+  var local=duration>0?monitor.computeProgress(position,duration):null;
+  var result=currentMedia.resumeGate.decision(local);
+  var protectedResume=result.blocked && result.reason==="remote-ahead";
+  return {status:protectedResume?"protected":state.status,
+    blocked:result.blocked,canRestore:protectedResume && duration>0,
+    resumePercent:state.resumePercent,
+    localPercent:local,
+    message:protectedResume
+      ? "Trakt holds "+state.resumePercent.toFixed(1)+"%; IINA is at "+
+        (local===null?"unknown":local.toFixed(1))+
+        "%. Outgoing scrobbles are blocked to preserve resume."
+      : state.message};
+}
+function beginResumeCheck(target) {
+  if (!target || !target.mediaInfo || target.mediaInfo.unresolvedShow ||
+      target.freshState==="resolving" || target.freshState==="conflict") return;
+  var gate=resumeProtection.create();
+  target.resumeGate=gate;
+  var inspectedInfo=target.mediaInfo;
+  queueSidebarRefresh(false);
+  (async function() {
+    var result;
+    try {result=await trakt.getResumeCheckpoint(inspectedInfo);}
+    catch(error) {
+      result={status:"unavailable"};
+      log("Trakt resume preflight unavailable: "+errStr(error));
+    }
+    // The playback, corrected identity or preflight may have changed mid-request.
+    if(currentMedia!==target || target.resumeGate!==gate ||
+       target.mediaInfo!==inspectedInfo)return;
+    gate.update(result);
+    var current=currentResumeStatus();
+    log("Resume guard: "+current.status+"; "+current.message);
+    queueSidebarRefresh(false);
+    if (!current.blocked) {
+      resyncCurrentPlayback("Trakt resume preflight cleared; safe to scrobble");
+    }
+  })();
+}
+function restoreRemoteResume() {
+  if (!currentMedia || !currentMedia.resumeGate) return;
+  var gate=currentMedia.resumeGate, snapshot=buildLiveSnapshot();
+  if (!snapshot || snapshot.state===monitor.State.Stopped)return;
+  var check=gate.decision(snapshot.progress);
+  if (!check.blocked || check.reason!=="remote-ahead" ||
+      !Number.isFinite(check.resumePercent))return;
+  var target=Math.min(snapshot.duration-2,
+    snapshot.duration*check.resumePercent/100);
+  if(!Number.isFinite(target)||target<=0)return;
+  try {
+    core.seekTo(target);
+    log("User-initiated resume seek from Trakt progress "+check.resumePercent.toFixed(1)+"%");
+    queueSidebarRefresh(false);
+  }catch(error){
+    log("Resume seek unavailable: "+errStr(error));
+    importantOsd("Could not seek to Trakt resume position");
+  }
+}
+
 function buildSidebarPlayback() {
   var snapshot = buildLiveSnapshot();
   return {
@@ -416,6 +483,7 @@ function buildSidebarPlayback() {
     preview: !!playbackState.preview,
     fastPause: !!playbackState.fastPause,
     matchProvenance: determineMatchProvenance(),
+    resumeProtection: currentResumeStatus(),
     identifiedAt: currentMedia ? currentMedia.identifiedAt : ""
   };
 }
@@ -680,6 +748,10 @@ function bindSidebarMessaging() {
     try { sidebar.postMessage("discard_unverified_result",response); }
     catch (error) { log("Unable to notify sidebar about removal: "+errStr(error)); }
     queueSidebarRefresh(false);
+  });
+
+  sidebar.onMessage("restore_remote_resume", function() {
+    restoreRemoteResume();
   });
 
   sidebar.onMessage("retry_pending_stops", function() {
@@ -1122,6 +1194,7 @@ async function applyCorrectionChoice(traktId, season, episode) {
       currentMedia.freshState = "";
       currentMedia.manuallyCorrected = true;
       currentMedia.traktTargetLabel = correctionResultLabel(chosenResult, mediaInfo);
+      beginResumeCheck(currentMedia);
       // An explicit show selection can safely apply to the same torrent/season
       // but never to a different torrent or season without new verification.
       if (currentMedia.episodeRoute && mediaInfo.type === "episode" &&
@@ -1437,8 +1510,9 @@ async function verifyFreshPlayback(target,external) {
       detail:"External ID independently verified. Live scrobbling enabled.",
       reason:""});
     resetPlaybackTracking();
+    beginResumeCheck(target);
     queueSidebarRefresh(false);
-    resyncCurrentPlayback("Fresh external ID independently resolved on Trakt");
+    // beginResumeCheck will scrobble only after verifying Trakt resume.
   } catch (error) {
     if (!currentMedia || currentMedia!==target)return;
     target.freshState="rejected";
@@ -1549,6 +1623,7 @@ function identifyCurrentMedia() {
       detail:"Conflicting external IDs or episode positions; use Correct Match.",
       reason:"missing-trakt-match"});
   }
+  if (currentMedia && !freshPending && !freshConflict) beginResumeCheck(currentMedia);
   log("Parsed " + parsedLabel(parsed) + " via " + (parsed.parserSource || "unknown"));
   debugOsd("Parsed " + parsedLabel(parsed));
 }
@@ -1707,6 +1782,22 @@ function queueScrobble(verb, snapshot, options) {
 
   var payload = cloneSnapshot(snapshot);
   if (!payload || !payload.mediaInfo) return;
+  // Strict read-before-write: even "start" at 00:00 can regress a saved
+  // Trakt resume point. Never send while the preflight is pending/unavailable.
+  if (!(options && options.journalId)) {
+    var currentGate=currentMedia&&currentMedia.resumeGate;
+    var check=currentGate?currentGate.decision(Number(payload.progress)):null;
+    if (!check || check.blocked) {
+      var reason=check?check.reason:"resume-check-pending";
+      setScrobbleStatus({status:"deferred",verb:verb,
+        mediaLabel:scrobbleTargetLabel(payload),
+        detail:reason==="remote-ahead"
+          ? "Resume Protection: seek to saved Trakt point before syncing."
+          : "Resume Protection: waiting for verified Trakt resume.",
+        reason:"resume-guard",progress:payload.progress});
+      return;
+    }
+  }
   if (!(options && options.journalId) && currentMedia &&
       ["resolving","rejected","conflict"].includes(currentMedia.freshState)) {
     setScrobbleStatus({status:"unmatched",verb:verb,
@@ -1943,6 +2034,21 @@ async function replaySavedFinalizations() {
       if (currentMedia && playbackState.prevSnapshot &&
           playbackState.prevSnapshot.state !== monitor.State.Stopped) break;
       var entry = pending[i];
+      // A previous offline stop must not overwrite a newer Trakt checkpoint.
+      // A failed lookup leaves the existing local journal untouched.
+      var remote;
+      try {remote=await trakt.getResumeCheckpoint(entry.mediaInfo);}
+      catch(error) {
+        log("Unable to validate previous stop against Trakt resume: "+errStr(error));
+        break;
+      }
+      if(!remote || remote.status!=="ok")break;
+      var remoteCheck=resumeProtection.assess(remote.progress,entry.progress);
+      if(remoteCheck.blocked) {
+        stopJournal.markReview(entry.id,"Saved Trakt resume is ahead of this old stop");
+        log("Old stop quarantined to Needs Review: remote resume ahead");
+        continue;
+      }
       var replayInfo=cloneMediaInfo(entry.mediaInfo);
       if (entry.replayProof && (entry.replayProof.kind==="manual" ||
           entry.replayProof.kind==="trakt-confirmed"))
