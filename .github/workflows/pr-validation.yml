@@ -44,3 +44,25 @@ jobs:
           test -s "$STAGE/sidebar.html"
           test -s "$STAGE/Info.json"
           node -e "const x=require('./Info.json');if(!x.version||!Number.isInteger(x.ghVersion))process.exit(1)"
+      - name: Package installable test canary
+        shell: bash
+        run: |
+          set -euo pipefail
+          STAGE="$(./scripts/stage-plugin.sh)"
+          VERSION="$(node -p "require('./Info.json').version")"
+          OUTPUT="$GITHUB_WORKSPACE/Trakt-Scrobbler-Plus-v${VERSION}.iinaplgz"
+          (
+            cd "$STAGE"
+            zip -q -r "$OUTPUT" .
+          )
+          unzip -t "$OUTPUT" >/dev/null
+          unzip -Z1 "$OUTPUT" | grep -qx 'Info.json'
+          unzip -Z1 "$OUTPUT" | grep -qx 'main.js'
+          unzip -Z1 "$OUTPUT" | grep -qx 'resume-protection.js'
+      - name: Upload Mac test package
+        uses: actions/upload-artifact@v4
+        with:
+          name: IINA-Trakt-Plus-beta5-canary
+          path: Trakt-Scrobbler-Plus-v*.iinaplgz
+          if-no-files-found: error
+          retention-days: 14
