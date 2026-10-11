@@ -14,7 +14,7 @@ assert.match(main,/trakt\.resolveFreshIdentity\(external\)/);
 assert.match(main,/currentMedia!==target \|\| target\.freshState!=="resolving"/,
  "stale async results must be discarded");
 assert.match(main,/currentMedia\.freshState = ""/,"manual override invalidates async reply");
-assert.match(main,/resyncCurrentPlayback\("Fresh external ID independently resolved on Trakt"\)/);
+assert.match(main,/beginResumeCheck\(target\)/, "fresh resolver must wait for remote resume preflight");
 assert.match(main,/freshState:freshConflict\?"conflict":freshPending\?"resolving":""/);
 assert.match(main,/detail:"External ID must be verified before scrobbling\."/);
 assert.match(main,/freshState==="verified"/);
