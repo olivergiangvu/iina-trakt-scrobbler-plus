@@ -462,9 +462,9 @@ function buildSyncQueueStatus() {
   var needsReview=stopJournal.review().map(function(entry) {
     return {id:entry.id,label:mediaLabel(entry.mediaInfo),progress:entry.progress,
       queuedAt:new Date(entry.createdAt).toISOString(),
-      reason:entry.mediaInfo && (entry.mediaInfo.unresolvedShow ||
+      reason:entry.reviewReason || (entry.mediaInfo && (entry.mediaInfo.unresolvedShow ||
         /^unknown series$/i.test(String(entry.mediaInfo.showTitle||"")))
-        ? "Missing verified series" : "Legacy checkpoint: match unverified"};
+        ? "Missing verified series" : "Legacy checkpoint: match unverified")};
   });
   return {
     pending: pending,
@@ -1682,6 +1682,9 @@ function queueScrobble(verb, snapshot, options) {
       }
 
       if (result && result.skip) {
+        if (journalId && result.reason === "missing-trakt-match") {
+          stopJournal.markReview(journalId, "Trakt match could not be verified");
+        }
         if (result.reason === "missing-client-credentials" && !missingCredentialsNoticeShown) {
           importantOsd("Configure Trakt app credentials for this build");
           missingCredentialsNoticeShown = true;
@@ -1724,6 +1727,7 @@ function queueScrobble(verb, snapshot, options) {
       }
 
       if (result && result.notFound) {
+        if (journalId) stopJournal.markReview(journalId, "Trakt rejected the resolved media ID");
         setScrobbleStatus({
           status: "unmatched",
           verb: effectiveVerb,
