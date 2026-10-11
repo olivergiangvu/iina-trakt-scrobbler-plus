@@ -18,6 +18,11 @@ function inspectUrls(h){
   });
   var st=/\/(?:stream|meta)\/(series|movie)\/(tt\d{6,10}(?::\d{1,3}:\d{1,4})?)(?:\.json)?(?:\/|$)/i.exec(path);
   if(st){types.push(st[1].toLowerCase()==="movie"?"movie":"episode");addId(st[2]);}
+  // MediaFusion explicitly carries episode coordinates but not a show identity.
+  // Accept this positional hint only on known provider hosts.
+  var mf=/^https?:\/\/(?:mediafusion(?:-dev)?\.elfhosted\.com|mediafusionfortheweebs\.midnightignite\.me)\/streaming_provider\/[^/?#]+\/playback\/[a-z][a-z0-9_-]{1,30}\/[a-f0-9]{40}(?:[a-f0-9]{24})?\/(\d{1,3})\/(\d{1,4})(?:\/|$)/i.exec(path);
+  if(mf){var ms=num(mf[1],0,100),me=num(mf[2],1,9999);
+    if(ms!==null&&me!==null){seasons.push(ms);episodes.push(me);types.push("episode");}}
   var seg=path.split("/"),at=seg.indexOf("playback"),tail=at<0?[]:seg.slice(at+1);
   if(/^[0-9a-f]{40}$/i.test(tail[0]||"")&&tail.length>=5){var s=num(tail[3],0,100),e=num(tail[4],1,9999);if(s!==null&&e!==null){seasons.push(s);episodes.push(e);types.push("episode");}}
  });

@@ -912,6 +912,19 @@ async function alReadings(h, link) {
     try { sn = await alStremioName(st); } catch (e) { sn = null; }
     if (sn) out.push(alReading(sn.file, sn.folder ? [sn.folder] : [], "Stremio"));
   }
+  // DMM/mpv can put the real filename inside an opaque player label:
+  // 98800072:1?h=<hash>&file=Better.Call.Saul.S03E03.mkv
+  // Never treat the opaque prefix or its hash as a media title.
+  ["filename", "mediaTitle", "metadataTitle"].forEach(function(key) {
+    var label = String(h[key] || "");
+    var m = /[?&](?:file|filename|fn|torrent_name)=([^&#]+)/i.exec(label);
+    if (m && m[1]) {
+      var extracted = alDecode(m[1], true);
+      if (extracted && extracted.length <= 500 && !/^https?:\/\//i.test(extracted)) {
+        out.push(alReading(extracted, [], "embedded-stream-filename"));
+      }
+    }
+  });
   ["filename", "file", "fn", "name", "title", "torrent_name"].forEach(function(k) {
     var v = alQuery(link, k);
     if (v) out.push(alReading(v, [], "link"));
