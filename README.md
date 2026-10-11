@@ -273,3 +273,26 @@ The new safety layer checks the authenticated Trakt resume endpoint
 
 **Canary**: install `v0.2.5-beta.2` on Mac only. Stable `v0.2.4`
 remains untouched; no HomeDocker change.
+
+## v0.2.5-beta.3 — Debrid Media Manager stream filename integrity
+
+Field diagnostics for an IINA DMM playback showed an opaque local filename
+`98800072:1?h=[infohash]&file=Better.Call.Saul.S03E03.Sunk.Costs...mkv`.
+The existing parser accepted the whole query as a TV show name before reaching
+the actual `file=` release name, despite being able to resolve the canonical
+Trakt target separately. This could split identity and resume tracking.
+
+- `playback-identity.js` rejects mpv labels with debrid query/hash markers as
+  title evidence and extracts a clean release name from the structured
+  `file=` field instead, preserving legitimate `metadata/by-key/title`.
+- Shared diagnostics now strip DMM token/hash-bearing query strings from
+  reported title/filename/metadata/recognized fields, displaying only a safe
+  filename when one exists.
+- A dedicated regression test reproduces the DMM string and verifies
+  **Better Call Saul, S03E03**, source `stream-file`, no torrent infohash
+  exposure, and refusal to guess when no real file name is available.
+- The AIOStreams IINA custom resume link remains
+  `iina://weblink?url={encodedUrl}&mpv_start={position}`.
+  Resume Protection and Trakt Bridge configuration are unchanged.
+
+Beta.3 is a canary. The stable release stays v0.2.4.
