@@ -1896,6 +1896,11 @@ async function resolveFreshIdentity(external) {
     return null;
   if(imdb&&item.ids.imdb&&String(item.ids.imdb).toLowerCase()!==imdb)return null;
   if(tmdb&&item.ids.tmdb&&Number(item.ids.tmdb)!==tmdb)return null;
+  // When S/E came from a filename rather than the provider's structured
+  // position, independently verify the filename show title matches the show
+  // returned by its IMDb/TMDB ID. Otherwise manual confirmation is required.
+  if(kind==="episode"&&identity.positionSource==="parsed-episode"&&
+     !titleIdentityMatches(identity.expectedShowTitle,item.title))return null;
   var result={kind:kind,trakt:Number(item.ids.trakt),
     title:String(item.title),year:Number(item.year)||null,
     imdb:imdb||String(item.ids.imdb||""),tmdb:tmdb||Number(item.ids.tmdb||0),
