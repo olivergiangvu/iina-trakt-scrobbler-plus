@@ -2,7 +2,7 @@
 
 An enhanced fork of [i3p9/iina-trakt-scrobbler](https://github.com/i3p9/iina-trakt-scrobbler) with initial support for **Remux / AIOStreams streaming URLs**.
 
-**Current stable release: v0.2.4.** Promoted directly from the verified v0.2.4-beta.6 canary after real IINA field tests of manual Movie/TV correction, MediaFusion S/E recognition, confirmed-pack lookup, Match Provenance, Sync Queue Review/Remove, live scrobbling, ⌘Q and end-to-end resume sync through the existing HomeDocker Trakt Bridge. Playback and Trakt API logic are unchanged from beta.6; only release metadata, CI packaging and documentation are updated. The separate Trakt Bridge remains independently managed.
+**Current stable release: v0.2.5.** Promoted from the field-tested v0.2.5-beta.7 canary (4/4 Mac acceptance cases PASS). New features include independently verified IMDb/TMDB first-playback matching, safe Comet series IMDb + filename episode resolution, Trakt resume-overwrite protection, DMM filename hardening and batched diagnostic logs. The tested beta.7's scrobble, resume and identification logic is unchanged; release preparation changes only version metadata, documentation and packaging. The separate HomeDocker Trakt Bridge is unchanged.
 
 ## Install directly from IINA (recommended)
 
@@ -39,6 +39,17 @@ Alternative: download the `.iinaplgz` file from [GitHub Releases](https://github
 The plugin should identify the correct S02E04/S02E06 from player metadata rather than guessing S01E25/S02E90 from encoded tokens. Playback identification, resume and quit finalization have passed live IINA checks; when localized titles lack an IMDb ID, use Manual Correction.
 
 
+## v0.2.5 Stable — new features and Mac validation
+
+- Fresh explicit IMDb/TMDB series or movie IDs are checked against Trakt; for episodes, the actual show identity and precise Season/Episode must be independently verified.
+- Comet URLs with a show IMDb ID but no structured Season/Episode can use a confidently parsed release filename after a canonical series-title check and exact Trakt episode verification.
+- Resume Overwrite Protection checks Trakt's saved progress before any scrobble, blocks lower-progress overwrites, and never automatically seeks to a Trakt position without user confirmation.
+- DMM filename and diagnostics improvements reject torrent/hash query tokens as title evidence. ID-less localized MediaFusion streams still require a trusted manual confirmation.
+- Throttled sidebar refresh and buffered `debug.log` writes reduce unnecessary IINA logging I/O; restart/stop checkpoints remain independently durable.
+- **User-tested on IINA 1.5.0:** mid-episode resume, Trakt pause progress, Trakt watched → AIOStreams sync, and app quit/relaunch **all PASS (4/4)**.
+- For Comet streams stalling in initial Seeking with AVFoundation, disabling all compressed S/PDIF passthrough codecs in **IINA → Settings → Audio** fixed the observed startup issue; this is an IINA setting, not a plugin change. The AIOStreams custom link remains `iina://weblink?url={encodedUrl}&mpv_start={position}`.
+- Release notes are versioned at [docs/releases/v0.2.5.md](docs/releases/v0.2.5.md). The main-branch publishing workflow must use the matching note file, and validates the packaged plugin before shipping.
+
 ## v0.2.4 Stable — validated feature summary
 
 - Structured MediaFusion provider routes identify season/episode even for localized episode-only titles; never accept a show identity from the route alone.
@@ -50,7 +61,7 @@ The plugin should identify the correct S02E04/S02E06 from player metadata rather
 
 ## Releases and auto-update
 
-GitHub Actions tests source files and automatically packages an installable `.iinaplgz` asset whenever a **new version** is merged to `main`.
+GitHub Actions tests source files and automatically packages an installable `.iinaplgz` asset whenever a **new version** is merged to `main`. Every published version must also have a matching file under `docs/releases/v<version>.md` to prevent stale release notes.
 Each release must increment both `version` (semantic display version) and the integer `ghVersion` in `Info.json`. IINA detects updates through `ghRepo` and `ghVersion`.
 
 Developers can follow [MAC-only testing and rollback instructions](docs/PLUS_BETA_TESTING.md).
