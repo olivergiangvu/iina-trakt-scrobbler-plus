@@ -1,0 +1,80 @@
+name: Publish v0.2.5 Fresh Recognition Canary
+
+on:
+  push:
+    branches: ['feature/fresh-auto-recognition-v0.2.5']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: v025-fresh-canary
+  cancel-in-progress: false
+
+jobs:
+  prerelease:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify beta metadata
+        run: |
+          node - <<'NODE'
+          const assert=require('node:assert/strict');
+          const info=require('./Info.json');
+          assert.equal(info.version,'0.2.5-beta.1');
+          assert.equal(info.ghVersion,13);
+          assert.equal(info.identifier,'io.github.olivergiangvu.iinatraktscrobblerplus');
+          NODE
+      - name: Syntax and full regression suite
+        shell: bash
+        run: |
+          set -euo pipefail
+          for m in main.js trakt.js playback-identity.js fresh-identity.js playback-diagnostics.js mediafusion-identity.js correction-media.js stop-journal.js sync-history.js stream-source.js trakt-api-gate.js; do
+            node --check "$m"
+          done
+          for t in tests/*.js; do
+            echo "TEST $t"
+            node "$t"
+          done
+      - name: Package extension
+        shell: bash
+        run: |
+          set -euo pipefail
+          STAGE="$(./scripts/stage-plugin.sh)"
+          ASSET="$GITHUB_WORKSPACE/Trakt-Scrobbler-Plus-v0.2.5-beta.1.iinaplgz"
+          (cd "$STAGE" && zip -q -r "$ASSET" .)
+          unzip -t "$ASSET" >/dev/null
+          for p in Info.json main.js trakt.js sidebar.html fresh-identity.js playback-identity.js playback-diagnostics.js mediafusion-identity.js correction-media.js stop-journal.js sync-history.js trakt-api-gate.js parser.iina.js; do
+            unzip -Z1 "$ASSET" | grep -qx "$p"
+          done
+          echo "ASSET=$ASSET" >> "$GITHUB_ENV"
+      - name: Publish canary as prerelease
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="v0.2.5-beta.1"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "$TAG already exists; not overwriting"
+            exit 0
+          fi
+          cat > notes.md <<'NOTES'
+          # v0.2.5-beta.1 — Fresh External-ID Auto Recognition
+
+          - IMDb/TMDB or Stremio ID-bearing links can automatically resolve a new
+            show/movie on the first playback, with exact TV S/E validation.
+          - Conflicting IDs or missing Trakt reference produce no auto-scrobble.
+          - Match Provenance and redacted Copy Diagnostics show verification source.
+          - Manual corrections and verified stop/resume from v0.2.4 are retained.
+          - Limit: ID-less localized MediaFusion streams still need manual confirmation
+            or the existing confirmed-pack cache. No blind guesses.
+          - Install the .iinaplgz manually on Mac through IINA. No SSH/server changes.
+          - Latest Stable remains v0.2.4.
+          NOTES
+          gh release create "$TAG" "$ASSET" --target "$GITHUB_SHA" \
+            --title "$TAG — Fresh Recognition Canary" --notes-file notes.md --prerelease
