@@ -32,6 +32,8 @@ jobs:
         run: node tests/sync-history.js
       - name: Sidebar Sync Queue UI contract
         run: node tests/sidebar-sync-queue.js
+      - name: MediaFusion episode route and manual pack cache regression
+        run: node tests/mediafusion-identity.js
       - name: Playback identity diagnostic redaction tests
         run: node tests/playback-diagnostics.js
       - name: False-positive title resolution regression tests
