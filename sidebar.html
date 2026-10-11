@@ -184,6 +184,53 @@
   .sub-none-row { display: flex; align-items: center; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,.06); font-size: 12px; color: rgba(255,255,255,.4); font-style: italic; }
   .sub-none-btn { background: rgba(255,255,255,.07); border: 1px solid rgba(255,255,255,.14); color: rgba(255,255,255,.55); font-size: 10px; font-weight: 600; padding: 3px 8px; border-radius: 4px; cursor: pointer; }
   .sub-none-btn.on { background: #555; border-color: #666; color: #fff; }
+
+  /* Episode Info Plus: match macOS appearance, including floating/PiP web views.
+     Inline legacy white labels need targeted light-mode overrides. */
+  :root { color-scheme: light dark; }
+  @media (prefers-color-scheme: dark) {
+    body { color:#e9edf3; background:rgba(12,15,21,.26); }
+  }
+  @media (prefers-color-scheme: light) {
+    body { color:#172435; background:rgba(248,249,252,.93); }
+    body, body input, body button, body textarea, body select { color:#172435; }
+    body #saved { background:rgba(204,39,43,.06); border-color:rgba(160,38,44,.25); }
+    body .rn, body .rc-t, body #s-title { color:#172435; }
+    body .rs, body .rc-s, body #s-meta, body #s-show, body .sl,
+    body .sub-hd, body .sub-meta, body .key-desc, body .msg,
+    body #s-desc, body #opacity-val, body #vpos-val, body .key-msg { color:#566478; }
+    body .pill, body .thm, body .pb, body .sq, body .rc-b, body .sub-btn2,
+    body .sub-load, body .sub-none-btn {
+      color:#27364a; background:rgba(34,49,70,.065); border-color:rgba(34,49,70,.19);
+    }
+    body input:not([type="checkbox"]):not([type="range"]), body textarea, body select,
+    body #q, body .lang-inp, body .key-row input {
+      color:#172435 !important; background:rgba(255,255,255,.80) !important;
+      border-color:rgba(34,49,70,.22) !important;
+    }
+    body input::placeholder, body #q::placeholder { color:#7c8797; }
+    body .rrow, body .rc-row, body .sub-row { border-color:rgba(34,49,70,.13); }
+    body .sp { border-color:rgba(34,49,70,.15); border-top-color:rgba(34,49,70,.68); }
+    body [style*="color:rgba(255,255,255"], body [style*="color:#fff"] {
+      color:#526175 !important;
+    }
+    body [style*="background:rgba(255,255,255"] {
+      background-color:rgba(34,49,70,.065) !important;
+    }
+    body [style*="border:1px solid rgba(255,255,255"] {
+      border-color:rgba(34,49,70,.19) !important;
+    }
+    body #s-title, body .rn, body .rc-t { color:#152132 !important; }
+    body button[style*="background:#c0392b"],
+    body .pill.on, body .thm.on, body .sub-load.loaded,
+    body #go, body .pb:hover, body .sub-load:hover:not(:disabled) { color:#fff !important; }
+    body #s-auto button { color:#165ca9 !important; }
+    body #auto-status { color:#42566c !important; }
+  }
+  @media (prefers-contrast: more) {
+    body { background:Canvas !important; color:CanvasText !important; }
+    button, input { border-width:1.5px !important; }
+  }
 </style>
 </head>
 <body>
@@ -929,9 +976,16 @@ function doToggleAutoLookup(on) {
 function startAutoLookup(url) {
   var hit = loadAutoMap()[url];
   if (hit && hit.rejected) { autoStatus("You chose to search for this one yourself."); return; }
-  if (hit && hit.info) { showAutoMatch(hit.info); return; }
-  if (!TK) { autoStatus("Automatic Lookup needs your TMDB key — add it below."); return; }
-  autoStatus("Looking it up…");
+  if (hit && hit.info) {
+    showAutoMatch(hit.info);
+    // A provisional match is useful offline; retry enrichment later.
+    if (!hit.info.metadataPending || !TK || (hit.retryAt && Date.now() < hit.retryAt)) return;
+    rememberAuto(url, { info: hit.info, retryAt: Date.now() + 120000 });
+    iina.postMessage("autoLookup", { url: url });
+    return;
+  }
+  if (!TK) autoStatus("TMDB key missing — trying playback ID + filename only.");
+  else autoStatus("Identifying episode…");
   iina.postMessage("autoLookup", { url: url });
 }
 
@@ -939,6 +993,7 @@ function showAutoMatch(info) {
   restoreSelection(info);
   autoShown = true;
   document.getElementById("s-auto").style.display = "block";
+  autoStatus(info.metadataPending ? "Recognized via playback ID · TMDB details pending" : "Matched and verified via TMDB");
 }
 
 iina.onMessage("autoLookupResult", function(d) {
@@ -946,13 +1001,21 @@ iina.onMessage("autoLookupResult", function(d) {
   // A pick made while the lookup ran wins.
   if (document.getElementById("saved").classList.contains("on") && !autoShown) return;
   if (d.info) {
-    rememberAuto(d.url, { info: d.info });
+    rememberAuto(d.url, { info: d.info, retryAt: d.info.metadataPending ? Date.now() + 120000 : 0 });
     showAutoMatch(d.info);
   } else {
     autoStatus("Not sure what this is — search below.", d.reason);
     var q = document.getElementById("q");
     if (q && !q.value && d.query) q.value = d.query;
   }
+});
+
+iina.onMessage("autoEnrichmentFailed", function(d) {
+  if (!d || d.url !== currentVideoUrl || !autoLookupOn() || !autoShown) return;
+  var hit = loadAutoMap()[d.url];
+  if (!hit || !hit.info || !hit.info.metadataPending) return;
+  rememberAuto(d.url, { info: hit.info, retryAt: Date.now() + 300000 });
+  autoStatus("Episode identified · TMDB temporarily unavailable", d.reason || "Metadata will be retried");
 });
 
 // "Not right? Search": forget the match and never guess this file again

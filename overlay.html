@@ -135,6 +135,31 @@
   /* Keep hit tests on the button, not a span inside it */
   #skip-btn > * { pointer-events:none; }
   @keyframes skipIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
+
+  /* Episode Info Plus: text and card ALWAYS change together to preserve contrast.
+     Light mode adapts floating/PiP overlays while keeping the background translucent. */
+  :root { color-scheme: light dark; }
+  #card { backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px); }
+  @media (prefers-color-scheme: light) {
+    #card {
+      background:rgba(250,251,253,var(--bg-opacity));
+      border-top:1px solid rgba(21,35,53,.11);
+      border-bottom:1px solid rgba(21,35,53,.11);
+    }
+    .sn, #wrap[data-theme="compact"] .sn { color:#4c5c70; }
+    .et { color:#142132; }
+    .mt { color:#45566b; }
+    .mt span+span::before, #wrap[data-theme="compact"] .sn::after { color:#8894a3; }
+    .rat { color:#8b5a00; }
+    .ov { color:#39495d; }
+    #wrap[data-theme="poster"] #card { box-shadow:0 18px 60px rgba(21,35,53,.24); }
+    /* The skip control retains its dark own background and white text. */
+    #skip-btn { color:#fff; }
+  }
+  @media (prefers-contrast: more) {
+    #card { background:Canvas !important; color:CanvasText !important; }
+    .sn,.et,.mt,.ov { color:CanvasText !important; }
+  }
 </style>
 </head>
 <body>
