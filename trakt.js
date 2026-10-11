@@ -1527,6 +1527,18 @@ function normalizeEpisodeCorrectionRecord(show, mediaInfo, verified) {
 }
 
 async function resolveEpisodeIds(mediaInfo, bucket, key) {
+	if (mediaInfo.unresolvedShow) {
+		log("MediaFusion episode route has season/episode but no trusted show identity; manual correction required.");
+		return null;
+	}
+	var explicit = Number(mediaInfo.manualTraktId || 0);
+	if (Number.isInteger(explicit) && explicit > 0) {
+		var checked = await verifyEpisodeCandidate(explicit, mediaInfo);
+		if (!checked) return null;
+		bucket[key] = createVerifiedEpisodeCacheEntry(explicit);
+		saveSearchCache();
+		return {trakt:explicit};
+	}
 	var cached = bucket[key];
 	var cachedId = readCachedTraktId(cached);
 
