@@ -14,7 +14,8 @@ assert.match(main,/function beginResumeCheck\(target\)/);
 assert.match(main,/await trakt\.getResumeCheckpoint\(inspectedInfo\)/);
 assert.match(main,/currentMedia!==target \|\| target\.resumeGate!==gate/);
 assert.match(main,/currentGate\?currentGate\.decision\(Number\(payload\.progress\)\):null/);
-assert.match(main,/reason:"resume-guard"/);
+assert.match(main,/reason:requiresMatch\\?"missing-trakt-match":"resume-guard"/,
+  "unverified series must surface manual match, while resume preflight remains gated");
 assert.match(main,/stopJournal\.markReview\(entry\.id,"Saved Trakt resume is ahead/);
 assert.match(main,/function restoreRemoteResume\(\)/);
 assert.match(main,/core\.seekTo\(target\)/);
