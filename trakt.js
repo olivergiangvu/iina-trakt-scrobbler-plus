@@ -1851,6 +1851,68 @@ async function applyMatchOverride(mediaInfo, candidate) {
 	return { trakt: traktId };
 }
 
+// Fresh explicit external-ID resolution. No title-only guesses, no stream URL
+// requests. The Trakt lookup must identify one media record and, for TV, the
+// exact season/episode must exist before allowing any scrobble.
+async function lookupTmdbByType(tmdb, kind) {
+  var type=kind==="episode"?"show":"movie";
+  var response=await authedRequest("GET","/search/tmdb/"+Number(tmdb),{
+    query:{type:type,limit:5,page:1}
+  });
+  if(response.statusCode>=400)
+    throw new Error("Trakt TMDB lookup failed with status "+response.statusCode);
+  var matches=(Array.isArray(response.body)?response.body:[]).filter(function(x){
+    var item=x&&x[type];
+    return x&&x.type===type&&item&&item.ids&&
+      Number(item.ids.tmdb)===Number(tmdb) && Number(item.ids.trakt)>0;
+  });
+  if(matches.length!==1) return null; // Zero or multiple: fail closed.
+  return matches[0][type];
+}
+async function resolveFreshIdentity(external) {
+  var identity=external||{};
+  if(identity.conflict || !["episode","movie"].includes(identity.kind))return null;
+  var imdb=String(identity.imdb||"").toLowerCase();
+  var tmdb=Number(identity.tmdb||0);
+  if(!/^tt\d{6,10}$/.test(imdb))imdb="";
+  if(!Number.isInteger(tmdb)||tmdb<=0||tmdb>999999999)tmdb=0;
+  if(!imdb&&!tmdb)return null;
+  if(identity.kind==="episode" &&
+    (!Number.isInteger(identity.season)||identity.season<0||identity.season>100||
+     !Number.isInteger(identity.episode)||identity.episode<1||identity.episode>9999))
+    return null;
+
+  var byImdb=null,byTmdb=null,kind=identity.kind;
+  if(imdb) byImdb=kind==="episode"
+    ? await fetchShowByReference(imdb) : await fetchMovieByReference(imdb);
+  if(tmdb) byTmdb=await lookupTmdbByType(tmdb,kind);
+  // When both IDs are given, require both independently resolve to SAME media.
+  if((imdb&&!byImdb)||(tmdb&&!byTmdb))return null;
+  if(byImdb && byTmdb &&
+    Number(byImdb.ids&&byImdb.ids.trakt)!==Number(byTmdb.ids&&byTmdb.ids.trakt))
+    return null;
+  var item=byImdb||byTmdb;
+  if(!item||!item.ids||!Number(item.ids.trakt)||!String(item.title||"").trim())
+    return null;
+  if(imdb&&item.ids.imdb&&String(item.ids.imdb).toLowerCase()!==imdb)return null;
+  if(tmdb&&item.ids.tmdb&&Number(item.ids.tmdb)!==tmdb)return null;
+  var result={kind:kind,trakt:Number(item.ids.trakt),
+    title:String(item.title),year:Number(item.year)||null,
+    imdb:imdb||String(item.ids.imdb||""),tmdb:tmdb||Number(item.ids.tmdb||0),
+    source:imdb&&tmdb?"verified-dual-id":imdb?"verified-imdb":"verified-tmdb"};
+  if(kind==="episode") {
+    var checked=await verifyEpisodeCandidate(result.trakt,{
+      showTitle:result.title,season:identity.season,episode:identity.episode,
+      episodeTitle:""
+    });
+    if(!checked)return null;
+    result.season=identity.season;
+    result.episode=identity.episode;
+    result.episodeTitle=String(checked.episode.title||"");
+  }
+  return result;
+}
+
 async function getTraktIds(mediaInfo) {
 	var type = mediaInfo && mediaInfo.type;
 	if (type !== "movie" && type !== "episode") {
@@ -2162,6 +2224,7 @@ module.exports = {
 	usingEmbeddedCredentials: usingEmbeddedCredentials,
 	ensureAccessToken: ensureAccessToken,
 	getTraktIds: getTraktIds,
+	resolveFreshIdentity: resolveFreshIdentity,
 	normalizeScrobbleVerb: normalizeScrobbleVerb,
 	prepareScrobblePayload: prepareScrobblePayload,
 	lookupCorrectionReference: lookupCorrectionReference,
