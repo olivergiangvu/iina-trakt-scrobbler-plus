@@ -10,7 +10,7 @@ var playbackDiagnostics = require("./playback-diagnostics.js");
 var mediaFusion = require("./mediafusion-identity.js");
 var correctionMedia = require("./correction-media.js");
 var trakt = require("./trakt.js");
-var PLUGIN_VERSION = "0.2.4-beta.5";
+var PLUGIN_VERSION = "0.2.4-beta.6";
 var DEBUG_LOG_PATH = "@data/debug.log";
 var MAX_DEBUG_LOG_CHARS = 200000;
 var POLL_INTERVAL_MS = 2000;
@@ -643,14 +643,30 @@ function bindSidebarMessaging() {
   });
 
   sidebar.onMessage("discard_unverified_stop", function(payload) {
-    var id=payload&&typeof payload.id==="string"?payload.id:"";
-    if (!id || stopReplayActive || activeStopSyncId) return;
-    if (!stopJournal.review().some(function(x){return x.id===id;})) return;
-    if (stopJournal.discardReview(id)) {
-      syncQueueNotice="Unverified checkpoint removed from local queue.";
-      log("Removed one unverified stop after explicit UI confirmation");
-      queueSidebarRefresh(false);
+    var id=payload && typeof payload.id==="string" ? payload.id : "";
+    var response={ok:false,id:id,message:"Checkpoint was preserved."};
+    try {
+      // Only local unverified records are eligible. Never mutate Trakt history
+      // or allow this handler to remove a proof-backed pending stop.
+      if (!id) {
+        response.message="Missing checkpoint identifier.";
+      } else if (!stopJournal.review().some(function(x){return x.id===id;})) {
+        response.message="Item no longer needs review, or was already removed.";
+      } else if (stopJournal.discardReview(id)) {
+        response.ok=true;
+        response.message="Unverified LOCAL checkpoint removed.";
+        syncQueueNotice=response.message;
+        log("Removed one unverified stop by confirmed user action");
+      } else {
+        response.message="Failed to save local queue; checkpoint is unchanged.";
+      }
+    } catch (error) {
+      response.message="Removal failed; checkpoint was preserved.";
+      log("Local checkpoint removal failed: "+errStr(error));
     }
+    try { sidebar.postMessage("discard_unverified_result",response); }
+    catch (error) { log("Unable to notify sidebar about removal: "+errStr(error)); }
+    queueSidebarRefresh(false);
   });
 
   sidebar.onMessage("retry_pending_stops", function() {
