@@ -106,3 +106,28 @@ For two problematic playback links, start each briefly and copy diagnostics
 separately. Never publish complete signed MediaFusion/TorBox URLs.
 
 This is a canary only; main stays at v0.2.3 stable.
+
+### v0.2.4-beta.3 — MediaFusion episode metadata and secure show learning
+
+Real macOS diagnostics exposed: `Strom ozvěny` (localized Czech episode
+title) played via MediaFusion TorBox URL with explicit `/2/8` route.
+MediaFusion route source independently confirms that suffix is Season 2,
+Episode 8. Official Czech metadata lists this as The Legend of Vox Machina
+S02E08 (The Echo Tree).
+
+Trakt+ now reads the season/episode from this structured MediaFusion route
+rather than treating isolated episode-title metadata as a movie. **A route
+alone does not identify the show.** Until the user chooses a show using
+Correct Match (or has an explicit trusted IMDb ID), scrobbling is blocked.
+Once a correct show is selected and Trakt confirms that S/E exists, the
+plugin remembers the chosen Trakt show for the same torrent fingerprint
+and season only, expiring after 60 days. No stream URLs, signed credentials,
+or raw infohash are stored in this mapping. Each new episode must be
+verified once with Trakt; its result then benefits from existing caching.
+
+Instructions: open MediaFusion stream -> Trakt+ sidebar -> Correct Match ->
+search `The Legend of Vox Machina` -> select correct show (S02E08 is
+pre-filled) -> confirm and resume. Verify Trakt and downstream bridge
+progress before marking this canary stable.
+
+**v0.2.3 remains stable; beta releases are manual installs on Mac.**
