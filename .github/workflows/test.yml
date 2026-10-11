@@ -32,6 +32,10 @@ jobs:
         run: node tests/sync-history.js
       - name: Sidebar Sync Queue UI contract
         run: node tests/sidebar-sync-queue.js
+      - name: Playback identity diagnostic redaction tests
+        run: node tests/playback-diagnostics.js
+      - name: False-positive title resolution regression tests
+        run: node tests/false-positive-matching.js
       - name: Parser smoke tests
         run: node tests/parser-smoke.js
       - name: Trakt resolution tests
