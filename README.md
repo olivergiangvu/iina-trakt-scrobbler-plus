@@ -207,3 +207,92 @@ Release is a manual-install **prerelease**; v0.2.3 remains latest stable.
 No HomeDocker or Trakt Bridge changes are required.
 
 **Historical beta notes above are retained as development records. v0.2.4 is now stable.**
+
+## v0.2.5-beta.1 — Fresh Explicit-ID Recognition (canary)
+
+**Goal:** recognize a *new*, previously unseen TV series/movie on the first
+playback **when a trusted source link actually contains an external ID**.
+No TMDB API key is required: the plugin uses its existing authenticated
+Trakt connection for IMDb IDs and TMDB-to-Trakt ID lookup.
+
+- Recognizes explicit `media_id=tt...`, `imdb_id=...`, `tmdb_id=...`,
+  `media_id=tmdb:<number>` and Stremio `/stream/series/tt...:S:E.json`
+  style IDs. Never extracts IDs from opaque MediaFusion secrets or torrent hashes.
+- MediaFusion's `/.../season/episode` can supply the S/E position but **not**
+  the series itself. Conflicting external IDs or disagreeing episode positions
+  are rejected rather than auto-scrobbled.
+- Fresh matches are asynchronously verified against Trakt. The correct
+  canonical movie/show title and exact existing S/E are required before
+  live scrobble is permitted. Stale network responses are ignored if the user
+  switches playback or manually overrides the match mid-request.
+- Match Source indicates fresh IMDb/TMDB verification; Copy Diagnostics
+  exposes only safe IDs and URL shapes, not stream URLs or credentials.
+- Existing manual-correction, pack cache, Sync Queue and quit/resume logic
+  remain unchanged after successful verification.
+- **Important limitation:** a bare MediaFusion URL such as
+  `/streaming_provider/[secret]/playback/torbox/[hash]/2/8` together with
+  only a Czech localized episode title `Strom ozvěny` **does not carry a
+  trustworthy show ID**. Fresh matching on *that precise URL* still requires
+  a confirmed pack match, a manual correction, or an upstream link that
+  includes an IMDb/TMDB ID. This beta does not guess by localized titles.
+
+**Installation:** download the v0.2.5-beta.1 prerelease `.iinaplgz` asset
+from GitHub and open on the **Mac** with IINA. Stable v0.2.4 is untouched.
+No SSH, HomeDocker or Trakt Bridge configuration changes are needed.
+
+**Beta acceptance:** first playback from an ID-bearing custom URL resolves
+without any prior manual pack cache, the verified show and S/E are reported
+to Trakt, a URL with conflicting IDs never scrobbles, and ⌘Q resume still
+synchronizes to downstream clients.
+
+## v0.2.5-beta.2 — Resume Overwrite Protection (safety hotfix)
+
+A user observed IINA starting S02E09 from 00:00 and scrobbling this
+early progress back onto Trakt/AIOStreams, overwriting the established
+resume point. This is a separate issue from episode recognition.
+The new safety layer checks the authenticated Trakt resume endpoint
+(`GET /sync/playback/episodes` or `/movies`) **before any scrobble**.
+
+- When remote resume is ahead of IINA by >1.5 percentage points,
+  all current `start/pause/stop` writes are blocked. This includes
+  close and ⌘Q; don't persist a low-progress stop for replay.
+- Unknown/offline/rate-limited Trakt resume check fails **closed**
+  rather than silently assuming zero.
+- Player sidebar displays Resume Protection + saved percentage.
+  **Resume from saved Trakt position** calls IINA `core.seekTo` only
+  on explicit user click, not silently.
+- Existing verified stop journal retries are individually compared
+  with live Trakt progress. A stale stop that would lower progress
+  moves to Needs Review, never automatically replayed.
+- Fresh external-ID verification and Manual Match both trigger a new
+  resume preflight before resuming scrobble.
+- Does not read AIOStreams/Bridge private data or delete Trakt progress.
+- CANNOT restore the previous checkpoint if it had already been
+  overwritten before the first protected preflight. Confirm a prior
+  checkpoint still exists in Trakt before attempting recovery.
+
+**Canary**: install `v0.2.5-beta.2` on Mac only. Stable `v0.2.4`
+remains untouched; no HomeDocker change.
+
+## v0.2.5-beta.3 — Debrid Media Manager stream filename integrity
+
+Field diagnostics for an IINA DMM playback showed an opaque local filename
+`98800072:1?h=[infohash]&file=Better.Call.Saul.S03E03.Sunk.Costs...mkv`.
+The existing parser accepted the whole query as a TV show name before reaching
+the actual `file=` release name, despite being able to resolve the canonical
+Trakt target separately. This could split identity and resume tracking.
+
+- `playback-identity.js` rejects mpv labels with debrid query/hash markers as
+  title evidence and extracts a clean release name from the structured
+  `file=` field instead, preserving legitimate `metadata/by-key/title`.
+- Shared diagnostics now strip DMM token/hash-bearing query strings from
+  reported title/filename/metadata/recognized fields, displaying only a safe
+  filename when one exists.
+- A dedicated regression test reproduces the DMM string and verifies
+  **Better Call Saul, S03E03**, source `stream-file`, no torrent infohash
+  exposure, and refusal to guess when no real file name is available.
+- The AIOStreams IINA custom resume link remains
+  `iina://weblink?url={encodedUrl}&mpv_start={position}`.
+  Resume Protection and Trakt Bridge configuration are unchanged.
+
+Beta.3 is a canary. The stable release stays v0.2.4.

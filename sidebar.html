@@ -829,6 +829,13 @@
         <p id="media-name" class="media-name">No active media</p>
         <p id="media-meta" class="media-meta">Load a movie or episode.</p>
         <p id="match-provenance" class="sync-meta" hidden></p>
+        <div id="resume-protection" class="sync-review-item" hidden
+             style="margin:8px 0; padding:9px; border:1px solid var(--input-border);border-radius:6px">
+          <p class="sync-meta" style="font-weight:700;margin:0 0 5px">Resume Protection</p>
+          <p id="resume-protection-status" class="sync-review-reason" aria-live="polite"></p>
+          <button id="restore-remote-resume" type="button" class="secondary" hidden
+                  style="width:100%; margin-top:7px">Resume from saved Trakt position</button>
+        </div>
         <div class="progress-wrap">
           <div class="progress-bar">
             <div id="progress-fill" class="progress-fill"></div>
@@ -1181,7 +1188,7 @@
           return "Synced to Trakt";
         }
         if (scrobble.status === "duplicate") return "Already up to date";
-        if (scrobble.status === "unmatched") return "Title not matched";
+        if (scrobble.status === "unmatched") return scrobble.reason === "missing-trakt-match" ? "Manual Match Required" : "Title not matched";
         if (scrobble.status === "skipped") {
           if (scrobble.reason === "auth-required") return "Connect Trakt";
           if (scrobble.reason === "missing-client-credentials") return "Missing credentials";
@@ -1200,7 +1207,7 @@
         if (scrobble.status === "queued" || scrobble.status === "sending") return "";
         if (scrobble.status === "succeeded") return "";
         if (scrobble.status === "duplicate") return "";
-        if (scrobble.status === "unmatched") return "Try a cleaner file name.";
+        if (scrobble.status === "unmatched") return scrobble.detail || "Use Correct Match to verify the Trakt identity.";
         if (scrobble.status === "skipped") {
           if (scrobble.reason === "auth-required") return "Connect from the top.";
           if (scrobble.reason === "missing-client-credentials") return "This build needs Trakt app credentials.";
@@ -1530,6 +1537,11 @@
         var p=playback.matchProvenance||{};
         setText("match-provenance",p.label ? "Match source: "+p.label : "");
         setHidden("match-provenance",!playback.available||!p.label);
+        var resume = playback.resumeProtection || {};
+        var blocked = playback.available && !!resume.blocked;
+        setHidden("resume-protection",!blocked);
+        setText("resume-protection-status",blocked ? resume.message||"Checking Trakt resume." : "");
+        setHidden("restore-remote-resume",!blocked||!resume.canRestore);
         fill.style.width = progress + "%";
         setText("progress-left", formatProgress(progress));
         setText("progress-right", formatDuration(playback.position) + " / " + formatDuration(playback.duration));
@@ -1941,6 +1953,11 @@
       bindStatusOsdToggle("status-osd-toggle");
       bindSelectableInput("device-code");
       bindAction("open-correction-button", "open_correction");
+      bindLocalAction("restore-remote-resume", function() {
+        if (!stateReady || !state.playback || !state.playback.resumeProtection ||
+            !state.playback.resumeProtection.canRestore) return;
+        send("restore_remote_resume");
+      });
       bindLocalAction("copy-playback-diagnostics", function() {
         if (!stateReady || !state.playback || !state.playback.available) {
           setText("diagnostics-feedback", "Start playback first, then copy diagnostics.");

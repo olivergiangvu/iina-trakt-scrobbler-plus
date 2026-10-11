@@ -1,0 +1,34 @@
+const assert=require("node:assert/strict");
+const g=require("../resume-protection.js");
+const gate=g.create();
+assert.equal(gate.decision(0).blocked,true,"must not send while remote unknown");
+assert.equal(gate.decision(0).reason,"resume-check-pending");
+gate.update({status:"ok",progress:70.5});
+assert.equal(gate.decision(0).blocked,true);
+assert.equal(gate.decision(1).blocked,true);
+assert.equal(gate.decision(68).blocked,true);
+assert.equal(gate.decision(69.5).blocked,false);
+assert.equal(gate.decision(70.5).blocked,false);
+assert.equal(gate.decision(90).blocked,false);
+assert.equal(gate.decision(80).reason,"at-or-ahead-of-resume");
+gate.update({status:"unavailable"});
+assert.equal(gate.decision(100).blocked,true,"network error must not mean zero resume");
+gate.update({status:"ok",progress:null});
+assert.equal(gate.decision(0).blocked,false,"confirmed no resume");
+gate.update({status:"ok",progress:2.6});
+assert.equal(gate.decision(0).blocked,true,"small previous checkpoints also protected");
+gate.update({status:"ok",progress:0});
+assert.equal(gate.decision(0).blocked,false);
+gate.update({status:"ok",progress:NaN});
+assert.equal(gate.decision(50).blocked,true);
+
+const missing = g.pendingIdentityStatus({type:"episode",unresolvedShow:true,showTitle:"Unknown Series"},"");
+assert.equal(missing.status,"needs-match");
+assert.match(missing.message,/Correct Match/);
+assert.equal(g.pendingIdentityStatus({type:"episode",showTitle:"Unknown Series"},"").status,"needs-match");
+assert.equal(g.pendingIdentityStatus({type:"episode",unresolvedShow:true},"resolving").status,"verifying-id");
+assert.equal(g.pendingIdentityStatus({type:"episode",showTitle:"Better Call Saul"},"rejected").status,"needs-match");
+assert.equal(g.pendingIdentityStatus({type:"episode",showTitle:"Better Call Saul"},"conflict").status,"needs-match");
+assert.equal(g.pendingIdentityStatus({type:"episode",showTitle:"Better Call Saul"},"").status,"checking");
+
+console.log("resume protection fail-closed safety tests PASS");
