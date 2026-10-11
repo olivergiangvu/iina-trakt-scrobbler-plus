@@ -65,8 +65,10 @@ function identify(source, parser, streamSource) {
   if (episodeRoute) {
     // An isolated localized title, e.g. "Strom ozvěny", is the *episode title*
     // for S02E08 and never reliable evidence of the show name.
-    var episodeTitle = movie && movie.parsed && movie.parsed.title
-      ? movie.parsed.title : "";
+    var rawEpisodeTitle = String(hints.metadataTitle || hints.mediaTitle || hints.title || "").trim();
+    if (isOpaque(rawEpisodeTitle) || /\bS\d{1,3}E\d{1,4}\b/i.test(rawEpisodeTitle)) rawEpisodeTitle = "";
+    var episodeTitle = rawEpisodeTitle || (movie && movie.parsed && movie.parsed.title
+      ? movie.parsed.title : "");
     var parsedEpisode = {
       kind: "episode", showTitle: "Unknown Series",
       season: episodeRoute.season, episode: episodeRoute.episode,
