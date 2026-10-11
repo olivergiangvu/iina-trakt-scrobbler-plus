@@ -58,6 +58,8 @@ jobs:
         run: node tests/trakt-resume-preflight.js
       - name: IINA resume guard / sidebar contract
         run: node tests/resume-preflight-ui.js
+      - name: DMM filename and redacted diagnostics regression
+        run: node tests/dmm-filename.js
       - name: Parser smoke tests
         run: node tests/parser-smoke.js
       - name: Trakt resolution tests
