@@ -424,9 +424,9 @@ function determineMatchProvenance() {
   if (!currentMedia || !currentMedia.mediaInfo) return {code:"unknown",label:"Unidentified"};
   var info=currentMedia.mediaInfo;
   var source=String(currentMedia.parsed && currentMedia.parsed.parserSource || "");
+  if (currentMedia.freshState==="resolving") return {code:"fresh-pending",label:"Verifying External ID…"};
   if (info.unresolvedShow) return {code:"needs-manual",label:"Needs Manual Match"};
   if (source==="mediafusion-confirmed-pack") return {code:"confirmed-pack",label:"Confirmed Pack Cache"};
-  if (currentMedia.freshState==="resolving") return {code:"fresh-pending",label:"Verifying External ID…"};
   if (currentMedia.freshState==="verified") {
     return {code:"fresh-verified",label:
       currentMedia.freshIdKind==="verified-dual-id"?"Fresh IMDb + TMDB (verified)":
@@ -1118,6 +1118,8 @@ async function applyCorrectionChoice(traktId, season, episode) {
 
     if (currentMedia) {
       currentMedia.mediaInfo = mediaInfo;
+      // If a user manually corrects during the network lookup, ignore its stale result.
+      currentMedia.freshState = "";
       currentMedia.manuallyCorrected = true;
       currentMedia.traktTargetLabel = correctionResultLabel(chosenResult, mediaInfo);
       // An explicit show selection can safely apply to the same torrent/season
@@ -1467,14 +1469,13 @@ function identifyCurrentMedia() {
   // of a series. Hold playback until Trakt resolves and verifies the episode.
   var freshPending=false;
   var freshConflict=!!(external&&external.conflict);
-  if (parsed && external && !external.conflict && external.kind==="episode" &&
-      Number.isInteger(external.season)&&Number.isInteger(external.episode) &&
-      parsed.parserSource!=="mediafusion-confirmed-pack") {
-    if (parsed.kind==="episode" &&
+  if (external && !external.conflict && external.kind==="episode" &&
+      Number.isInteger(external.season)&&Number.isInteger(external.episode)) {
+    if (parsed && parsed.kind==="episode" &&
         (parsed.season!==external.season||parsed.episode!==external.episode)) {
       freshConflict=true;
     } else {
-      var episodeTitle=parsed.kind==="episode"?parsed.episodeTitle :
+      var episodeTitle=parsed && parsed.kind==="episode" ? parsed.episodeTitle :
         String(source.metadataTitle||source.mediaTitle||source.title||"");
       parsed={kind:"episode",showTitle:"Unknown Series",
         season:external.season,episode:external.episode,
@@ -1482,10 +1483,15 @@ function identifyCurrentMedia() {
         parserSource:"explicit-playback-id-pending"};
       freshPending=true;
     }
-  } else if(parsed && external && !external.conflict && external.kind==="movie" &&
-      parsed.kind==="movie") {
+  } else if(external && !external.conflict && external.kind==="movie" &&
+      (!parsed || parsed.kind==="movie")) {
+    if(!parsed)parsed={kind:"movie",title:"Unknown Movie",year:null};
     freshPending=true;
     parsed.parserSource="explicit-playback-id-pending";
+  } else if(external && !external.conflict) {
+    // A show ID without S/E, or a conflict with parsed media type,
+    // must not accidentally fall back to unrelated movie title search.
+    freshConflict=true;
   }
   if(freshConflict && parsed) {
     if(parsed.kind==="episode")parsed.unresolvedShow=true;
