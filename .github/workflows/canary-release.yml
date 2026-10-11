@@ -26,8 +26,8 @@ jobs:
           const info = require('./Info.json');
           assert.equal(info.identifier, 'io.github.olivergiangvu.iinatraktscrobblerplus');
           assert.equal(info.ghRepo, 'olivergiangvu/iina-trakt-scrobbler-plus');
-          assert.equal(info.version, '0.2.4-beta.3');
-          assert.equal(info.ghVersion, 8);
+          assert.equal(info.version, '0.2.4-beta.4');
+          assert.equal(info.ghVersion, 9);
           NODE
 
       - name: Syntax and complete test suite
@@ -37,6 +37,7 @@ jobs:
           node --check main.js
           node --check trakt.js
           node --check mediafusion-identity.js
+          node --check correction-media.js
           node --check sync-history.js
           node --check stop-journal.js
           node --check trakt-api-gate.js
@@ -50,14 +51,14 @@ jobs:
         run: |
           set -euo pipefail
           STAGE="$(./scripts/stage-plugin.sh)"
-          ASSET="$GITHUB_WORKSPACE/Trakt-Scrobbler-Plus-v0.2.4-beta.3.iinaplgz"
+          ASSET="$GITHUB_WORKSPACE/Trakt-Scrobbler-Plus-v0.2.4-beta.4.iinaplgz"
           (
             cd "$STAGE"
             zip -q -r "$ASSET" .
           )
           unzip -t "$ASSET" > /dev/null
           for path in Info.json main.js sidebar.html stop-journal.js \
-                      sync-history.js trakt-api-gate.js playback-identity.js playback-diagnostics.js mediafusion-identity.js parser.iina.js; do
+                      sync-history.js trakt-api-gate.js playback-identity.js playback-diagnostics.js mediafusion-identity.js correction-media.js parser.iina.js; do
             unzip -Z1 "$ASSET" | grep -qx "$path"
           done
           echo "ASSET=$ASSET" >> "$GITHUB_ENV"
@@ -68,17 +69,19 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          TAG="v0.2.4-beta.3"
+          TAG="v0.2.4-beta.4"
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "$TAG already exists; no destructive asset overwrite"
             exit 0
           fi
           cat > notes.md <<'NOTES'
-          # Trakt Scrobbler Plus v0.2.4-beta.3 — Sync Queue Canary
+          # Trakt Scrobbler Plus v0.2.4-beta.4 — Sync Queue Canary
 
           - Pending / Syncing / Recently Synced final-stop dashboard.
           - Reject incorrect high-scoring Trakt title matches (e.g. Strom ozvěny vs Gegen den Strom).
           - Redacted Copy Diagnostics button for MediaFusion / TorBox stream URLs.
+          - Manual correction now supports explicit Movie / TV Series search mode, regardless of parser guess.
+          - TV mode offers Season/Episode fields and verifies selected series episode on Trakt.
           - Use MediaFusion season/episode route to avoid treating localized episode titles as movies.
           - Require a trusted show ID or manual match before any scrobble; remember user-confirmed show for matching torrent/season without storing stream credentials.
           - Safe **Retry Now** button: respects Trakt cooldown, network connectivity,
