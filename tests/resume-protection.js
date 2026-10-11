@@ -21,4 +21,14 @@ gate.update({status:"ok",progress:0});
 assert.equal(gate.decision(0).blocked,false);
 gate.update({status:"ok",progress:NaN});
 assert.equal(gate.decision(50).blocked,true);
+
+const missing = g.pendingIdentityStatus({type:"episode",unresolvedShow:true,showTitle:"Unknown Series"},"");
+assert.equal(missing.status,"needs-match");
+assert.match(missing.message,/Correct Match/);
+assert.equal(g.pendingIdentityStatus({type:"episode",showTitle:"Unknown Series"},"").status,"needs-match");
+assert.equal(g.pendingIdentityStatus({type:"episode",unresolvedShow:true},"resolving").status,"verifying-id");
+assert.equal(g.pendingIdentityStatus({type:"episode",showTitle:"Better Call Saul"},"rejected").status,"needs-match");
+assert.equal(g.pendingIdentityStatus({type:"episode",showTitle:"Better Call Saul"},"conflict").status,"needs-match");
+assert.equal(g.pendingIdentityStatus({type:"episode",showTitle:"Better Call Saul"},"").status,"checking");
+
 console.log("resume protection fail-closed safety tests PASS");
