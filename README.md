@@ -244,3 +244,32 @@ No SSH, HomeDocker or Trakt Bridge configuration changes are needed.
 without any prior manual pack cache, the verified show and S/E are reported
 to Trakt, a URL with conflicting IDs never scrobbles, and ⌘Q resume still
 synchronizes to downstream clients.
+
+## v0.2.5-beta.2 — Resume Overwrite Protection (safety hotfix)
+
+A user observed IINA starting S02E09 from 00:00 and scrobbling this
+early progress back onto Trakt/AIOStreams, overwriting the established
+resume point. This is a separate issue from episode recognition.
+The new safety layer checks the authenticated Trakt resume endpoint
+(`GET /sync/playback/episodes` or `/movies`) **before any scrobble**.
+
+- When remote resume is ahead of IINA by >1.5 percentage points,
+  all current `start/pause/stop` writes are blocked. This includes
+  close and ⌘Q; don't persist a low-progress stop for replay.
+- Unknown/offline/rate-limited Trakt resume check fails **closed**
+  rather than silently assuming zero.
+- Player sidebar displays Resume Protection + saved percentage.
+  **Resume from saved Trakt position** calls IINA `core.seekTo` only
+  on explicit user click, not silently.
+- Existing verified stop journal retries are individually compared
+  with live Trakt progress. A stale stop that would lower progress
+  moves to Needs Review, never automatically replayed.
+- Fresh external-ID verification and Manual Match both trigger a new
+  resume preflight before resuming scrobble.
+- Does not read AIOStreams/Bridge private data or delete Trakt progress.
+- CANNOT restore the previous checkpoint if it had already been
+  overwritten before the first protected preflight. Confirm a prior
+  checkpoint still exists in Trakt before attempting recovery.
+
+**Canary**: install `v0.2.5-beta.2` on Mac only. Stable `v0.2.4`
+remains untouched; no HomeDocker change.
