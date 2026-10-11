@@ -25,15 +25,15 @@ jobs:
           node - <<'NODE'
           const assert=require('node:assert/strict');
           const info=require('./Info.json');
-          assert.equal(info.version,'0.2.5-beta.1');
-          assert.equal(info.ghVersion,13);
+          assert.equal(info.version,'0.2.5-beta.2');
+          assert.equal(info.ghVersion,14);
           assert.equal(info.identifier,'io.github.olivergiangvu.iinatraktscrobblerplus');
           NODE
       - name: Syntax and full regression suite
         shell: bash
         run: |
           set -euo pipefail
-          for m in main.js trakt.js playback-identity.js fresh-identity.js playback-diagnostics.js mediafusion-identity.js correction-media.js stop-journal.js sync-history.js stream-source.js trakt-api-gate.js; do
+          for m in main.js trakt.js playback-identity.js fresh-identity.js resume-protection.js playback-diagnostics.js mediafusion-identity.js correction-media.js stop-journal.js sync-history.js stream-source.js trakt-api-gate.js; do
             node --check "$m"
           done
           for t in tests/*.js; do
@@ -45,10 +45,10 @@ jobs:
         run: |
           set -euo pipefail
           STAGE="$(./scripts/stage-plugin.sh)"
-          ASSET="$GITHUB_WORKSPACE/Trakt-Scrobbler-Plus-v0.2.5-beta.1.iinaplgz"
+          ASSET="$GITHUB_WORKSPACE/Trakt-Scrobbler-Plus-v0.2.5-beta.2.iinaplgz"
           (cd "$STAGE" && zip -q -r "$ASSET" .)
           unzip -t "$ASSET" >/dev/null
-          for p in Info.json main.js trakt.js sidebar.html fresh-identity.js playback-identity.js playback-diagnostics.js mediafusion-identity.js correction-media.js stop-journal.js sync-history.js trakt-api-gate.js parser.iina.js; do
+          for p in Info.json main.js trakt.js sidebar.html fresh-identity.js resume-protection.js playback-identity.js playback-diagnostics.js mediafusion-identity.js correction-media.js stop-journal.js sync-history.js trakt-api-gate.js parser.iina.js; do
             unzip -Z1 "$ASSET" | grep -qx "$p"
           done
           echo "ASSET=$ASSET" >> "$GITHUB_ENV"
@@ -58,14 +58,20 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          TAG="v0.2.5-beta.1"
+          TAG="v0.2.5-beta.2"
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "$TAG already exists; not overwriting"
             exit 0
           fi
           cat > notes.md <<'NOTES'
-          # v0.2.5-beta.1 — Fresh External-ID Auto Recognition
+          # v0.2.5-beta.2 — Fresh External-ID Auto Recognition
 
+          - Hotfix: read remote Trakt resume before sending ANY scrobble event
+            (start/pause/stop). If IINA starts behind an existing checkpoint,
+            progress writes are blocked until playback catches up or user
+            clicks Resume from saved Trakt position.
+          - Trakt GET failures fail closed, not treated as an empty resume.
+          - Previously queued stop retries must not overwrite newer progress.
           - IMDb/TMDB or Stremio ID-bearing links can automatically resolve a new
             show/movie on the first playback, with exact TV S/E validation.
           - Conflicting IDs or missing Trakt reference produce no auto-scrobble.
