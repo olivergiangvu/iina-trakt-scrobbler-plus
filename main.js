@@ -8,8 +8,9 @@ var stopJournalModule = require("./stop-journal.js");
 var syncHistoryModule = require("./sync-history.js");
 var playbackDiagnostics = require("./playback-diagnostics.js");
 var mediaFusion = require("./mediafusion-identity.js");
+var correctionMedia = require("./correction-media.js");
 var trakt = require("./trakt.js");
-var PLUGIN_VERSION = "0.2.4-beta.3";
+var PLUGIN_VERSION = "0.2.4-beta.4";
 var DEBUG_LOG_PATH = "@data/debug.log";
 var MAX_DEBUG_LOG_CHARS = 200000;
 var POLL_INTERVAL_MS = 2000;
@@ -75,6 +76,7 @@ function createCorrectionState() {
     error: "",
     mediaLabel: "",
     mediaKey: "",
+    kind: "movie",
     season: "",
     episode: "",
     results: []
@@ -335,6 +337,7 @@ function cloneCorrectionState(state) {
     error: String(source.error || ""),
     mediaLabel: String(source.mediaLabel || ""),
     mediaKey: String(source.mediaKey || ""),
+    kind: source.kind === "episode" ? "episode" : "movie",
     season: String(source.season !== undefined && source.season !== null ? source.season : ""),
     episode: String(source.episode !== undefined && source.episode !== null ? source.episode : ""),
     results: Array.isArray(source.results)
@@ -670,6 +673,26 @@ function bindSidebarMessaging() {
     });
   });
 
+  sidebar.onMessage("change_correction_kind", function(payload) {
+    var kind = payload && payload.kind === "episode" ? "episode" : "movie";
+    authActionChain = authActionChain.then(function() {
+      if (!currentMedia || !currentMedia.mediaInfo || !correctionState.active) return;
+      var hint = currentMedia.episodeRoute || mediaFusion.fromSource(currentMedia.source);
+      var pos = correctionMedia.episodePosition(currentMedia.mediaInfo, hint);
+      correctionState = Object.assign(cloneCorrectionState(correctionState), {
+        kind: kind,
+        busy: false,
+        results: [],
+        error: "",
+        season: kind === "episode" ? pos.season : "",
+        episode: kind === "episode" ? pos.episode : ""
+      });
+      queueSidebarRefresh(false);
+    }).catch(function(error) {
+      log("Manual media kind change failed: " + errStr(error));
+    });
+  });
+
   sidebar.onMessage("search_correction", function(payload) {
     var query = payload && payload.query ? String(payload.query) : "";
     log('Sidebar requested correction search query="' + query + '"');
@@ -819,6 +842,9 @@ async function openCorrectionFlow(query) {
     return;
   }
 
+  var episodeRoute = currentMedia.episodeRoute || mediaFusion.fromSource(currentMedia.source);
+  var initialKind = correctionMedia.preferredKind(currentMedia.mediaInfo, episodeRoute);
+  var position = correctionMedia.episodePosition(currentMedia.mediaInfo, episodeRoute);
   var resolvedQuery = String(query || defaultCorrectionQuery(currentMedia.mediaInfo)).trim();
   correctionState = {
     active: true,
@@ -828,8 +854,9 @@ async function openCorrectionFlow(query) {
     error: "",
     mediaLabel: correctionMediaLabel(),
     mediaKey: currentMediaKey(),
-    season: currentMedia.mediaInfo.type === "episode" ? String(currentMedia.mediaInfo.season) : "",
-    episode: currentMedia.mediaInfo.type === "episode" ? String(currentMedia.mediaInfo.episode) : "",
+    kind: initialKind,
+    season: initialKind === "episode" ? position.season : "",
+    episode: initialKind === "episode" ? position.episode : "",
     results: []
   };
   queueSidebarRefresh(false);
@@ -871,7 +898,9 @@ async function searchCorrectionFlow(query) {
   queueSidebarRefresh(false);
 
   try {
-    var results = await trakt.searchCorrectionCandidates(currentMedia.mediaInfo, resolvedQuery, 8);
+    var mediaForSearch = correctionMedia.searchMedia(currentMedia.mediaInfo,
+      correctionState.kind, currentMedia.episodeRoute);
+    var results = await trakt.searchCorrectionCandidates(mediaForSearch, resolvedQuery, 8);
     if (mediaKey !== currentMediaKey()) {
       return;
     }
@@ -939,7 +968,9 @@ async function lookupCorrectionReference(reference) {
   queueSidebarRefresh(false);
 
   try {
-    var result = await trakt.lookupCorrectionReference(currentMedia.mediaInfo, resolvedReference);
+    var mediaForLookup = correctionMedia.searchMedia(currentMedia.mediaInfo,
+      correctionState.kind, currentMedia.episodeRoute);
+    var result = await trakt.lookupCorrectionReference(mediaForLookup, resolvedReference);
     if (mediaKey !== currentMediaKey()) {
       return;
     }
@@ -986,24 +1017,7 @@ async function applyCorrectionChoice(traktId, season, episode) {
     return;
   }
 
-  var mediaInfo = cloneMediaInfo(currentMedia.mediaInfo);
-  if (mediaInfo.type === "episode") {
-    var chosenSeason = Number(season);
-    var chosenEpisode = Number(episode);
-    if (season === "" || episode === "" || !Number.isInteger(chosenSeason) ||
-        !Number.isInteger(chosenEpisode) || chosenSeason < 0 || chosenSeason > 100 ||
-        chosenEpisode < 1 || chosenEpisode > 9999) {
-      correctionState = Object.assign(cloneCorrectionState(correctionState), {
-        active: true, busy: false, error: "Enter a valid Season (0–100) and Episode (1–9999)."
-      });
-      queueSidebarRefresh(false);
-      return;
-    }
-    mediaInfo.season = chosenSeason;
-    mediaInfo.episode = chosenEpisode;
-    // Keep localized episode title for display, but do not use it as a show title.
-    mediaInfo.episodeTitle = mediaInfo.episodeTitle || "";
-  }
+  var originalMediaInfo = cloneMediaInfo(currentMedia.mediaInfo);
   var mediaKey = currentMediaKey();
   var chosenId = Number(traktId || 0);
   if (!chosenId) {
@@ -1021,15 +1035,10 @@ async function applyCorrectionChoice(traktId, season, episode) {
     var chosenResult = (correctionState.results || []).find(function(result) {
       return Number(result.trakt || 0) === chosenId;
     }) || null;
-    // Cache and playback use the same canonical title after manual selection.
-    if (chosenResult && chosenResult.title) {
-      mediaInfo.title = chosenResult.title;
-      if (mediaInfo.type === "episode") mediaInfo.showTitle = chosenResult.title;
-    }
-    if (mediaInfo.type === "episode") {
-      mediaInfo.unresolvedShow = false;
-      mediaInfo.manualTraktId = chosenId;
-    }
+    // Manual mode is authoritative even if the parser mistakenly guessed Movie.
+    // Require the selected candidate's kind to agree with the current search mode.
+    var mediaInfo = correctionMedia.selectMedia(originalMediaInfo,
+      correctionState.kind, chosenResult, season, episode);
     await trakt.applyMatchOverride(mediaInfo, chosenId);
     if (mediaKey !== currentMediaKey()) {
       return;
@@ -1042,7 +1051,7 @@ async function applyCorrectionChoice(traktId, season, episode) {
       // but never to a different torrent or season without new verification.
       if (currentMedia.episodeRoute && mediaInfo.type === "episode" &&
           chosenResult && chosenResult.title &&
-          chosenSeason === currentMedia.episodeRoute.season) {
+          mediaInfo.season === currentMedia.episodeRoute.season) {
         mediaFusionShowCache.remember(currentMedia.episodeRoute, chosenId, chosenResult.title);
       }
     }
