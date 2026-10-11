@@ -12,9 +12,11 @@ var freshIdentity = require("./fresh-identity.js");
 var resumeProtection = require("./resume-protection.js");
 var correctionMedia = require("./correction-media.js");
 var trakt = require("./trakt.js");
+var debugLogBuffer = require("./debug-log-buffer.js");
 var PLUGIN_VERSION = "0.2.5-beta.6";
 var DEBUG_LOG_PATH = "@data/debug.log";
 var MAX_DEBUG_LOG_CHARS = 200000;
+var DEBUG_LOG_FLUSH_INTERVAL_MS = 10000;
 var POLL_INTERVAL_MS = 2000;
 var UI_POLL_INTERVAL_MS = 2000;
 // Limit playback-position-triggered WebView refreshes; keep event transitions instant.
@@ -42,6 +44,11 @@ var lastScrobbleStatus = createScrobbleStatus();
 var correctionState = createCorrectionState();
 var stopJournal = stopJournalModule.create(file);
 var syncHistory = syncHistoryModule.create(file);
+var debugLog = debugLogBuffer.create(file, {
+  path: DEBUG_LOG_PATH,
+  maxChars: MAX_DEBUG_LOG_CHARS,
+  thresholdChars: 8192
+});
 var mediaFusionShowCache = mediaFusion.create(file);
 var activeStopSyncId = "";
 var syncQueueNotice = "";
@@ -102,15 +109,7 @@ trakt.configure({
 });
 
 function appendDebugLog(message) {
-  var line = "[" + new Date().toISOString() + "] " + message;
-  try {
-    var existing = file.exists(DEBUG_LOG_PATH) ? (file.read(DEBUG_LOG_PATH) || "") : "";
-    var next = existing + line + "\n";
-    if (next.length > MAX_DEBUG_LOG_CHARS) {
-      next = next.slice(next.length - MAX_DEBUG_LOG_CHARS);
-    }
-    file.write(DEBUG_LOG_PATH, next);
-  } catch (_error) {}
+  debugLog.append(message);
 }
 
 function log(message) {
@@ -2354,6 +2353,10 @@ persistAuthStatus();
 registerMenuItems();
 ensurePollTimer();
 ensureUiPollTimer();
+// Prevent a 200KB read+rewrite for every diagnostic line (on Mac field tests
+// this happened repeatedly within a single second).
+setInterval(function() { debugLog.flush(); }, DEBUG_LOG_FLUSH_INTERVAL_MS);
+debugLog.flush();
 replaySavedFinalizations();
 stopReplayTimer = setInterval(function() {
   void replaySavedFinalizations();
@@ -2395,11 +2398,18 @@ event.on("iina.window-will-close", wrapEvent("iina.window-will-close", function(
       playbackState.prevSnapshot = latest;
     }
   }
-  return finalizeCurrentMedia("window-will-close");
+  // Capture the current diagnostic batch before IINA starts teardown.
+  debugLog.flush();
+  return Promise.resolve(finalizeCurrentMedia("window-will-close")).finally(function() {
+    debugLog.flush();
+  });
 }));
 
 // Additional late safety net for IINA builds that skip the window lifecycle
 // event during process shutdown. The journal prevents loss across teardown.
 event.on("mpv.shutdown", wrapEvent("mpv.shutdown", function() {
-  return finalizeCurrentMedia("mpv.shutdown");
+  debugLog.flush();
+  return Promise.resolve(finalizeCurrentMedia("mpv.shutdown")).finally(function() {
+    debugLog.flush();
+  });
 }));
