@@ -98,4 +98,27 @@ function inspect(source, route) {
     source:"explicit-playback-id"
   };
 }
-module.exports={inspect:inspect,parseOne:parseOne};
+// A provider may supply an explicit series IMDb ID without S/E (e.g. Comet).
+// Fill only the missing episode position using a confidently parsed filename.
+// This is NOT proof of show identity: Trakt must still resolve the external ID,
+// match the parsed show title, and verify that the episode exists.
+function completeEpisodePosition(external, parsed) {
+  if(!external||external.conflict||external.kind!=="episode")return external;
+  if(!parsed||parsed.kind!=="episode"||parsed.unresolvedShow||
+      !Number.isInteger(parsed.season)||parsed.season<0||parsed.season>100||
+      !Number.isInteger(parsed.episode)||parsed.episode<1||parsed.episode>9999||
+      !String(parsed.showTitle||"").trim()||
+      /^unknown series$/i.test(String(parsed.showTitle||"").trim()))return external;
+  if((external.season!==null&&external.season!==parsed.season)||
+     (external.episode!==null&&external.episode!==parsed.episode))
+    return Object.assign({},external,{conflict:true,reason:"episode-position-mismatch"});
+  if(external.season!==null&&external.episode!==null)return external;
+  return Object.assign({},external,{
+    season:external.season===null?parsed.season:external.season,
+    episode:external.episode===null?parsed.episode:external.episode,
+    positionSource:"parsed-episode",
+    expectedShowTitle:String(parsed.showTitle).trim()
+  });
+}
+module.exports={inspect:inspect,parseOne:parseOne,
+  completeEpisodePosition:completeEpisodePosition};
