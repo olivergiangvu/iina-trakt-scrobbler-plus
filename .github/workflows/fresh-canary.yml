@@ -25,7 +25,7 @@ jobs:
           node - <<'NODE'
           const assert=require('node:assert/strict');
           const info=require('./Info.json');
-          assert.equal(info.version,'0.2.5-beta.2');
+          assert.equal(info.version,'0.2.5-beta.3');
           assert.equal(info.ghVersion,15);
           assert.equal(info.identifier,'io.github.olivergiangvu.iinatraktscrobblerplus');
           NODE
