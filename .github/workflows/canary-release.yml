@@ -26,8 +26,8 @@ jobs:
           const info = require('./Info.json');
           assert.equal(info.identifier, 'io.github.olivergiangvu.iinatraktscrobblerplus');
           assert.equal(info.ghRepo, 'olivergiangvu/iina-trakt-scrobbler-plus');
-          assert.equal(info.version, '0.2.4-beta.5');
-          assert.equal(info.ghVersion, 10);
+          assert.equal(info.version, '0.2.4-beta.6');
+          assert.equal(info.ghVersion, 11);
           NODE
 
       - name: Syntax and complete test suite
@@ -51,7 +51,7 @@ jobs:
         run: |
           set -euo pipefail
           STAGE="$(./scripts/stage-plugin.sh)"
-          ASSET="$GITHUB_WORKSPACE/Trakt-Scrobbler-Plus-v0.2.4-beta.5.iinaplgz"
+          ASSET="$GITHUB_WORKSPACE/Trakt-Scrobbler-Plus-v0.2.4-beta.6.iinaplgz"
           (
             cd "$STAGE"
             zip -q -r "$ASSET" .
@@ -69,18 +69,18 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          TAG="v0.2.4-beta.5"
+          TAG="v0.2.4-beta.6"
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "$TAG already exists; no destructive asset overwrite"
             exit 0
           fi
           cat > notes.md <<'NOTES'
-          # Trakt Scrobbler Plus v0.2.4-beta.5 — Sync Queue Canary
+          # Trakt Scrobbler Plus v0.2.4-beta.6 — Sync Queue Canary
 
           - Visible match provenance: Manual, IMDb, Trakt-confirmed, confirmed MediaFusion torrent cache, or unverified.
           - Legacy unmatched stops moved to Needs Review, not auto-replayed or silently deleted.
           - Verified final stops carry safe Trakt ID proof and are revalidated on retry.
-          - Individual two-step removal of unverified LOCAL queue items; Trakt history untouched.
+          - Fixed IINA Remove action: pointerdown / click / keyboard support with no double-send.\n          - Explicit Confirm remove / Cancel, wrapped labels, and success/error feedback.\n          - Unverified LOCAL stops may be removed during playback; Trakt history untouched.
           - Pending / Syncing / Recently Synced final-stop dashboard.
           - Reject incorrect high-scoring Trakt title matches (e.g. Strom ozvěny vs Gegen den Strom).
           - Redacted Copy Diagnostics button for MediaFusion / TorBox stream URLs.
