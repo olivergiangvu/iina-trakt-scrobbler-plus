@@ -150,3 +150,29 @@ applied. Confirmed MediaFusion torrent-season learning remains supported.
 
 **Beta testing:** Install the GitHub v0.2.4-beta.4 prerelease file manually
 on the Mac; v0.2.3 remains the Latest Stable release.
+
+### v0.2.4-beta.5 — Provenance & Queue Integrity
+
+**Safety update after real user tests:** local beta.4 had two unverified
+stops (`Strom OzvěNy` as a movie and `Unknown Series S02E08`).
+These and other legacy checkpoints without trusted evidence now appear under
+**Needs Review**. They are retained on disk and **never auto-sent**.
+Each may be removed locally only via a deliberate two-click confirmation.
+Removal does not delete Trakt history or watched data.
+
+**New durable stop checkpoints** are persisted for automatic recovery only
+with an explicitly confirmed manual Trakt ID, a valid IMDb ID or a Trakt
+identity confirmed by a prior successful request. For older filename-only
+metadata, live playback still uses the existing Trakt resolver, but will not
+durably replay an unproven final stop on network failure. This deliberately
+favours avoiding wrong historical writes over maximum offline retry coverage.
+
+The sidebar shows **Match source**: Direct IMDb ID, Manual Confirmed,
+Confirmed Pack Cache, Trakt Verified or Unverified / Needs Manual Match.
+On a proof-backed retry, Trakt show S/E or movie identity is validated
+before sending progress. Invalid proofs move to Needs Review.
+
+**Beta install:** download the v0.2.4-beta.5 .iinaplgz prerelease asset,
+open with IINA on Mac, restart. The latest stable v0.2.3 and the independent
+HomeDocker Trakt Bridge are not changed. Test normal pause/stop, quit/resume,
+confirmed-pack source label and Needs Review. Do not promote until user confirms.
