@@ -51,7 +51,13 @@ function create(file, options) {
     for (var i = entries.length - 1; i >= 0; i--) {
       var entry = entries[i], key = keyFor(entry.mediaInfo);
       // Never replace a valid checkpoint with an unsafe one for the same item.
-      if (seen[key]) continue;
+      if (seen[key]) {
+        // Prefer a previously verified stop to newer unverifiable legacy data.
+        var existing=out.findIndex(function(x){return keyFor(x.mediaInfo)===key;});
+        if (existing>=0 && !isReplayable(out[existing]) && isReplayable(entry))
+          out[existing]=entry;
+        continue;
+      }
       seen[key] = true;
       out.unshift(entry);
     }
@@ -104,6 +110,16 @@ function create(file, options) {
   function acknowledge(id) {
     return !!id && save(load().filter(function(x){return x.id !== id;}));
   }
+  function markReview(id, reason) {
+    var items=load(), found=false;
+    items.forEach(function(x) {
+      if (x.id!==id || !isReplayable(x)) return;
+      x.replayProof=null;
+      x.reviewReason=String(reason||"Trakt could not verify identity").slice(0,100);
+      found=true;
+    });
+    return found && save(items);
+  }
   function discardReview(id) {
     var original = find(id);
     if (!original || isReplayable(original)) return false;
@@ -111,7 +127,7 @@ function create(file, options) {
   }
   return {
     pending:pending, review:review, find:find, record:record,
-    acknowledge:acknowledge, discardReview:discardReview,
+    acknowledge:acknowledge, discardReview:discardReview, markReview:markReview,
     isReplayable:isReplayable
   };
 }
