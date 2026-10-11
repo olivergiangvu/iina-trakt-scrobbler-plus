@@ -1,15 +1,13 @@
 {
-  "name": "Episode Info",
-  "identifier": "com.Zain-Imam.episodeinfo",
-  "version": "1.3.3",
-  "ghRepo": "Zain-Imam/iina-episode-info",
-  "ghVersion": 8,
+  "name": "Episode Info Plus",
+  "identifier": "io.github.olivergiangvu.iinaepisodeinfoplus",
+  "version": "0.1.0-beta.1",
   "author": {
-    "name": "Zain Imam",
-    "url": "https://github.com/Zain-Imam"
+    "name": "Oliver Giang Vu (upstream Zain Imam)",
+    "url": "https://github.com/olivergiangvu"
   },
   "entry": "main.js",
-  "description": "Episode/movie info overlay on pause. Subtitle search, recent picks, and skip intro.",
+  "description": "Episode metadata with offline-first stream identification, TMDB enrichment and adaptive Light/Dark appearance.",
   "permissions": [
     "show-osd",
     "video-overlay",
@@ -33,6 +31,6 @@
     "localhost"
   ],
   "sidebarTab": {
-    "name": "Episode Info"
+    "name": "Episode Info+"
   }
 }

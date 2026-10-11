@@ -1,3 +1,13 @@
+# Episode Info Plus — Beta 0.1.0
+
+Staging derivative of [Zain-Imam/iina-episode-info](https://github.com/Zain-Imam/iina-episode-info). Upstream MIT license and attribution retained. Matching philosophy adapted independently from [Trakt Scrobbler Plus v0.2.5](https://github.com/olivergiangvu/iina-trakt-scrobbler-plus).
+
+Changes: explicit IMDb/TMDB ID and Comet/Stremio route conflict checks; fast **provisional** filename + ID identification without TMDB; asynchronous TMDB enrichment that never clears a provisional result on timeout; macOS light/dark adaptive overlay and sidebar. Manual corrections must take priority. IMDb in an URL alone does *not* prove ownership of a title: until TMDB responds, the result is shown as provisional, not verified.
+
+This is a staging branch in the Trakt+ Git repository, **not yet a GitHub fork repository**. The plugin identifier differs from both upstream Episode Info and Trakt+. Manifest auto-updates are intentionally disabled to avoid referencing the unrelated Trakt+ default branch. Retains subtitle and skip functionality of upstream.
+
+---
+
 <div align="center">
 
 # Episode Info — IINA Plugin
