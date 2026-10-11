@@ -2112,6 +2112,9 @@ async function scrobble(verb, mediaInfo, progress) {
 	return {
 		ok: true,
 		verb: requestVerb,
+		// Resolved by Trakt before POST; not inferred from filename or user-supplied labels.
+		resolvedTraktId: Number(payload.show && payload.show.ids && payload.show.ids.trakt ||
+			payload.movie && payload.movie.ids && payload.movie.ids.trakt || 0),
 		action:
 			response.body && response.body.action
 				? String(response.body.action)
