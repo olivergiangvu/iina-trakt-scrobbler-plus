@@ -50,6 +50,8 @@ jobs:
         run: node tests/fresh-identity.js
       - name: Trakt Fresh ID lookup verification
         run: node tests/fresh-trakt-resolution.js
+      - name: First-playback async identity and UI contract
+        run: node tests/fresh-integration-contract.js
       - name: Parser smoke tests
         run: node tests/parser-smoke.js
       - name: Trakt resolution tests
