@@ -91,5 +91,32 @@ const episode={title:"The Echo Tree",season:2,number:8};
   });
   assert.equal(await s.trakt.resolveFreshIdentity({kind:"episode",tmdb:135934,season:2,episode:8}),null,
     "Trakt missing TMDB mapping never falls back to text-title guess");
+  // Real-world Comet regression: the URL contains a series IMDb ID while
+  // a separate readable filename provides S/E. Still verify both on Trakt.
+  const fresh=require("../fresh-identity.js");
+  const coordinated=fresh.coordinateEpisode(
+    {conflict:false,kind:"episode",imdb:"tt3032476",tmdb:0,season:null,episode:null},
+    {kind:"episode",showTitle:"Better Call Saul",season:3,episode:3});
+  assert.equal(coordinated.conflict,false);
+  const betterCallSaul={title:"Better Call Saul",year:2015,
+    ids:{trakt:3032,imdb:"tt3032476",tmdb:60059}};
+  s=setup(url=>{
+    if(url.pathname==="/shows/tt3032476")
+      return {statusCode:200,body:betterCallSaul};
+    if(url.pathname==="/shows/3032/seasons/3/episodes/3")
+      return {statusCode:200,body:{title:"Sunk Costs",season:3,number:3}};
+    throw Error("Unexpected Comet mock call "+url.pathname);
+  });
+  resolved=await s.trakt.resolveFreshIdentity(coordinated.external);
+  assert.equal(resolved.kind,"episode");
+  assert.equal(resolved.imdb,"tt3032476");
+  assert.equal(resolved.season,3);
+  assert.equal(resolved.episode,3);
+  assert.equal(resolved.title,"Better Call Saul");
+  assert.ok(fresh.titlesAgree(coordinated.external.expectedShowTitle,resolved.title));
+  assert.equal(s.calls.length,2,"exact show + episode verification, no title search");
+  assert.equal(fresh.titlesAgree("Better Call Saul","Breaking Bad"),false,
+    "Wrong IMDb show must never unlock scrobbling");
+
   console.log("Fresh external ID verification and fail-closed regression tests PASS");
 })().catch(e=>{console.error(e);process.exitCode=1;});
