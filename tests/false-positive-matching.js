@@ -79,5 +79,26 @@ function setup(initial, handler) {
   assert.deepEqual(JSON.parse(manual.store[CACHE_PATH]).movie["strom ozvěny|"],
     {trakt:900,manual:true});
 
+
+  const noShow=setup({},url=>{throw Error("No lookup should occur: "+url.pathname);});
+  const unresolvedEpisode={type:"episode",title:"Unknown Series",
+    showTitle:"Unknown Series",season:2,episode:8,episodeTitle:"Strom ozvěny",
+    unresolvedShow:true};
+  assert.equal(await noShow.trakt.getTraktIds(unresolvedEpisode),null,
+    "Season/episode alone must not identify a show");
+  assert.equal(noShow.paths.length,0,"unresolved episode must not hit Trakt");
+
+  const learned=setup({},url=>{
+    if(url.pathname==="/shows/4242/seasons/2/episodes/8")return {
+      statusCode:200,body:{title:"The Echo Tree",season:2,number:8}
+    };
+    throw Error("Unexpected API "+url.pathname);
+  });
+  const trusted={...unresolvedEpisode,title:"The Legend of Vox Machina",
+    showTitle:"The Legend of Vox Machina",unresolvedShow:false,manualTraktId:4242};
+  assert.deepEqual(await learned.trakt.getTraktIds(trusted),{trakt:4242});
+  assert.deepEqual(await learned.trakt.getTraktIds(trusted),{trakt:4242});
+  assert.equal(learned.paths.length,1,"verified pack episode should be cached");
+
   console.log("false-positive matching guard tests passed");
 })().catch(err=>{console.error(err);process.exitCode=1;});
