@@ -21,4 +21,34 @@ assert.equal(fresh.inspect({path:"https://x.test/playback/tt11247158/2/8"},route
 assert.equal(fresh.inspect({path:"https://x.test/a?token=tt11247158"},route),null,
  "not trust a token that resembles imdb id");
 assert.ok(!JSON.stringify(x).includes("127.0.0.1"));
+// Comet stream exposes correct series IMDb ID, but S/E only in filename.
+const comet="https://comet.feels.legal/example/playback/opaque/0/1/3/3"+
+  "?torrent_name=Better.Call.Saul.S03E03.2160p.mkv&media_id=tt3032476&media_type=series";
+const cometId=fresh.inspect({path:comet,url:comet},null);
+assert.equal(cometId.imdb,"tt3032476");
+assert.equal(cometId.season,null);
+assert.equal(cometId.episode,null);
+const episode={kind:"episode",showTitle:"Better Call Saul",season:3,episode:3};
+const completed=fresh.completeEpisodePosition(cometId,episode);
+assert.equal(completed.conflict,false,"missing provider S/E is not an ID conflict");
+assert.equal(completed.season,3);
+assert.equal(completed.episode,3);
+assert.equal(completed.expectedShowTitle,"Better Call Saul");
+assert.equal(completed.positionSource,"parsed-episode");
+assert.equal(completed.imdb,"tt3032476");
+assert.equal(fresh.completeEpisodePosition(cometId,{kind:"movie",title:"Sunk Costs"}),cometId,
+  "never invent S/E from movie title");
+assert.equal(fresh.completeEpisodePosition(cometId,{kind:"episode",unresolvedShow:true,
+  showTitle:"Unknown Series",season:3,episode:3}),cometId,
+  "unresolved localized series is not proof");
+const explicit=fresh.inspect({path:comet+"&season=3&episode=4"},null);
+assert.equal(fresh.completeEpisodePosition(explicit,episode).conflict,true,
+  "explicit provider position mismatch must fail closed");
+assert.equal(fresh.completeEpisodePosition({
+  conflict:true,kind:"episode",imdb:"tt3032476",season:null,episode:null},episode).conflict,true,
+  "never override contradictory external IDs");
+assert.equal(fresh.completeEpisodePosition({
+  conflict:false,kind:"episode",imdb:"tt3032476",season:3,episode:3},episode).positionSource,
+  undefined,"keep already-proven provider S/E unchanged");
+
 console.log("fresh trusted ID extraction tests PASS");
