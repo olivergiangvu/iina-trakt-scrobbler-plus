@@ -26,7 +26,7 @@ jobs:
           const assert=require('node:assert/strict');
           const info=require('./Info.json');
           assert.equal(info.version,'0.2.5-beta.2');
-          assert.equal(info.ghVersion,14);
+          assert.equal(info.ghVersion,15);
           assert.equal(info.identifier,'io.github.olivergiangvu.iinatraktscrobblerplus');
           NODE
       - name: Syntax and full regression suite
@@ -45,7 +45,7 @@ jobs:
         run: |
           set -euo pipefail
           STAGE="$(./scripts/stage-plugin.sh)"
-          ASSET="$GITHUB_WORKSPACE/Trakt-Scrobbler-Plus-v0.2.5-beta.2.iinaplgz"
+          ASSET="$GITHUB_WORKSPACE/Trakt-Scrobbler-Plus-v0.2.5-beta.3.iinaplgz"
           (cd "$STAGE" && zip -q -r "$ASSET" .)
           unzip -t "$ASSET" >/dev/null
           for p in Info.json main.js trakt.js sidebar.html fresh-identity.js resume-protection.js playback-identity.js playback-diagnostics.js mediafusion-identity.js correction-media.js stop-journal.js sync-history.js trakt-api-gate.js parser.iina.js; do
@@ -58,13 +58,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          TAG="v0.2.5-beta.2"
+          TAG="v0.2.5-beta.3"
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "$TAG already exists; not overwriting"
             exit 0
           fi
           cat > notes.md <<'NOTES'
-          # v0.2.5-beta.2 — Fresh External-ID Auto Recognition
+          # v0.2.5-beta.3 — Fresh External-ID Auto Recognition
 
           - Hotfix: read remote Trakt resume before sending ANY scrobble event
             (start/pause/stop). If IINA starts behind an existing checkpoint,
@@ -72,6 +72,10 @@ jobs:
             clicks Resume from saved Trakt position.
           - Trakt GET failures fail closed, not treated as an empty resume.
           - Previously queued stop retries must not overwrite newer progress.
+          - Fix DMM player labels containing 98800072:1?h=...&file=...
+            so the real file name is used to identify the series and episode.
+          - Copy Diagnostics redacts DMM torrent hashes from player.filename,
+            title, metadata, and recognized fields.
           - IMDb/TMDB or Stremio ID-bearing links can automatically resolve a new
             show/movie on the first playback, with exact TV S/E validation.
           - Conflicting IDs or missing Trakt reference produce no auto-scrobble.
