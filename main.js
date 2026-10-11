@@ -10,7 +10,7 @@ var playbackDiagnostics = require("./playback-diagnostics.js");
 var mediaFusion = require("./mediafusion-identity.js");
 var correctionMedia = require("./correction-media.js");
 var trakt = require("./trakt.js");
-var PLUGIN_VERSION = "0.2.4-beta.4";
+var PLUGIN_VERSION = "0.2.4-beta.5";
 var DEBUG_LOG_PATH = "@data/debug.log";
 var MAX_DEBUG_LOG_CHARS = 200000;
 var POLL_INTERVAL_MS = 2000;
@@ -40,6 +40,7 @@ var syncHistory = syncHistoryModule.create(file);
 var mediaFusionShowCache = mediaFusion.create(file);
 var activeStopSyncId = "";
 var syncQueueNotice = "";
+var confirmedPlayback = {key:"",proof:null};
 
 function createPlaybackState() {
   return {
@@ -413,8 +414,31 @@ function buildSidebarPlayback() {
     duration: snapshot ? snapshot.duration : 0,
     preview: !!playbackState.preview,
     fastPause: !!playbackState.fastPause,
+    matchProvenance: determineMatchProvenance(),
     identifiedAt: currentMedia ? currentMedia.identifiedAt : ""
   };
+}
+
+function determineMatchProvenance() {
+  if (!currentMedia || !currentMedia.mediaInfo) return {code:"unknown",label:"Unidentified"};
+  var info=currentMedia.mediaInfo;
+  var source=String(currentMedia.parsed && currentMedia.parsed.parserSource || "");
+  if (info.unresolvedShow) return {code:"needs-manual",label:"Needs Manual Match"};
+  if (source==="mediafusion-confirmed-pack") return {code:"confirmed-pack",label:"Confirmed Pack Cache"};
+  if (currentMedia.manuallyCorrected) return {code:"manual",label:"Manual Confirmed"};
+  if (/^tt\d{6,10}$/i.test(String(info.imdb||""))) return {code:"imdb",label:"Direct IMDb ID"};
+  if (confirmedPlayback.key===monitor.mediaKey(info)) return {code:"trakt-confirmed",label:"Trakt Verified"};
+  if (/^(?:mpv-|filename|stream-)/i.test(source)) return {code:"filename",label:"Filename / Metadata (unverified)"};
+  return {code:"unverified",label:"Unverified Metadata"};
+}
+function trustedReplayProof(info) {
+  if (!info || info.unresolvedShow) return null;
+  var id=Number(info.manualTraktId||0);
+  if (Number.isInteger(id)&&id>0) return {kind:"manual",traktId:id};
+  if (/^tt\d{6,10}$/i.test(String(info.imdb||""))) return {kind:"imdb",imdb:info.imdb};
+  if (confirmedPlayback.key===monitor.mediaKey(info)&&confirmedPlayback.proof)
+    return confirmedPlayback.proof;
+  return null;
 }
 
 function isSyncReplayPlaybackActive() {
@@ -435,8 +459,16 @@ function buildSyncQueueStatus() {
       syncing: entry.id === activeStopSyncId
     };
   });
+  var needsReview=stopJournal.review().map(function(entry) {
+    return {id:entry.id,label:mediaLabel(entry.mediaInfo),progress:entry.progress,
+      queuedAt:new Date(entry.createdAt).toISOString(),
+      reason:entry.mediaInfo && (entry.mediaInfo.unresolvedShow ||
+        /^unknown series$/i.test(String(entry.mediaInfo.showTitle||"")))
+        ? "Missing verified series" : "Legacy checkpoint: match unverified"};
+  });
   return {
     pending: pending,
+    needsReview: needsReview,
     recentlySynced: syncHistory.recent(),
     flushing: !!stopReplayActive,
     activeSyncId: activeStopSyncId,
@@ -608,6 +640,17 @@ function bindSidebarMessaging() {
         sidebar.postMessage("diagnostics_copy_status", {ok:false, message:"Clipboard unavailable."});
       }
     })();
+  });
+
+  sidebar.onMessage("discard_unverified_stop", function(payload) {
+    var id=payload&&typeof payload.id==="string"?payload.id:"";
+    if (!id || stopReplayActive || activeStopSyncId) return;
+    if (!stopJournal.review().some(function(x){return x.id===id;})) return;
+    if (stopJournal.discardReview(id)) {
+      syncQueueNotice="Unverified checkpoint removed from local queue.";
+      log("Removed one unverified stop after explicit UI confirmation");
+      queueSidebarRefresh(false);
+    }
   });
 
   sidebar.onMessage("retry_pending_stops", function() {
@@ -1046,6 +1089,7 @@ async function applyCorrectionChoice(traktId, season, episode) {
 
     if (currentMedia) {
       currentMedia.mediaInfo = mediaInfo;
+      currentMedia.manuallyCorrected = true;
       currentMedia.traktTargetLabel = correctionResultLabel(chosenResult, mediaInfo);
       // An explicit show selection can safely apply to the same torrent/season
       // but never to a different torrent or season without new verification.
@@ -1343,6 +1387,7 @@ function identifyCurrentMedia() {
     parsed: parsed,
     episodeRoute: episodeRoute,
     mediaInfo: mediaInfo,
+    manuallyCorrected: false,
     traktTargetLabel: "",
     identifiedAt: new Date().toISOString()
   } : null;
@@ -1527,10 +1572,15 @@ function queueScrobble(verb, snapshot, options) {
   }
 
   var payload = cloneSnapshot(snapshot);
-  if (!payload || !payload.mediaInfo) {
+  if (!payload || !payload.mediaInfo) return;
+  if (payload.mediaInfo.unresolvedShow ||
+      (payload.mediaInfo.type==="episode" &&
+       /^unknown series$/i.test(String(payload.mediaInfo.showTitle||"")))) {
+    setScrobbleStatus({status:"unmatched",verb:verb,mediaLabel:scrobbleTargetLabel(payload),
+      detail:"Select and verify the series using Correct Match before scrobbling.",
+      reason:"missing-trakt-match",progress:payload.progress});
     return;
   }
-
   var effectiveVerb = (trakt && typeof trakt.normalizeScrobbleVerb === "function")
     ? trakt.normalizeScrobbleVerb(verb, payload.progress)
     : verb;
@@ -1550,10 +1600,10 @@ function queueScrobble(verb, snapshot, options) {
   // An acknowledged Trakt stop removes it. Do not include stream URLs or OAuth data.
   var journalId = options && options.journalId ? String(options.journalId) : "";
   if (effectiveVerb === "stop" && !journalId) {
-    var savedFinalization = stopJournal.record(payload);
+    var savedFinalization = stopJournal.record(payload, trustedReplayProof(payload.mediaInfo));
     journalId = savedFinalization ? savedFinalization.id : "";
     if (savedFinalization) log("Saved Trakt stop checkpoint (progress=" + payload.progress.toFixed(2) + "%)");
-    else log("Unable to persist Trakt stop checkpoint; attempting direct send");
+    else log("No verified identity for durable stop; attempting direct Trakt validation without unsafe retry");
   }
   setScrobbleStatus({
     status: "queued",
@@ -1587,9 +1637,14 @@ function queueScrobble(verb, snapshot, options) {
       var result = await trakt.scrobble(effectiveVerb, payload.mediaInfo, payload.progress);
       if (result && result.ok) {
         if (journalId) {
-          var completed = stopJournal.pending().find(function(item) { return item.id === journalId; });
+          var completed = stopJournal.find(journalId);
           stopJournal.acknowledge(journalId);
           if (completed) syncHistory.record(completed, "ok");
+        }
+        var confirmedId=Number(result.resolvedTraktId||0);
+        if (Number.isInteger(confirmedId)&&confirmedId>0) {
+          confirmedPlayback={key:monitor.mediaKey(payload.mediaInfo),
+            proof:{kind:"trakt-confirmed",traktId:confirmedId}};
         }
         var traktAction = successfulScrobbleAction(effectiveVerb, result);
         var traktProgress = successfulScrobbleProgress(payload.progress, result);
@@ -1652,7 +1707,7 @@ function queueScrobble(verb, snapshot, options) {
       if (result && result.duplicate) {
         // Trakt 409 already recorded an identical scrobble; do not replay it.
         if (journalId) {
-          var duplicate = stopJournal.pending().find(function(item) { return item.id === journalId; });
+          var duplicate = stopJournal.find(journalId);
           stopJournal.acknowledge(journalId);
           if (duplicate) syncHistory.record(duplicate, "duplicate");
         }
@@ -1742,13 +1797,17 @@ async function replaySavedFinalizations() {
       if (currentMedia && playbackState.prevSnapshot &&
           playbackState.prevSnapshot.state !== monitor.State.Stopped) break;
       var entry = pending[i];
+      var replayInfo=cloneMediaInfo(entry.mediaInfo);
+      if (entry.replayProof && (entry.replayProof.kind==="manual" ||
+          entry.replayProof.kind==="trakt-confirmed"))
+        replayInfo.manualTraktId=Number(entry.replayProof.traktId||0);
       queueScrobble("stop", {
         state: monitor.State.Stopped,
         progress: entry.progress,
         duration: 0,
         position: 0,
         updatedAt: entry.createdAt / 1000,
-        mediaInfo: entry.mediaInfo,
+        mediaInfo: replayInfo,
         traktTargetLabel: ""
       }, { journalId: entry.id });
       await playbackState.scrobbleChain;
