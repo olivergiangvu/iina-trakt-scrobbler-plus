@@ -34,4 +34,21 @@ function create() {
   function snapshot(){return Object.assign({},state);}
   return {update:update,decision:decision,snapshot:snapshot};
 }
-module.exports={create:create,assess:assess};
+// A missing resume gate does not necessarily mean an in-flight Trakt request.
+// Some identities deliberately never begin the preflight until manually matched.
+function pendingIdentityStatus(mediaInfo,freshState) {
+  if(freshState==="resolving")
+    return {status:"verifying-id",
+      message:"Verifying external media ID before checking Trakt resume."};
+  if(freshState==="conflict"||freshState==="rejected")
+    return {status:"needs-match",
+      message:"External media ID needs verification. Use Correct Match to continue."};
+  if(!mediaInfo||mediaInfo.unresolvedShow||
+      (mediaInfo.type==="episode"&&
+       /^unknown series$/i.test(String(mediaInfo.showTitle||""))))
+    return {status:"needs-match",
+      message:"Series identity is not verified. Use Correct Match to enable Trakt sync."};
+  return {status:"checking",
+    message:"Checking Trakt resume before sending playback…"};
+}
+module.exports={create:create,assess:assess,pendingIdentityStatus:pendingIdentityStatus};
