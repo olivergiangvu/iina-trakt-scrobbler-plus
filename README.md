@@ -89,3 +89,20 @@ No Terminal, SSH, HomeDocker stack edits or bridge changes are needed.
 **Validation plan:** IINA sidebar should show Pending and Recently Synced,
 Retry Now should be disabled when the API is rate limited or the player is active,
 and quit/resume progress should still flow through the existing Trakt Bridge.
+
+### v0.2.4-beta.2 — False-positive matching protection
+
+The first v0.2.4 canary exposed a pre-existing bug in title-only matching:
+Trakt's top result could be accepted despite a completely unrelated title.
+The v0.2.4-beta.2 canary requires canonical title equivalence for title-only
+movie matches (folds accents/case), revalidates old numeric match caches,
+and still allows explicit manual selection or confirmed IMDb matching.
+
+In the Trakt+ sidebar, use **Playback Diagnostics → Copy Diagnostics**
+to copy a **redacted** JSON record of the current IINA stream. It includes
+filename, metadata titles, host, URL path shape, available IMDb IDs and
+parameter **names**, not auth values, stream tokens, or bearer URLs.
+For two problematic playback links, start each briefly and copy diagnostics
+separately. Never publish complete signed MediaFusion/TorBox URLs.
+
+This is a canary only; main stays at v0.2.3 stable.
