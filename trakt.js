@@ -1913,6 +1913,42 @@ async function resolveFreshIdentity(external) {
   return result;
 }
 
+// READ-ONLY preflight. A missing checkpoint is distinct from network failure.
+// Result is tied to exact Trakt movie ID or show ID + season/episode, never
+// to an episode title or the filename. No remote sync modifications.
+async function getResumeCheckpoint(mediaInfo) {
+  if (!mediaInfo || !["movie","episode"].includes(mediaInfo.type)) {
+    return {status:"unavailable",reason:"missing-media"};
+  }
+  var ids=await getTraktIds(mediaInfo);
+  var traktId=Number(ids&&ids.trakt||0);
+  if(!Number.isInteger(traktId)||traktId<=0)
+    return {status:"unavailable",reason:"unverified-id"};
+  var isEpisode=mediaInfo.type==="episode";
+  var response=await authedRequest("GET",
+    isEpisode?"/sync/playback/episodes":"/sync/playback/movies");
+  if(response.statusCode!==200||!Array.isArray(response.body))
+    return {status:"unavailable",reason:"Trakt resume GET "+response.statusCode};
+  var matches=response.body.filter(function(entry){
+    if(!entry||typeof entry!=="object")return false;
+    if(isEpisode){
+      var showId=Number(entry.show&&entry.show.ids&&entry.show.ids.trakt||0);
+      var ep=entry.episode||{};
+      return showId===traktId &&
+        Number(ep.season)===Number(mediaInfo.season) &&
+        Number(ep.number)===Number(mediaInfo.episode);
+    }
+    return Number(entry.movie&&entry.movie.ids&&entry.movie.ids.trakt||0)===traktId;
+  });
+  if(!matches.length)return {status:"ok",progress:null,traktId:traktId};
+  var progress=matches.map(function(x){return Number(x.progress);});
+  if(progress.some(function(x){return !Number.isFinite(x)||x<0||x>100;}))
+    return {status:"unavailable",reason:"invalid-resume-progress"};
+  // Take greatest remaining playback checkpoint to prevent regressions when
+  // Trakt contains multiple entries for the same show+episode.
+  return {status:"ok",progress:Math.max.apply(Math,progress),traktId:traktId};
+}
+
 async function getTraktIds(mediaInfo) {
 	var type = mediaInfo && mediaInfo.type;
 	if (type !== "movie" && type !== "episode") {
@@ -2227,6 +2263,7 @@ module.exports = {
 	usingEmbeddedCredentials: usingEmbeddedCredentials,
 	ensureAccessToken: ensureAccessToken,
 	getTraktIds: getTraktIds,
+	getResumeCheckpoint: getResumeCheckpoint,
 	resolveFreshIdentity: resolveFreshIdentity,
 	normalizeScrobbleVerb: normalizeScrobbleVerb,
 	prepareScrobblePayload: prepareScrobblePayload,
