@@ -6,6 +6,9 @@ function isOpaque(value) {
   var text = String(value || "").trim();
   if (!text) return true;
   if (/^https?:\/\//i.test(text)) return true;
+  // DMM/mpv can report an opaque playback ID followed by ?h=...&file=...
+  // as the "filename". Never parse that whole query into a show title.
+  if (/[?&](?:h|hash|infohash|file|filename|torrent_name|token)=/i.test(text)) return true;
   if (/^eyJ[A-Za-z0-9_-]{20,}/.test(text)) return true;
   // Encoded streaming path token followed by a fabricated SxxExx marker.
   var prefix = text.split(/\s+S\d{1,2}E\d{1,4}\b/i)[0];
@@ -15,7 +18,7 @@ function isOpaque(value) {
 
 function identify(source, parser, streamSource) {
   var hints = source || {};
-  var urls = [hints.path, hints.url, hints.title, hints.mediaTitle].filter(Boolean);
+  var urls = [hints.path, hints.url, hints.filename, hints.title, hints.mediaTitle].filter(Boolean);
   var stream = { name: "", imdb: "", nameSource: "" };
   var episodeRoute = mediaFusion.fromSource(hints);
 
@@ -28,8 +31,8 @@ function identify(source, parser, streamSource) {
     if (!stream.imdb && entry.imdb) stream.imdb = entry.imdb;
   });
 
-  // mpv metadata title and filename are the same hints used successfully
-  // by other IINA integrations. Prefer them over encoded playback paths.
+  // Prefer a verified readable media title. Opaque mpv labels containing
+  // debrid query strings are ignored; stream-file then supplies the filename.
   var candidates = [
     ["mpv-metadata-title", hints.metadataTitle],
     ["mpv-filename", hints.filename],
