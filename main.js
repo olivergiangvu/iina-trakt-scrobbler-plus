@@ -12,7 +12,7 @@ var freshIdentity = require("./fresh-identity.js");
 var resumeProtection = require("./resume-protection.js");
 var correctionMedia = require("./correction-media.js");
 var trakt = require("./trakt.js");
-var PLUGIN_VERSION = "0.2.5-beta.5";
+var PLUGIN_VERSION = "0.2.5-beta.6";
 var DEBUG_LOG_PATH = "@data/debug.log";
 var MAX_DEBUG_LOG_CHARS = 200000;
 var POLL_INTERVAL_MS = 2000;
@@ -1488,6 +1488,19 @@ async function verifyFreshPlayback(target,external) {
       queueSidebarRefresh(false);
       return;
     }
+    // A partial series ID used filename S/E only as a candidate. Trakt must
+    // confirm that the show identity agrees with that independently parsed title.
+    // A valid S/E on a *different* IMDb show is NOT proof of the correct show.
+    if (external.expectedShowTitle &&
+        (resolved.kind!=="episode" ||
+         !freshIdentity.titlesAgree(external.expectedShowTitle,resolved.title))) {
+      target.freshState="rejected";
+      setScrobbleStatus({status:"unmatched",mediaLabel:mediaLabel(target.mediaInfo),
+        detail:"IMDb series does not match the parsed show title. Use Correct Match.",
+        reason:"missing-trakt-match"});
+      queueSidebarRefresh(false);
+      return;
+    }
     var info=target.mediaInfo,parsed=target.parsed;
     if (resolved.kind==="episode") {
       info.type="episode";
@@ -1546,6 +1559,13 @@ function identifyCurrentMedia() {
       parsed.parserSource = "mediafusion-confirmed-pack";
     }
   }
+  // A series-level IMDb/TMDB ID often omits S/E (e.g. Comet query links).
+  // Combine it with independently parsed, readable S/E only provisionally;
+  // Trakt must verify the series title and that exact episode exists.
+  var coordinated=freshIdentity.coordinateEpisode(external,parsed);
+  if(coordinated.conflict && external && !external.conflict)
+    external=Object.assign({},external,{conflict:true});
+  else external=coordinated.external;
   // On a fresh external ID, the parser's localized metadata is not proof
   // of a series. Hold playback until Trakt resolves and verifies the episode.
   var freshPending=false;
@@ -1570,8 +1590,8 @@ function identifyCurrentMedia() {
     freshPending=true;
     parsed.parserSource="explicit-playback-id-pending";
   } else if(external && !external.conflict) {
-    // A show ID without S/E, or a conflict with parsed media type,
-    // must not accidentally fall back to unrelated movie title search.
+    // Missing trustworthy S/E or a conflict with parsed media type must
+    // not accidentally fall back to an unrelated title search.
     freshConflict=true;
   }
   if(freshConflict && parsed) {
