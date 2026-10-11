@@ -131,3 +131,22 @@ pre-filled) -> confirm and resume. Verify Trakt and downstream bridge
 progress before marking this canary stable.
 
 **v0.2.3 remains stable; beta releases are manual installs on Mac.**
+
+### v0.2.4-beta.4 — Manual Search type override
+
+With some local-language MediaFusion playback titles, IINA can only
+observe the localized episode name and may parse it as a movie. The Manual
+Match UI formerly inherited that guessed media type, making TV series
+impossible to search and hiding Season/Episode controls.
+
+Manual Match now includes an explicit **TV Series / Episode** versus **Movie**
+selector. Switching types clears stale results, routes Trakt searches and ID
+lookups through the correct API resource, and shows editable Season/Episode
+independently of the original parser decision. Structured MediaFusion
+season/episode values prefill the form. Applying a TV selection converts
+the current media identity from the guessed movie to an episode after Trakt
+validates the specified show and S/E. A mismatched result type cannot be
+applied. Confirmed MediaFusion torrent-season learning remains supported.
+
+**Beta testing:** Install the GitHub v0.2.4-beta.4 prerelease file manually
+on the Mac; v0.2.3 remains the Latest Stable release.
