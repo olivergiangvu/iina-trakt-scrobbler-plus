@@ -883,6 +883,14 @@
         <div id="correction-open" class="correction-open" hidden>
           <p id="correction-current" class="correction-current">Current match</p>
           <div class="correction-query-row">
+            <label style="font-size:12px;flex:1;min-width:0">Search type
+              <select id="correction-kind" class="text-input" aria-label="Search media type">
+                <option value="episode">TV Series / Episode</option>
+                <option value="movie">Movie</option>
+              </select>
+            </label>
+          </div>
+          <div class="correction-query-row">
             <input id="correction-query" class="text-input" type="text" value="" placeholder="Search Trakt" spellcheck="false">
             <div class="correction-actions">
               <button id="correction-search-button" class="secondary" type="button">Search</button>
@@ -1614,6 +1622,7 @@
         var open = !!correction.active;
         var busy = !!correction.busy;
         var input = document.getElementById("correction-query");
+        var kindInput = document.getElementById("correction-kind");
         var referenceInput = document.getElementById("correction-reference");
         var seasonInput = document.getElementById("correction-season");
         var episodeInput = document.getElementById("correction-episode");
@@ -1640,6 +1649,7 @@
         setHidden("correction-open", !open);
         setText("correction-current", correction.mediaLabel ? ("Current: " + correction.mediaLabel) : "Current file");
 
+        if (kindInput) kindInput.value = correction.kind === "episode" ? "episode" : "movie";
         if (input && document.activeElement !== input) {
           input.value = correction.query || "";
         }
@@ -1647,8 +1657,7 @@
         if (referenceInput && document.activeElement !== referenceInput) {
           referenceInput.value = correction.reference || "";
         }
-        var episodeMode = !!(state.playback && state.playback.available &&
-          (correction.mediaLabel || "").match(/S\d+E\d+/i));
+        var episodeMode = correction.kind === "episode";
         setHidden("correction-episode-editor", !episodeMode);
         setHidden("correction-episode-help", !episodeMode);
         if (seasonInput && document.activeElement !== seasonInput) {
@@ -1853,6 +1862,17 @@
         render();
         send("copy_auth_code");
       });
+      var kindSelector = document.getElementById("correction-kind");
+      if (kindSelector) {
+        kindSelector.addEventListener("change", function() {
+          var kind = kindSelector.value === "episode" ? "episode" : "movie";
+          state.correction.kind = kind;
+          state.correction.results = [];
+          state.correction.error = "";
+          renderCorrection();
+          send("change_correction_kind", {kind:kind});
+        });
+      }
       bindLocalAction("correction-search-button", function () {
         var input = document.getElementById("correction-query");
         requestAction("search_correction", {
