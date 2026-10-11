@@ -1,8 +1,9 @@
 name: Publish v0.2.4 canary prerelease
 
+# Archived canary publishing workflow. Manual dispatch only; do not publish
+# old beta tags when preparing a stable release from the same branch.
 on:
-  push:
-    branches: ['feature/sync-queue-v0.2.4']
+  workflow_dispatch:
 
 permissions:
   contents: write
