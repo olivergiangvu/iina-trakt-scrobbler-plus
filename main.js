@@ -1,2415 +1,2043 @@
-const { core, event, file, preferences, utils, sidebar, menu } = iina;
+// IINA Plugin: Episode Info v1.3.3
 
-var parser = require("./parser.iina.js");
-var streamSource = require("./stream-source.js");
-var playbackIdentity = require("./playback-identity.js");
-var monitor = require("./monitor.js");
-var stopJournalModule = require("./stop-journal.js");
-var syncHistoryModule = require("./sync-history.js");
-var playbackDiagnostics = require("./playback-diagnostics.js");
-var mediaFusion = require("./mediafusion-identity.js");
-var freshIdentity = require("./fresh-identity.js");
-var resumeProtection = require("./resume-protection.js");
-var correctionMedia = require("./correction-media.js");
-var trakt = require("./trakt.js");
-var debugLogBuffer = require("./debug-log-buffer.js");
-var PLUGIN_VERSION = "0.2.5";
-var DEBUG_LOG_PATH = "@data/debug.log";
-var MAX_DEBUG_LOG_CHARS = 200000;
-var DEBUG_LOG_FLUSH_INTERVAL_MS = 10000;
-var POLL_INTERVAL_MS = 2000;
-var UI_POLL_INTERVAL_MS = 2000;
-// Limit playback-position-triggered WebView refreshes; keep event transitions instant.
-var PLAYBACK_SIDEBAR_MIN_INTERVAL_MS = 1000;
-var PLUGIN_SIDEBAR_ID = "plugin:io.github.olivergiangvu.iinatraktscrobblerplus";
-var currentMedia = null;
-var lastSourceSignature = "";
-var playbackState = createPlaybackState();
-var pollTimer = null;
-var uiPollTimer = null;
-var lastPlaybackSidebarRefreshAt = 0;
-var sidebarHandlersBound = false;
-var firstScrobbleNoticeShown = false;
-var missingCredentialsNoticeShown = false;
-var authRequiredNoticeShown = false;
-var guessitFailureLogged = false;
-var lastHandledAuthActionNonce = "";
-var lastAuthStatusSignature = "";
-var authActionChain = Promise.resolve();
-var sidebarRefreshActive = false;
-var sidebarRefreshForced = false;
-var stopReplayActive = false;
-var stopReplayTimer = null;
-var lastScrobbleStatus = createScrobbleStatus();
-var correctionState = createCorrectionState();
-var stopJournal = stopJournalModule.create(file);
-var syncHistory = syncHistoryModule.create(file);
-var debugLog = debugLogBuffer.create(file, {
-  path: DEBUG_LOG_PATH,
-  maxChars: MAX_DEBUG_LOG_CHARS,
-  thresholdChars: 8192
-});
-var mediaFusionShowCache = mediaFusion.create(file);
-var activeStopSyncId = "";
-var syncQueueNotice = "";
-var confirmedPlayback = {key:"",proof:null};
+const { core, event, utils, file, menu } = iina;
+// Messages to the overlay and sidebar go through messageSafe()
+const overlay = safeMessenger(iina.overlay, ["loadFile", "onMessage", "show", "hide", "setClickable"]);
+const sidebar = safeMessenger(iina.sidebar, ["loadFile", "onMessage"]);
 
-function createPlaybackState() {
-  return {
-    prevSnapshot: null,
-    preview: false,
-    fastPause: false,
-    scrobbleBuffer: null,
-    previewTimer: null,
-    fastPauseTimer: null,
-    lastScrobbleKey: "",
-    scrobbleChain: Promise.resolve()
-  };
-}
-
-function createScrobbleStatus() {
-  return {
-    status: "idle",
-    verb: "",
-    action: "",
-    mediaLabel: "",
-    detail: "No scrobble has been attempted in this window yet.",
-    reason: "",
-    progress: null,
-    updatedAt: ""
-  };
-}
-
-function createCorrectionState() {
-  return {
-    active: false,
-    busy: false,
-    query: "",
-    reference: "",
-    error: "",
-    mediaLabel: "",
-    mediaKey: "",
-    kind: "movie",
-    season: "",
-    episode: "",
-    results: []
-  };
-}
-
-trakt.configure({
-  file: file,
-  preferences: preferences,
-  utils: utils,
-  logger: function(message) {
-    log(message);
-  },
-  notify: function(message) {
-    importantOsd(message);
-  }
-});
-
-function appendDebugLog(message) {
-  debugLog.append(message);
-}
-
-function log(message) {
-  iina.console.log("[IINATraktScrobbler] " + message);
-  appendDebugLog("[IINATraktScrobbler] " + message);
-}
-
-function errStr(error) {
-  if (!error) return "Unknown error";
-  if (typeof error === "string") return error;
-  return error.message || String(error);
-}
-
-function logGuessitFailureOnce() {
-  if (guessitFailureLogged || !parser || typeof parser.getDiagnostics !== "function") return;
-
-  var diagnostics = parser.getDiagnostics();
-  if (!diagnostics) return;
-  if (
-    diagnostics.guessitStatus !== "load-failed" &&
-    diagnostics.guessitStatus !== "unconfigured" &&
-    diagnostics.guessitStatus !== "runtime-failed"
-  ) return;
-
-  guessitFailureLogged = true;
-  if (diagnostics.guessitStatus === "runtime-failed") {
-    log("Guessit runtime failed: " + diagnostics.guessitError);
-    return;
-  }
-
-  log("Guessit unavailable: " + diagnostics.guessitLoadError);
-}
-
-function prefBool(key, fallbackValue) {
-  var value = preferences.get(key);
-  if (typeof value === "boolean") return value;
-  if (value === 1 || value === "1" || value === "true") return true;
-  if (value === 0 || value === "0" || value === "false") return false;
-  return fallbackValue;
-}
-
-function prefNumber(key, fallbackValue) {
-  var value = Number(preferences.get(key));
-  return isFinite(value) ? value : fallbackValue;
-}
-
-function debugOsd(message) {
-  if (!prefBool("debug_osd", false)) return;
-  try {
-    core.osd("Trakt Scrobbler: " + message);
-  } catch (_error) {}
-}
-
-function statusOsd(message) {
-  if (!prefBool("status_osd", true)) return;
-  try {
-    core.osd(message);
-  } catch (_error) {}
-}
-
-function importantOsd(message) {
-  try {
-    core.osd("Trakt Scrobbler: " + message);
-  } catch (_error) {}
-}
-
-function successfulScrobbleAction(verb, result) {
-  if (result && result.action) {
-    return String(result.action);
-  }
-  return verb;
-}
-
-function successfulScrobbleProgress(payloadProgress, result) {
-  if (result && isFinite(Number(result.progress))) {
-    return Number(result.progress);
-  }
-  return Number(payloadProgress || 0);
-}
-
-function successfulScrobbleDetail(action, progress) {
-  var value = Number(progress || 0);
-  if (!isFinite(value)) value = 0;
-  if (action === "scrobble") return "Trakt marked this as watched at " + value.toFixed(2) + "%.";
-  if (action === "pause") return "Trakt saved playback progress at " + value.toFixed(2) + "%.";
-  if (action === "start") return "Trakt accepted playback at " + value.toFixed(2) + "%.";
-  return "Trakt accepted this scrobble at " + value.toFixed(2) + "%.";
-}
-
-function truncateOsdText(value, maxLength) {
-  var text = String(value || "").trim();
-  if (!text || text.length <= maxLength) return text;
-  return text.slice(0, Math.max(0, maxLength - 1)).trim() + "…";
-}
-
-function osdMediaLabel(mediaInfo) {
-  if (!mediaInfo) return "";
-
-  if (mediaInfo.type === "episode") {
-    var episodeCode = "S" + pad2(mediaInfo.season) + "E" + pad2(mediaInfo.episode);
-    if (mediaInfo.episodeTitle) {
-      return truncateOsdText(episodeCode + " - " + mediaInfo.episodeTitle, 64);
+// Helpers
+// IINA passes messages to web views inside a JS template literal, so a backtick or ${ would break them
+function messageSafe(v) {
+  if (typeof v === "string") return v.replace(/`/g, "\u02CB").replace(/\$\{/g, "$\u200B{");
+  if (Array.isArray(v)) return v.map(messageSafe);
+  if (v && typeof v === "object" && Object.getPrototypeOf(v) === Object.prototype) {
+    var out = {};
+    for (var k in v) {
+      if (Object.prototype.hasOwnProperty.call(v, k)) out[k] = messageSafe(v[k]);
     }
-    return truncateOsdText((mediaInfo.showTitle || mediaInfo.title || "") + " " + episodeCode, 64);
+    return out;
   }
-
-  return truncateOsdText(mediaInfo.title + (mediaInfo.year ? (" (" + mediaInfo.year + ")") : ""), 64);
+  return v;
 }
 
-function showScrobbleStatusOsd(title, mediaInfo) {
-  if (!prefBool("status_osd", true)) return;
-
-  var message = String(title || "").trim();
-  var label = osdMediaLabel(mediaInfo);
-  if (label) {
-    message += ": " + label;
-  }
-
-  statusOsd(message);
-}
-
-function maybeShowScrobbleStatusOsd(verb, action, mediaInfo) {
-  if (action === "scrobble") {
-    showScrobbleStatusOsd("Watched on Trakt", mediaInfo);
-    return;
-  }
-
-  if (action === "pause") {
-    showScrobbleStatusOsd("Progress Saved", mediaInfo);
-    return;
-  }
-
-  if (verb === "start") {
-    showScrobbleStatusOsd("Scrobble Started", mediaInfo);
-    return;
-  }
-
-  if (verb === "stop") {
-    showScrobbleStatusOsd("Stopped on Trakt", mediaInfo);
-  }
-}
-
-function setStatusOsdEnabled(enabled) {
-  var nextValue = !!enabled;
-  var prevValue = prefBool("status_osd", true);
-  if (nextValue === prevValue) {
-    queueSidebarRefresh(false);
-    return;
-  }
-
-  persistPreferences({
-    status_osd: nextValue
+// Wraps iina.overlay / iina.sidebar so postMessage goes through messageSafe()
+function safeMessenger(target, methods) {
+  var m = {};
+  methods.forEach(function(name) {
+    m[name] = function() { return target[name].apply(target, arguments); };
   });
-
-  log("Trakt status OSD " + (nextValue ? "enabled" : "disabled"));
-  queueSidebarRefresh(false);
+  m.postMessage = function(name, data) { return target.postMessage(name, messageSafe(data)); };
+  return m;
 }
 
-function persistPreferences(values) {
-  Object.keys(values || {}).forEach(function(key) {
-    preferences.set(key, values[key]);
-  });
-
-  if (typeof preferences.sync === "function") {
-    try {
-      preferences.sync();
-    } catch (_error) {}
+// Turn any thrown value or API error into a readable string
+function errStr(e) {
+  if (e == null) return "Unknown error";
+  if (typeof e === "string") return e;
+  if (e instanceof Error) return e.message || String(e);
+  if (typeof e === "object") {
+    if (typeof e.message === "string") return e.message;
+    if (typeof e.reason  === "string") return e.reason;
+    if (e.error)              return errStr(e.error);
+    if (e.data && e.data.message) return String(e.data.message);
+    try { return JSON.stringify(e); } catch(_) { return "Error"; }
   }
+  return String(e);
 }
 
-function authStatusSignature(status) {
-  return JSON.stringify({
-    state: status.state,
-    summary: status.summary,
-    detail: status.detail,
-    busy: !!status.busy,
-    connected: !!status.connected,
-    credentialMode: status.credentialMode
-  });
+// Quote a string for /bin/sh -c
+function shellQuote(s) {
+  return "'" + String(s).replace(/'/g, "'\\''") + "'";
 }
 
-function persistAuthStatus(status) {
-  var resolved = status || trakt.getAuthStatus();
-  var signature = authStatusSignature(resolved);
-  var payload = {
-    auth_state: resolved.state,
-    auth_summary: resolved.summary,
-    auth_detail: resolved.detail || "",
-    auth_busy: !!resolved.busy,
-    auth_connected: !!resolved.connected,
-    auth_credential_mode: resolved.credentialMode || ""
-  };
-
-  if (signature !== lastAuthStatusSignature) {
-    payload.auth_updated_at = new Date().toISOString();
-    lastAuthStatusSignature = signature;
-  }
-
-  persistPreferences(payload);
-  return resolved;
-}
-
-function stateName(state) {
-  if (state === monitor.State.Playing) return "playing";
-  if (state === monitor.State.Paused) return "paused";
-  if (state === monitor.State.Stopped) return "stopped";
-  return core.status.idle ? "idle" : (core.status.paused ? "paused" : "playing");
-}
-
-function cloneScrobbleStatus(status) {
-  return {
-    status: status.status,
-    verb: status.verb,
-    action: status.action,
-    mediaLabel: status.mediaLabel,
-    detail: status.detail,
-    reason: status.reason,
-    progress: status.progress,
-    updatedAt: status.updatedAt
-  };
-}
-
-function cloneCorrectionState(state) {
-  var source = state || createCorrectionState();
-  return {
-    active: !!source.active,
-    busy: !!source.busy,
-    query: String(source.query || ""),
-    reference: String(source.reference || ""),
-    error: String(source.error || ""),
-    mediaLabel: String(source.mediaLabel || ""),
-    mediaKey: String(source.mediaKey || ""),
-    kind: source.kind === "episode" ? "episode" : "movie",
-    season: String(source.season !== undefined && source.season !== null ? source.season : ""),
-    episode: String(source.episode !== undefined && source.episode !== null ? source.episode : ""),
-    results: Array.isArray(source.results)
-      ? source.results.map(function(result) {
-          return {
-            trakt: Number(result.trakt || 0),
-            kind: String(result.kind || ""),
-            title: String(result.title || ""),
-            subtitle: String(result.subtitle || ""),
-            detail: String(result.detail || ""),
-            year: result.year ? Number(result.year) : null,
-            posterUrl: String(result.posterUrl || "")
-          };
-        })
-      : []
-  };
-}
-
-function setScrobbleStatus(values) {
-  var incoming = values || {};
-  var next = Object.assign({}, lastScrobbleStatus, incoming);
-  if (!Object.prototype.hasOwnProperty.call(incoming, "reason") &&
-      incoming.status !== "skipped" &&
-      incoming.status !== "disabled") {
-    next.reason = "";
-  }
-  if (!Object.prototype.hasOwnProperty.call(incoming, "action")) {
-    next.action = "";
-  }
-
-  lastScrobbleStatus = Object.assign({}, next, {
-    updatedAt: new Date().toISOString()
-  });
-  queueSidebarRefresh(false);
-}
-
-function showSidebarTab() {
-  try {
-    if (sidebar && typeof sidebar.show === "function") {
-      sidebar.show();
-      return;
-    }
-  } catch (_error) {}
-
-  try {
-    if (core.window) {
-      core.window.sidebar = PLUGIN_SIDEBAR_ID;
-    }
-  } catch (_error) {}
-}
-
-function registerMenuItems() {
-  if (!menu || typeof menu.addItem !== "function" || typeof menu.item !== "function") {
-    return;
-  }
-
-  menu.addItem(menu.item("Show Sidebar", function() {
-    showSidebarTab();
-  }, {
-    keyBinding: "Meta+t"
-  }));
-}
-
-function currentResumeStatus() {
-  if (!currentMedia)
-    return {status:"idle",blocked:false,canRestore:false,message:""};
-  if (!currentMedia.resumeGate)
-    return Object.assign({blocked:true,canRestore:false},
-      resumeProtection.pendingIdentityStatus(currentMedia.mediaInfo,currentMedia.freshState));
-  var state=currentMedia.resumeGate.snapshot();
-  var position=Number(core.status.position||0);
-  var duration=Number(core.status.duration||0);
-  var local=duration>0?monitor.computeProgress(position,duration):null;
-  var result=currentMedia.resumeGate.decision(local);
-  var protectedResume=result.blocked && result.reason==="remote-ahead";
-  return {status:protectedResume?"protected":state.status,
-    blocked:result.blocked,canRestore:protectedResume && duration>0,
-    resumePercent:state.resumePercent,
-    localPercent:local,
-    message:protectedResume
-      ? "Trakt holds "+state.resumePercent.toFixed(1)+"%; IINA is at "+
-        (local===null?"unknown":local.toFixed(1))+
-        "%. Outgoing scrobbles are blocked to preserve resume."
-      : state.message};
-}
-function beginResumeCheck(target) {
-  if (!target || !target.mediaInfo || target.mediaInfo.unresolvedShow ||
-      (target.mediaInfo.type==="episode" &&
-       /^unknown series$/i.test(String(target.mediaInfo.showTitle||""))) ||
-      ["resolving","conflict","rejected"].includes(target.freshState)) return;
-  var gate=resumeProtection.create();
-  target.resumeGate=gate;
-  var inspectedInfo=target.mediaInfo;
-  queueSidebarRefresh(false);
-  (async function() {
-    var result;
-    try {result=await trakt.getResumeCheckpoint(inspectedInfo);}
-    catch(error) {
-      result={status:"unavailable"};
-      log("Trakt resume preflight unavailable: "+errStr(error));
-    }
-    // The playback, corrected identity or preflight may have changed mid-request.
-    if(currentMedia!==target || target.resumeGate!==gate ||
-       target.mediaInfo!==inspectedInfo)return;
-    gate.update(result);
-    var current=currentResumeStatus();
-    log("Resume guard: "+current.status+"; "+current.message);
-    queueSidebarRefresh(false);
-    if (!current.blocked) {
-      resyncCurrentPlayback("Trakt resume preflight cleared; safe to scrobble");
-    }
-  })();
-}
-function restoreRemoteResume() {
-  if (!currentMedia || !currentMedia.resumeGate) return;
-  var gate=currentMedia.resumeGate, snapshot=buildLiveSnapshot();
-  if (!snapshot || snapshot.state===monitor.State.Stopped)return;
-  var check=gate.decision(snapshot.progress);
-  if (!check.blocked || check.reason!=="remote-ahead" ||
-      !Number.isFinite(check.resumePercent))return;
-  var target=Math.min(snapshot.duration-2,
-    snapshot.duration*check.resumePercent/100);
-  if(!Number.isFinite(target)||target<=0)return;
-  try {
-    core.seekTo(target);
-    log("User-initiated resume seek from Trakt progress "+check.resumePercent.toFixed(1)+"%");
-    queueSidebarRefresh(false);
-  }catch(error){
-    log("Resume seek unavailable: "+errStr(error));
-    importantOsd("Could not seek to Trakt resume position");
-  }
-}
-
-function buildSidebarPlayback() {
-  var snapshot = buildLiveSnapshot();
-  return {
-    available: !!(currentMedia && currentMedia.mediaInfo),
-    mediaLabel: currentMedia && currentMedia.mediaInfo ? mediaLabel(currentMedia.mediaInfo) : "",
-    parserSource: currentMedia && currentMedia.parsed ? (currentMedia.parsed.parserSource || "") : "",
-    state: snapshot ? stateName(snapshot.state) : stateName(null),
-    progress: snapshot ? snapshot.progress : 0,
-    position: snapshot ? snapshot.position : 0,
-    duration: snapshot ? snapshot.duration : 0,
-    preview: !!playbackState.preview,
-    fastPause: !!playbackState.fastPause,
-    matchProvenance: determineMatchProvenance(),
-    resumeProtection: currentResumeStatus(),
-    identifiedAt: currentMedia ? currentMedia.identifiedAt : ""
-  };
-}
-
-function determineMatchProvenance() {
-  if (!currentMedia || !currentMedia.mediaInfo) return {code:"unknown",label:"Unidentified"};
-  var info=currentMedia.mediaInfo;
-  var source=String(currentMedia.parsed && currentMedia.parsed.parserSource || "");
-  if (currentMedia.freshState==="resolving") return {code:"fresh-pending",label:"Verifying External ID…"};
-  if (info.unresolvedShow) return {code:"needs-manual",label:"Needs Manual Match"};
-  if (source==="mediafusion-confirmed-pack") return {code:"confirmed-pack",label:"Confirmed Pack Cache"};
-  if (currentMedia.freshState==="verified") {
-    return {code:"fresh-verified",label:
-      currentMedia.freshIdKind==="verified-dual-id"?"Fresh IMDb + TMDB (verified)":
-      currentMedia.freshIdKind==="verified-tmdb"?"Fresh TMDB ID (verified)":
-      "Fresh IMDb ID (verified)"};
-  }
-  if (currentMedia.freshState==="rejected" || currentMedia.freshState==="conflict")
-    return {code:"fresh-rejected",label:"External ID needs review"};
-  if (currentMedia.manuallyCorrected) return {code:"manual",label:"Manual Confirmed"};
-  if (/^tt\d{6,10}$/i.test(String(info.imdb||""))) return {code:"imdb",label:"Direct IMDb ID"};
-  if (confirmedPlayback.key===monitor.mediaKey(info)) return {code:"trakt-confirmed",label:"Trakt Verified"};
-  if (/^(?:mpv-|filename|stream-)/i.test(source)) return {code:"filename",label:"Filename / Metadata (unverified)"};
-  return {code:"unverified",label:"Unverified Metadata"};
-}
-function trustedReplayProof(info) {
-  if (!info || info.unresolvedShow) return null;
-  var id=Number(info.manualTraktId||0);
-  if (Number.isInteger(id)&&id>0) return {
-    kind:currentMedia&&currentMedia.freshState==="verified"&&
-      currentMedia.mediaInfo===info?"trakt-confirmed":"manual",traktId:id
-  };
-  if (/^tt\d{6,10}$/i.test(String(info.imdb||""))) return {kind:"imdb",imdb:info.imdb};
-  if (confirmedPlayback.key===monitor.mediaKey(info)&&confirmedPlayback.proof)
-    return confirmedPlayback.proof;
-  return null;
-}
-
-function isSyncReplayPlaybackActive() {
-  return !!(currentMedia && playbackState.prevSnapshot &&
-    playbackState.prevSnapshot.state !== monitor.State.Stopped);
-}
-
-// Sidebar gets only bounded metadata from the final-stop journal.
-function buildSyncQueueStatus() {
-  var api = trakt.getApiStatus ? trakt.getApiStatus() : {mode:"online"};
-  var isActive = isSyncReplayPlaybackActive();
-  var pending = stopJournal.pending().map(function(entry) {
-    return {
-      id: entry.id,
-      label: mediaLabel(entry.mediaInfo),
-      progress: Number(entry.progress || 0),
-      queuedAt: new Date(entry.createdAt).toISOString(),
-      syncing: entry.id === activeStopSyncId
-    };
-  });
-  var needsReview=stopJournal.review().map(function(entry) {
-    return {id:entry.id,label:mediaLabel(entry.mediaInfo),progress:entry.progress,
-      queuedAt:new Date(entry.createdAt).toISOString(),
-      reason:entry.reviewReason || (entry.mediaInfo && (entry.mediaInfo.unresolvedShow ||
-        /^unknown series$/i.test(String(entry.mediaInfo.showTitle||"")))
-        ? "Missing verified series" : "Legacy checkpoint: match unverified")};
-  });
-  return {
-    pending: pending,
-    needsReview: needsReview,
-    recentlySynced: syncHistory.recent(),
-    flushing: !!stopReplayActive,
-    activeSyncId: activeStopSyncId,
-    notice: syncQueueNotice,
-    canRetry: !!pending.length && api.mode === "online" &&
-      !stopReplayActive && !activeStopSyncId && !isActive &&
-      isScrobblingEnabled() && trakt.getAuthStatus().connected,
-    blockedReason: isActive ? "Pause/stop the current playback first."
-      : api.mode !== "online" ? "Respecting Trakt cooldown."
-      : stopReplayActive || activeStopSyncId ? "Another sync is running."
-      : !isScrobblingEnabled() ? "Enable scrobbling first."
-      : !trakt.getAuthStatus().connected ? "Sign in to Trakt first." : ""
-  };
-}
-
-async function buildSidebarPayload(forceProfileRefresh) {
-  var auth = persistAuthStatus();
-  var viewerProfile = null;
-  var correction = cloneCorrectionState(correctionState);
-  var recentHistory = {
-    items: [],
-    fetchedAt: "",
-    error: ""
-  };
-
-  if (auth.connected && typeof trakt.getViewerProfile === "function") {
-    try {
-      viewerProfile = await trakt.getViewerProfile({
-        force: !!forceProfileRefresh
-      });
-    } catch (error) {
-      log("Sidebar profile refresh failed: " + errStr(error));
-    }
-  }
-
-  if (auth.connected && !correction.active && typeof trakt.getRecentHistory === "function") {
-    recentHistory = await trakt.getRecentHistory({
-      force: !!forceProfileRefresh
-    });
-  }
-
-  return {
-    app: {
-      version: PLUGIN_VERSION
-    },
-    scrobblingEnabled: prefBool("scrobble_enabled", true),
-    statusOsdEnabled: prefBool("status_osd", true),
-    auth: {
-      state: auth.state,
-      summary: auth.summary,
-      detail: auth.detail || "",
-      busy: !!auth.busy,
-      connected: !!auth.connected,
-      credentialMode: auth.credentialMode || "",
-      deviceCode: auth.deviceCode || "",
-      verificationUrl: auth.verificationUrl || "",
-      token: typeof trakt.getTokenInfo === "function" ? trakt.getTokenInfo() : null,
-      user: viewerProfile
-    },
-    playback: buildSidebarPlayback(),
-    scrobble: cloneScrobbleStatus(lastScrobbleStatus),
-    correction: correction,
-    history: recentHistory,
-    network: Object.assign({}, (trakt.getApiStatus ? trakt.getApiStatus() : {mode:"online"}), {
-      pendingFinalizations: stopJournal.pending().length
-    }),
-    syncQueue: buildSyncQueueStatus(),
-    generatedAt: new Date().toISOString()
-  };
-}
-
-function queueSidebarRefresh(forceProfileRefresh) {
-  if (!sidebar || typeof sidebar.postMessage !== "function") return;
-  // One in-flight refresh; coalesce fast playback/UI events rather than
-  // accumulating hundreds of async sidebar tasks during network stalls.
-  if (forceProfileRefresh) sidebarRefreshForced = true;
-  if (sidebarRefreshActive) return;
-  sidebarRefreshActive = true;
-  var force = sidebarRefreshForced;
-  sidebarRefreshForced = false;
-  (async function() {
-    try {
-      var payload = await buildSidebarPayload(force);
-      sidebar.postMessage("state", payload);
-    } catch (error) {
-      log("Sidebar refresh failed: " + errStr(error));
-    } finally {
-      sidebarRefreshActive = false;
-      if (sidebarRefreshForced) queueSidebarRefresh(false);
-    }
-  })();
-}
-
-function bindSidebarMessaging() {
-  if (sidebarHandlersBound || !sidebar || typeof sidebar.onMessage !== "function") {
-    return;
-  }
-
-  sidebarHandlersBound = true;
-
-  sidebar.onMessage("ready", function() {
-    log("Sidebar ready");
-    queueSidebarRefresh(true);
-  });
-
-  sidebar.onMessage("connect", function() {
-    log("Sidebar requested connect");
-    authActionChain = authActionChain.then(async function() {
-      var force = trakt.getAuthStatus().state === "connected";
-      await runManualAuth(force);
-    }).catch(function(error) {
-      log("Sidebar connect failed: " + errStr(error));
-      persistAuthStatus();
-      queueSidebarRefresh(true);
-    });
-  });
-
-  sidebar.onMessage("signout", function() {
-    log("Sidebar requested signout");
-    authActionChain = authActionChain.then(function() {
-      handleManualSignOut();
-    }).catch(function(error) {
-      log("Sidebar signout failed: " + errStr(error));
-      persistAuthStatus();
-      queueSidebarRefresh(true);
-    });
-  });
-
-  sidebar.onMessage("toggle_scrobbling", function(payload) {
-    var enabled = !(payload && payload.enabled === false);
-    log("Sidebar requested scrobbling " + (enabled ? "enable" : "disable"));
-    setScrobblingEnabled(enabled);
-  });
-
-  sidebar.onMessage("toggle_status_osd", function(payload) {
-    var enabled = !(payload && payload.enabled === false);
-    log("Sidebar requested status OSD " + (enabled ? "enable" : "disable"));
-    setStatusOsdEnabled(enabled);
-  });
-
-  sidebar.onMessage("refresh", function() {
-    log("Sidebar requested refresh");
-    queueSidebarRefresh(true);
-  });
-
-  sidebar.onMessage("copy_playback_diagnostics", function() {
-    (async function() {
-      try {
-        var text = JSON.stringify(JSON.parse(playbackDiagnostics.build(
-          getCurrentSource(),
-          currentMedia && currentMedia.parsed,
-          currentMedia && currentMedia.traktTargetLabel,
-          PLUGIN_VERSION
-        )));
-        // AppleScript clipboard helper, same IINA-sanctioned interface used by auth.
-        var escaped = text.replace(/\\/g, "\\\\").replace(/"/g, '\\"')
-          .replace(/\r/g, " ").replace(/\n/g, "\\n");
-        var result = await utils.exec("/usr/bin/osascript", [
-          "-e", 'set the clipboard to "' + escaped + '"'
-        ]);
-        var ok = result && result.status === 0;
-        sidebar.postMessage("diagnostics_copy_status", {
-          ok: !!ok,
-          message: ok ? "Safe diagnostics copied. Paste them into ChatGPT." :
-            "Copy failed. Try again."
-        });
-      } catch (error) {
-        log("Safe diagnostics clipboard unavailable: " + errStr(error));
-        sidebar.postMessage("diagnostics_copy_status", {ok:false, message:"Clipboard unavailable."});
-      }
-    })();
-  });
-
-  sidebar.onMessage("discard_unverified_stop", function(payload) {
-    var id=payload && typeof payload.id==="string" ? payload.id : "";
-    var response={ok:false,id:id,message:"Checkpoint was preserved."};
-    try {
-      // Only local unverified records are eligible. Never mutate Trakt history
-      // or allow this handler to remove a proof-backed pending stop.
-      if (!id) {
-        response.message="Missing checkpoint identifier.";
-      } else if (!stopJournal.review().some(function(x){return x.id===id;})) {
-        response.message="Item no longer needs review, or was already removed.";
-      } else if (stopJournal.discardReview(id)) {
-        response.ok=true;
-        response.message="Unverified LOCAL checkpoint removed.";
-        syncQueueNotice=response.message;
-        log("Removed one unverified stop by confirmed user action");
-      } else {
-        response.message="Failed to save local queue; checkpoint is unchanged.";
-      }
-    } catch (error) {
-      response.message="Removal failed; checkpoint was preserved.";
-      log("Local checkpoint removal failed: "+errStr(error));
-    }
-    try { sidebar.postMessage("discard_unverified_result",response); }
-    catch (error) { log("Unable to notify sidebar about removal: "+errStr(error)); }
-    queueSidebarRefresh(false);
-  });
-
-  sidebar.onMessage("restore_remote_resume", function() {
-    restoreRemoteResume();
-  });
-
-  sidebar.onMessage("retry_pending_stops", function() {
-    // Manual retry does not bypass server cooldown or interrupt playback.
-    var q = buildSyncQueueStatus();
-    if (!q.canRetry) {
-      syncQueueNotice = q.blockedReason || (q.pending.length ? "Retry is not available." : "Queue is already clear.");
-      queueSidebarRefresh(false);
-      return;
-    }
-    syncQueueNotice = "Retry requested. Sending saved stops in order.";
-    queueSidebarRefresh(false);
-    Promise.resolve().then(async function() {
-      await replaySavedFinalizations();
-      var remaining = stopJournal.pending().length;
-      var api = trakt.getApiStatus ? trakt.getApiStatus() : {mode:"online"};
-      syncQueueNotice = remaining
-        ? (api.mode === "online"
-          ? remaining + " stop update(s) still pending; automatic recovery remains enabled."
-          : "Trakt unavailable; retry will resume after cooldown.")
-        : "All pending final stops confirmed.";
-      queueSidebarRefresh(false);
-    }).catch(function(error) {
-      syncQueueNotice = "Retry failed; saved stops remain queued.";
-      log("Manual retry failed: " + errStr(error));
-      queueSidebarRefresh(false);
-    });
-  });
-
-  sidebar.onMessage("copy_auth_code", function() {
-    Promise.resolve().then(async function() {
-      var result = { ok: false, message: "No active code." };
-      if (typeof trakt.copyPendingAuthCode === "function") {
-        result = await trakt.copyPendingAuthCode();
-      }
-      try {
-        sidebar.postMessage("copy_auth_result", result);
-      } catch (_error) {}
-    }).catch(function(error) {
-      log("Sidebar auth code copy failed: " + errStr(error));
-      try {
-        sidebar.postMessage("copy_auth_result", {
-          ok: false,
-          message: "Copy failed. Copy manually."
-        });
-      } catch (_error) {}
-    });
-  });
-
-  sidebar.onMessage("open_correction", function(payload) {
-    var query = payload && payload.query ? String(payload.query) : "";
-    log("Sidebar requested correction search");
-    authActionChain = authActionChain.then(function() {
-      return openCorrectionFlow(query);
-    }).catch(function(error) {
-      log("Sidebar correction open failed: " + errStr(error));
-      correctionState = Object.assign(cloneCorrectionState(correctionState), {
-        active: true,
-        busy: false,
-        error: errStr(error)
-      });
-      queueSidebarRefresh(false);
-    });
-  });
-
-  sidebar.onMessage("change_correction_kind", function(payload) {
-    var kind = payload && payload.kind === "episode" ? "episode" : "movie";
-    authActionChain = authActionChain.then(function() {
-      if (!currentMedia || !currentMedia.mediaInfo || !correctionState.active) return;
-      var hint = currentMedia.episodeRoute || mediaFusion.fromSource(currentMedia.source);
-      var pos = correctionMedia.episodePosition(currentMedia.mediaInfo, hint);
-      correctionState = Object.assign(cloneCorrectionState(correctionState), {
-        kind: kind,
-        busy: false,
-        results: [],
-        error: "",
-        season: kind === "episode" ? pos.season : "",
-        episode: kind === "episode" ? pos.episode : ""
-      });
-      queueSidebarRefresh(false);
-    }).catch(function(error) {
-      log("Manual media kind change failed: " + errStr(error));
-    });
-  });
-
-  sidebar.onMessage("search_correction", function(payload) {
-    var query = payload && payload.query ? String(payload.query) : "";
-    log('Sidebar requested correction search query="' + query + '"');
-    authActionChain = authActionChain.then(function() {
-      return searchCorrectionFlow(query);
-    }).catch(function(error) {
-      log("Sidebar correction search failed: " + errStr(error));
-      correctionState = Object.assign(cloneCorrectionState(correctionState), {
-        active: true,
-        busy: false,
-        error: errStr(error)
-      });
-      queueSidebarRefresh(false);
-    });
-  });
-
-  sidebar.onMessage("lookup_correction_reference", function(payload) {
-    var reference = payload && payload.reference ? String(payload.reference) : "";
-    log('Sidebar requested correction reference lookup="' + reference + '"');
-    authActionChain = authActionChain.then(function() {
-      return lookupCorrectionReference(reference);
-    }).catch(function(error) {
-      log("Sidebar correction reference lookup failed: " + errStr(error));
-      correctionState = Object.assign(cloneCorrectionState(correctionState), {
-        active: true,
-        busy: false,
-        error: errStr(error)
-      });
-      queueSidebarRefresh(false);
-    });
-  });
-
-  sidebar.onMessage("close_correction", function() {
-    log("Sidebar requested correction close");
-    resetCorrectionState();
-    queueSidebarRefresh(false);
-  });
-
-  sidebar.onMessage("choose_correction", function(payload) {
-    var traktId = payload && payload.trakt ? Number(payload.trakt) : 0;
-    var season = payload && payload.season;
-    var episode = payload && payload.episode;
-    if (!traktId) {
-      return;
-    }
-
-    log("Sidebar requested correction apply " + traktId);
-    authActionChain = authActionChain.then(function() {
-      return applyCorrectionChoice(traktId, season, episode);
-    }).catch(function(error) {
-      log("Sidebar correction apply failed: " + errStr(error));
-      correctionState = Object.assign(cloneCorrectionState(correctionState), {
-        active: true,
-        busy: false,
-        error: errStr(error)
-      });
-      queueSidebarRefresh(false);
-    });
-  });
-}
-
-function initializeSidebar() {
-  if (!sidebar || typeof sidebar.loadFile !== "function") {
-    return;
-  }
-
-  sidebarHandlersBound = false;
-  sidebar.loadFile("sidebar.html");
-  bindSidebarMessaging();
-  queueSidebarRefresh(true);
-}
-
-function wrapEvent(label, fn) {
-  return async function() {
-    try {
-      return await fn();
-    } catch (error) {
-      var message = label + " failed: " + errStr(error);
-      log(message);
-      importantOsd(message);
-    }
-  };
-}
-
-function getCurrentSource() {
-  function mpvText(key) {
-    try {
-      return iina.mpv && typeof iina.mpv.getString === "function"
-        ? String(iina.mpv.getString(key) || "")
-        : "";
-    } catch (_error) { return ""; }
-  }
-  return {
-    url: String(core.status.url || ""),
-    title: String(core.status.title || ""),
-    path: mpvText("path"),
-    filename: mpvText("filename"),
-    mediaTitle: mpvText("media-title"),
-    metadataTitle: mpvText("metadata/by-key/title")
-  };
-}
-
-async function runManualAuth(force) {
-  var status = trakt.getAuthStatus();
-  showSidebarTab();
-  persistAuthStatus({
-    state: "authorizing",
-    summary: force ? "Reconnecting to Trakt" : "Waiting for Trakt authorization",
-    detail: "Complete the confirmation in your browser.",
-    busy: true,
-    connected: false,
-    credentialMode: status.credentialMode
-  });
-  queueSidebarRefresh(true);
-
-  try {
-    await trakt.beginInteractiveAuth({
-      force: !!force,
-      showDialog: true
-    });
-    authRequiredNoticeShown = false;
-    persistAuthStatus();
-    queueSidebarRefresh(true);
-    resyncCurrentPlaybackAfterAuth();
-    importantOsd("Trakt connected");
-    log("Manual Trakt auth completed");
-  } catch (error) {
-    persistAuthStatus();
-    queueSidebarRefresh(true);
-    importantOsd("Trakt authorization failed");
-    log("Manual Trakt auth failed: " + errStr(error));
-  }
-}
-
-function handleManualSignOut() {
-  trakt.signOut();
-  authRequiredNoticeShown = false;
-  resetCorrectionState();
-  persistAuthStatus();
-  queueSidebarRefresh(true);
-  importantOsd("Trakt signed out");
-  log("Trakt token cleared");
-}
-
-async function openCorrectionFlow(query) {
-  if (!currentMedia || !currentMedia.mediaInfo) {
-    return;
-  }
-
-  var episodeRoute = currentMedia.episodeRoute || mediaFusion.fromSource(currentMedia.source);
-  var initialKind = correctionMedia.preferredKind(currentMedia.mediaInfo, episodeRoute);
-  var position = correctionMedia.episodePosition(currentMedia.mediaInfo, episodeRoute);
-  var resolvedQuery = String(query || defaultCorrectionQuery(currentMedia.mediaInfo)).trim();
-  correctionState = {
-    active: true,
-    busy: false,
-    query: resolvedQuery,
-    reference: "",
-    error: "",
-    mediaLabel: correctionMediaLabel(),
-    mediaKey: currentMediaKey(),
-    kind: initialKind,
-    season: initialKind === "episode" ? position.season : "",
-    episode: initialKind === "episode" ? position.episode : "",
-    results: []
-  };
-  queueSidebarRefresh(false);
-  await searchCorrectionFlow(resolvedQuery);
-}
-
-async function searchCorrectionFlow(query) {
-  if (!currentMedia || !currentMedia.mediaInfo) {
-    resetCorrectionState();
-    queueSidebarRefresh(false);
-    return;
-  }
-
-  var resolvedQuery = String(query || "").trim();
-  if (!resolvedQuery) {
-    correctionState = Object.assign(cloneCorrectionState(correctionState), {
-      active: true,
-      busy: false,
-      query: "",
-      error: "Enter a title to search.",
-      mediaLabel: correctionMediaLabel(),
-      mediaKey: currentMediaKey(),
-      results: []
-    });
-    queueSidebarRefresh(false);
-    return;
-  }
-
-  var mediaKey = currentMediaKey();
-  correctionState = Object.assign(cloneCorrectionState(correctionState), {
-    active: true,
-    busy: true,
-    query: resolvedQuery,
-    error: "",
-    mediaLabel: correctionMediaLabel(),
-    mediaKey: mediaKey,
-    results: []
-  });
-  queueSidebarRefresh(false);
-
-  try {
-    var mediaForSearch = correctionMedia.searchMedia(currentMedia.mediaInfo,
-      correctionState.kind, currentMedia.episodeRoute);
-    var results = await trakt.searchCorrectionCandidates(mediaForSearch, resolvedQuery, 8);
-    if (mediaKey !== currentMediaKey()) {
-      return;
-    }
-
-    correctionState = Object.assign(cloneCorrectionState(correctionState), {
-      active: true,
-      busy: false,
-      query: resolvedQuery,
-      error: results.length ? "" : "No Trakt matches found.",
-      mediaLabel: correctionMediaLabel(),
-      mediaKey: mediaKey,
-      results: results
-    });
-    log("Correction search returned " + results.length + " result(s) for " + correctionMediaLabel());
-  } catch (error) {
-    if (mediaKey !== currentMediaKey()) {
-      return;
-    }
-
-    correctionState = Object.assign(cloneCorrectionState(correctionState), {
-      active: true,
-      busy: false,
-      query: resolvedQuery,
-      error: errStr(error),
-      mediaLabel: correctionMediaLabel(),
-      mediaKey: mediaKey,
-      results: []
-    });
-    log("Correction search failed: " + errStr(error));
-  }
-
-  queueSidebarRefresh(false);
-}
-
-async function lookupCorrectionReference(reference) {
-  if (!currentMedia || !currentMedia.mediaInfo) {
-    resetCorrectionState();
-    queueSidebarRefresh(false);
-    return;
-  }
-
-  var resolvedReference = String(reference || "").trim();
-  if (!resolvedReference) {
-    correctionState = Object.assign(cloneCorrectionState(correctionState), {
-      active: true,
-      busy: false,
-      reference: "",
-      error: "Enter a Trakt ID or slug.",
-      mediaLabel: correctionMediaLabel(),
-      mediaKey: currentMediaKey()
-    });
-    queueSidebarRefresh(false);
-    return;
-  }
-
-  var mediaKey = currentMediaKey();
-  correctionState = Object.assign(cloneCorrectionState(correctionState), {
-    active: true,
-    busy: true,
-    reference: resolvedReference,
-    error: "",
-    mediaLabel: correctionMediaLabel(),
-    mediaKey: mediaKey
-  });
-  queueSidebarRefresh(false);
-
-  try {
-    var mediaForLookup = correctionMedia.searchMedia(currentMedia.mediaInfo,
-      correctionState.kind, currentMedia.episodeRoute);
-    var result = await trakt.lookupCorrectionReference(mediaForLookup, resolvedReference);
-    if (mediaKey !== currentMediaKey()) {
-      return;
-    }
-
-    correctionState = Object.assign(cloneCorrectionState(correctionState), {
-      active: true,
-      busy: false,
-      reference: resolvedReference,
-      error: result ? "" : "No Trakt match found for that ID or slug.",
-      mediaLabel: correctionMediaLabel(),
-      mediaKey: mediaKey,
-      results: result ? [result] : []
-    });
-
-    if (result) {
-      log(
-        "Correction reference lookup resolved " +
-          resolvedReference +
-          " -> " +
-          correctionResultLabel(result, currentMedia.mediaInfo)
-      );
-    }
-  } catch (error) {
-    if (mediaKey !== currentMediaKey()) {
-      return;
-    }
-
-    correctionState = Object.assign(cloneCorrectionState(correctionState), {
-      active: true,
-      busy: false,
-      reference: resolvedReference,
-      error: errStr(error),
-      mediaLabel: correctionMediaLabel(),
-      mediaKey: mediaKey
-    });
-    log("Correction reference lookup failed: " + errStr(error));
-  }
-
-  queueSidebarRefresh(false);
-}
-
-async function applyCorrectionChoice(traktId, season, episode) {
-  if (!currentMedia || !currentMedia.mediaInfo) {
-    return;
-  }
-
-  var originalMediaInfo = cloneMediaInfo(currentMedia.mediaInfo);
-  var mediaKey = currentMediaKey();
-  var chosenId = Number(traktId || 0);
-  if (!chosenId) {
-    return;
-  }
-
-  correctionState = Object.assign(cloneCorrectionState(correctionState), {
-    active: true,
-    busy: true,
-    error: ""
-  });
-  queueSidebarRefresh(false);
-
-  try {
-    var chosenResult = (correctionState.results || []).find(function(result) {
-      return Number(result.trakt || 0) === chosenId;
-    }) || null;
-    // Manual mode is authoritative even if the parser mistakenly guessed Movie.
-    // Require the selected candidate's kind to agree with the current search mode.
-    var mediaInfo = correctionMedia.selectMedia(originalMediaInfo,
-      correctionState.kind, chosenResult, season, episode);
-    await trakt.applyMatchOverride(mediaInfo, chosenId);
-    if (mediaKey !== currentMediaKey()) {
-      return;
-    }
-
-    if (currentMedia) {
-      currentMedia.mediaInfo = mediaInfo;
-      // If a user manually corrects during the network lookup, ignore its stale result.
-      currentMedia.freshState = "";
-      currentMedia.manuallyCorrected = true;
-      currentMedia.traktTargetLabel = correctionResultLabel(chosenResult, mediaInfo);
-      beginResumeCheck(currentMedia);
-      // An explicit show selection can safely apply to the same torrent/season
-      // but never to a different torrent or season without new verification.
-      if (currentMedia.episodeRoute && mediaInfo.type === "episode" &&
-          chosenResult && chosenResult.title &&
-          mediaInfo.season === currentMedia.episodeRoute.season) {
-        mediaFusionShowCache.remember(currentMedia.episodeRoute, chosenId, chosenResult.title);
-      }
-    }
-    log("Applied manual Trakt match " + chosenId + " for " + mediaLabel(mediaInfo));
-    resetCorrectionState();
-    playbackState.lastScrobbleKey = "";
-    setScrobbleStatus({
-      status: "ready",
-      verb: "",
-      mediaLabel: currentMedia ? scrobbleTargetLabel(currentMedia) : correctionResultLabel(chosenResult, mediaInfo),
-      detail: "Watching for playback changes.",
-      reason: ""
-    });
-    queueSidebarRefresh(true);
-    resyncCurrentPlayback("Re-syncing current playback after manual correction");
-    importantOsd("Trakt match corrected");
-  } catch (error) {
-    if (mediaKey !== currentMediaKey()) {
-      return;
-    }
-
-    correctionState = Object.assign(cloneCorrectionState(correctionState), {
-      active: true,
-      busy: false,
-      error: errStr(error)
-    });
-    queueSidebarRefresh(false);
-    log("Applying manual Trakt match failed: " + errStr(error));
-  }
-}
-
-function checkAuthActionRequest() {
-  var nonce = String(preferences.get("auth_action_nonce") || "");
-  if (!nonce || nonce === lastHandledAuthActionNonce) {
-    return;
-  }
-
-  lastHandledAuthActionNonce = nonce;
-  var action = String(preferences.get("auth_action_kind") || "");
-  persistPreferences({
-    auth_action_kind: "",
-    auth_action_nonce: ""
-  });
-
-  if (!action) {
-    return;
-  }
-
-  authActionChain = authActionChain.then(async function() {
-    if (action === "show_sidebar") {
-      log("Preferences requested sidebar show");
-      showSidebarTab();
-      queueSidebarRefresh(true);
-      return;
-    }
-
-    if (action === "connect") {
-      var force = trakt.getAuthStatus().state === "connected";
-      await runManualAuth(force);
-      return;
-    }
-
-    if (action === "signout") {
-      handleManualSignOut();
-    }
-  }).catch(function(error) {
-    log("Auth action failed: " + errStr(error));
-    persistAuthStatus();
-  });
-}
-
-function parsedLabel(parsed) {
-  if (!parsed) return "unparsed";
-  if (parsed.kind === "episode") {
-    return parsed.showTitle + " S" + parsed.season + "E" + parsed.episode;
-  }
-  return parsed.title || parsed.kind;
-}
-
-function isScrobblingEnabled() {
-  return prefBool("scrobble_enabled", true);
-}
-
-function pad2(value) {
-  return String(value).padStart(2, "0");
-}
-
-function mediaInfoFromParsed(parsed) {
-  if (!parsed) return null;
-  if (parsed.kind === "movie") {
-    return {
-      type: "movie",
-      title: parsed.title,
-      year: parsed.year || null
-    };
-  }
-
-  if (parsed.kind === "episode") {
-    return {
-      type: "episode",
-      title: parsed.showTitle,
-      showTitle: parsed.showTitle,
-      year: parsed.year || null,
-      season: parsed.season,
-      episode: parsed.episode,
-      episodeTitle: parsed.episodeTitle || "",
-      unresolvedShow: !!parsed.unresolvedShow,
-      manualTraktId: Number(parsed.manualTraktId || 0)
-    };
-  }
-
-  return null;
-}
-
-function mediaLabel(mediaInfo) {
-  if (!mediaInfo) return "unknown media";
-  if (mediaInfo.type === "episode") {
-    var suffix = mediaInfo.episodeTitle ? (" - " + mediaInfo.episodeTitle) : "";
-    return mediaInfo.showTitle + " S" + pad2(mediaInfo.season) + "E" + pad2(mediaInfo.episode) + suffix;
-  }
-  return mediaInfo.title + (mediaInfo.year ? (" (" + mediaInfo.year + ")") : "");
-}
-
-function correctionResultLabel(result, mediaInfo) {
-  if (!result) return "";
-  if (result.kind === "episode") {
-    var suffix = mediaInfo && mediaInfo.episodeTitle ? (" - " + mediaInfo.episodeTitle) : "";
-    return String(result.title || "") +
-      " S" + pad2(mediaInfo && mediaInfo.season) +
-      "E" + pad2(mediaInfo && mediaInfo.episode) +
-      suffix;
-  }
-
-  return String(result.title || "") + (result.year ? (" (" + result.year + ")") : "");
-}
-
-function labelFromTraktScrobbleBody(body, mediaInfo) {
-  var payload = body || {};
-
-  if (payload.movie && payload.movie.title) {
-    return String(payload.movie.title) + (payload.movie.year ? (" (" + payload.movie.year + ")") : "");
-  }
-
-  if (payload.show && payload.show.title) {
-    var episodeTitle = payload.episode && payload.episode.title
-      ? String(payload.episode.title)
-      : String((mediaInfo && mediaInfo.episodeTitle) || "");
-    return String(payload.show.title) +
-      " S" + pad2(payload.episode && payload.episode.season ? payload.episode.season : (mediaInfo && mediaInfo.season)) +
-      "E" + pad2(payload.episode && payload.episode.number ? payload.episode.number : (mediaInfo && mediaInfo.episode)) +
-      (episodeTitle ? (" - " + episodeTitle) : "");
-  }
-
-  return "";
-}
-
-function scrobbleTargetLabel(snapshot) {
-  if (!snapshot) return "";
-  return String(snapshot.traktTargetLabel || "") || mediaLabel(snapshot.mediaInfo);
-}
-
-function correctionMediaLabel() {
-  if (!currentMedia || !currentMedia.mediaInfo) return "";
-  return scrobbleTargetLabel(currentMedia);
-}
-
-function cloneMediaInfo(mediaInfo) {
-  if (!mediaInfo) return null;
-  return {
-    type: mediaInfo.type,
-    title: mediaInfo.title,
-    showTitle: mediaInfo.showTitle,
-    year: mediaInfo.year,
-    season: mediaInfo.season,
-    episode: mediaInfo.episode,
-    episodeTitle: mediaInfo.episodeTitle,
-    unresolvedShow: !!mediaInfo.unresolvedShow,
-    manualTraktId: Number(mediaInfo.manualTraktId || 0),
-    imdb: mediaInfo.imdb || "",
-    tmdb: Number(mediaInfo.tmdb||0)
-  };
-}
-
-function currentMediaKey() {
-  return currentMedia && currentMedia.mediaInfo
-    ? monitor.mediaKey(currentMedia.mediaInfo)
-    : "";
-}
-
-function defaultCorrectionQuery(mediaInfo) {
-  if (!mediaInfo) return "";
-  if (mediaInfo.type === "episode") {
-    return mediaInfo.unresolvedShow ? "" :
-      String(mediaInfo.showTitle || mediaInfo.title || "").trim();
-  }
-  return String(mediaInfo.title || "").trim();
-}
-
-function resetCorrectionState() {
-  correctionState = createCorrectionState();
-}
-
-function cloneSnapshot(snapshot) {
-  if (!snapshot) return null;
-  return {
-    state: snapshot.state,
-    duration: snapshot.duration,
-    position: snapshot.position,
-    progress: snapshot.progress,
-    updatedAt: snapshot.updatedAt,
-    mediaInfo: cloneMediaInfo(snapshot.mediaInfo),
-    traktTargetLabel: String(snapshot.traktTargetLabel || "")
-  };
-}
-
-function createResumableTimer(timeoutMs, callback) {
-  var remainingMs = timeoutMs;
-  var startedAt = 0;
-  var timerId = null;
-
-  function clear() {
-    if (timerId !== null) {
-      clearTimeout(timerId);
-      timerId = null;
-    }
-  }
-
-  function schedule() {
-    clear();
-    startedAt = Date.now();
-    timerId = setTimeout(function() {
-      timerId = null;
-      callback();
-    }, remainingMs);
-  }
-
-  return {
-    start: function() {
-      remainingMs = timeoutMs;
-      schedule();
-    },
-    pause: function() {
-      if (timerId === null) return;
-      remainingMs = Math.max(0, remainingMs - (Date.now() - startedAt));
-      clear();
-    },
-    resume: function() {
-      if (timerId !== null) return;
-      schedule();
-    },
-    cancel: function() {
-      clear();
-    }
-  };
-}
-
-function playbackConfig() {
-  return {
-    skipInterval: prefNumber("skip_interval", 5),
-    previewThreshold: prefNumber("preview_threshold", 80),
-    previewDuration: prefNumber("preview_duration", 60),
-    fastPauseThreshold: prefNumber("fast_pause_threshold", 1),
-    fastPauseDuration: prefNumber("fast_pause_duration", 5)
-  };
-}
-
-// Hydrate only from explicit, independently verified external IDs.
-// Never match by the localized episode title alone. Reject stale async replies
-// when playback changes to another stream during the Trakt network request.
-async function verifyFreshPlayback(target,external) {
-  try {
-    var resolved=await trakt.resolveFreshIdentity(external);
-    if (!currentMedia || currentMedia!==target || target.freshState!=="resolving")return;
-    if (!resolved) {
-      target.freshState="rejected";
-      setScrobbleStatus({status:"unmatched",mediaLabel:mediaLabel(target.mediaInfo),
-        detail:"External ID could not be independently verified on Trakt. Use Correct Match.",
-        reason:"missing-trakt-match"});
-      queueSidebarRefresh(false);
-      return;
-    }
-    var info=target.mediaInfo,parsed=target.parsed;
-    if (resolved.kind==="episode") {
-      info.type="episode";
-      info.title=resolved.title;info.showTitle=resolved.title;
-      info.season=resolved.season;info.episode=resolved.episode;
-      info.unresolvedShow=false;
-      parsed.kind="episode";parsed.showTitle=resolved.title;
-      parsed.season=resolved.season;parsed.episode=resolved.episode;
-      parsed.unresolvedShow=false;
-      if(!info.episodeTitle)info.episodeTitle=resolved.episodeTitle||"";
-    } else {
-      info.type="movie";info.title=resolved.title;info.year=resolved.year;
-      info.unresolvedShow=false;
-      parsed.kind="movie";parsed.title=resolved.title;
-      parsed.year=resolved.year;
-    }
-    info.manualTraktId=resolved.trakt;
-    if (resolved.imdb && /^tt\\d{6,10}$/i.test(resolved.imdb))info.imdb=resolved.imdb;
-    info.tmdb=resolved.tmdb||0;
-    target.freshIdKind=resolved.source;
-    target.freshState="verified";
-    parsed.parserSource=resolved.source;
-    target.traktTargetLabel=resolved.kind==="episode" ?
-      resolved.title+" S"+pad2(resolved.season)+"E"+pad2(resolved.episode)+
-      (resolved.episodeTitle?" - "+resolved.episodeTitle:"") : resolved.title;
-    setScrobbleStatus({status:"ready",mediaLabel:mediaLabel(info),
-      detail:"External ID independently verified. Live scrobbling enabled.",
-      reason:""});
-    resetPlaybackTracking();
-    beginResumeCheck(target);
-    queueSidebarRefresh(false);
-    // beginResumeCheck will scrobble only after verifying Trakt resume.
-  } catch (error) {
-    if (!currentMedia || currentMedia!==target)return;
-    target.freshState="rejected";
-    log("Fresh media verification failed: "+errStr(error));
-    setScrobbleStatus({status:"unmatched",mediaLabel:mediaLabel(target.mediaInfo),
-      detail:"Trakt lookup unavailable; no unverified scrobble sent. Retry by reopening playback.",
-      reason:"missing-trakt-match"});
-    queueSidebarRefresh(false);
-  }
-}
-
-function identifyCurrentMedia() {
-  var source = getCurrentSource();
-  var picked = playbackIdentity.identify(source, parser, streamSource);
-  var parsed = picked.parsed;
-  var episodeRoute = picked.episodeRoute || null;
-  var external=freshIdentity.inspect(source,episodeRoute);
-  if (parsed && parsed.unresolvedShow && episodeRoute && !(external && external.conflict)) {
-    var packMatch = mediaFusionShowCache.find(episodeRoute);
-    if (packMatch) {
-      parsed.showTitle = packMatch.title;
-      parsed.unresolvedShow = false;
-      parsed.manualTraktId = packMatch.trakt;
-      parsed.parserSource = "mediafusion-confirmed-pack";
-    }
-  }
-  // Some providers expose a trusted series ID without episode numbers.
-  // Only borrow missing S/E from parsed playback metadata; independent Trakt
-  // resolution, title equivalence and exact episode verification remain required.
-  external=freshIdentity.completeEpisodePosition(external,parsed);
-  // On a fresh external ID, the parser's localized metadata is not proof
-  // of a series. Hold playback until Trakt resolves and verifies the episode.
-  var freshPending=false;
-  var freshConflict=!!(external&&external.conflict);
-  if (external && !external.conflict && external.kind==="episode" &&
-      Number.isInteger(external.season)&&Number.isInteger(external.episode)) {
-    if (parsed && parsed.kind==="episode" &&
-        (parsed.season!==external.season||parsed.episode!==external.episode)) {
-      freshConflict=true;
-    } else {
-      var episodeTitle=parsed && parsed.kind==="episode" ? parsed.episodeTitle :
-        String(source.metadataTitle||source.mediaTitle||source.title||"");
-      parsed={kind:"episode",showTitle:"Unknown Series",
-        season:external.season,episode:external.episode,
-        episodeTitle:episodeTitle,unresolvedShow:true,
-        parserSource:"explicit-playback-id-pending"};
-      freshPending=true;
-    }
-  } else if(external && !external.conflict && external.kind==="movie" &&
-      (!parsed || parsed.kind==="movie")) {
-    if(!parsed)parsed={kind:"movie",title:"Unknown Movie",year:null};
-    freshPending=true;
-    parsed.parserSource="explicit-playback-id-pending";
-  } else if(external && !external.conflict) {
-    // A show ID without S/E, or a conflict with parsed media type,
-    // must not accidentally fall back to unrelated movie title search.
-    freshConflict=true;
-  }
-  if(freshConflict && parsed) {
-    if(parsed.kind==="episode")parsed.unresolvedShow=true;
-    parsed.parserSource="conflicting-external-id";
-  }
-  logGuessitFailureOnce();
-  var mediaInfo = mediaInfoFromParsed(parsed);
-  if (mediaInfo && picked.imdb) {
-    mediaInfo.imdb = picked.imdb;
-  }
-  log("Playback identification: " + (parsed ? parsedLabel(parsed) : "no confident match") +
-      " via " + picked.source + (picked.imdb ? " imdb=" + picked.imdb : ""));
-  currentMedia = parsed ? {
-    source: source,
-    parsed: parsed,
-    episodeRoute: episodeRoute,
-    mediaInfo: mediaInfo,
-    freshState:freshConflict?"conflict":freshPending?"resolving":"",
-    freshIdKind:"",
-    manuallyCorrected: false,
-    traktTargetLabel: "",
-    identifiedAt: new Date().toISOString()
-  } : null;
-
-  if (!parsed) {
-    lastScrobbleStatus = createScrobbleStatus();
-    setScrobbleStatus({
-      status: "idle",
-      verb: "",
-      mediaLabel: "",
-      detail: "The current file could not be classified."
-    });
-    log("Could not classify current media");
-    debugOsd("Could not classify current media");
-    return;
-  }
-
-  setScrobbleStatus({
-    status: isScrobblingEnabled() ? "ready" : "disabled",
-    verb: "",
-    mediaLabel: currentMedia && currentMedia.mediaInfo ? mediaLabel(currentMedia.mediaInfo) : parsedLabel(parsed),
-    detail: mediaInfo && mediaInfo.unresolvedShow
-      ? "MediaFusion S/E verified; select the show using Correct Match."
-      : isScrobblingEnabled() ? "Watching for playback changes." : "Scrobbling is turned off.",
-    reason: mediaInfo && mediaInfo.unresolvedShow ? "missing-trakt-match" :
-      isScrobblingEnabled() ? "" : "disabled"
-  });
-  if (currentMedia && freshPending && !freshConflict) {
-    setScrobbleStatus({status:"ready",mediaLabel:mediaLabel(mediaInfo),
-      detail:"Verifying embedded IMDb/TMDB ID before live scrobbling.",
-      reason:"missing-trakt-match"});
-    verifyFreshPlayback(currentMedia,external);
-  } else if (currentMedia && freshConflict) {
-    setScrobbleStatus({status:"unmatched",mediaLabel:mediaLabel(mediaInfo),
-      detail:"Conflicting external IDs or episode positions; use Correct Match.",
-      reason:"missing-trakt-match"});
-  }
-  if (currentMedia && !freshPending && !freshConflict) beginResumeCheck(currentMedia);
-  log("Parsed " + parsedLabel(parsed) + " via " + (parsed.parserSource || "unknown"));
-  debugOsd("Parsed " + parsedLabel(parsed));
-}
-
-function clearTimer(name) {
-  var timer = playbackState[name];
-  if (timer && typeof timer.cancel === "function") {
-    timer.cancel();
-  }
-  playbackState[name] = null;
-}
-
-function exitPreview() {
-  if (!playbackState.preview) return;
-  playbackState.preview = false;
-  playbackState.scrobbleBuffer = null;
-  clearTimer("previewTimer");
-  log("Preview mode ended");
-}
-
-function exitFastPause() {
-  if (!playbackState.fastPause) return;
-  playbackState.fastPause = false;
-  playbackState.scrobbleBuffer = null;
-  clearTimer("fastPauseTimer");
-  log("Fast-pause mode ended");
-}
-
-function resetPlaybackTracking() {
-  exitPreview();
-  exitFastPause();
-  playbackState.prevSnapshot = null;
-  playbackState.scrobbleBuffer = null;
-  playbackState.lastScrobbleKey = "";
-  playbackState.preview = false;
-  playbackState.fastPause = false;
-}
-
-function buildLiveSnapshot() {
-  if (!currentMedia || !currentMedia.mediaInfo) {
-    return null;
-  }
-
-  var duration = Number(core.status.duration || 0);
-  if (!isFinite(duration) || duration <= 0) {
-    return null;
-  }
-
-  var position = Number(core.status.position || 0);
-  if (!isFinite(position)) position = 0;
-  if (position < 0) position = 0;
-  if (position > duration) position = duration;
-
-  var state = core.status.idle
-    ? monitor.State.Stopped
-    : (core.status.paused ? monitor.State.Paused : monitor.State.Playing);
-
-  return {
-    state: state,
-    duration: duration,
-    position: position,
-    progress: monitor.computeProgress(position, duration),
-    updatedAt: Date.now() / 1000,
-    mediaInfo: cloneMediaInfo(currentMedia.mediaInfo),
-    traktTargetLabel: String(currentMedia.traktTargetLabel || "")
-  };
-}
-
-function buildStoppedSnapshot(prevSnapshot) {
-  if (!prevSnapshot) return null;
-  return {
-    state: monitor.State.Stopped,
-    duration: prevSnapshot.duration,
-    position: prevSnapshot.position,
-    progress: prevSnapshot.progress,
-    updatedAt: Date.now() / 1000,
-    mediaInfo: cloneMediaInfo(prevSnapshot.mediaInfo),
-    traktTargetLabel: String(prevSnapshot.traktTargetLabel || "")
-  };
-}
-
-function resyncCurrentPlayback(logMessage) {
-  var snapshot = buildLiveSnapshot();
-  if (!snapshot || !snapshot.mediaInfo || snapshot.state === monitor.State.Stopped) {
-    return;
-  }
-
-  playbackState.lastScrobbleKey = "";
-  if (logMessage) {
-    log(logMessage);
-  }
-  queueScrobble(monitor.stateVerb(snapshot.state), snapshot);
-}
-
-function resyncCurrentPlaybackAfterAuth() {
-  resyncCurrentPlayback("Re-syncing current playback after Trakt auth");
-}
-
-function setScrobblingEnabled(enabled) {
-  var nextValue = !!enabled;
-  var prevValue = isScrobblingEnabled();
-  if (nextValue === prevValue) {
-    queueSidebarRefresh(false);
-    return;
-  }
-
-  persistPreferences({
-    scrobble_enabled: nextValue
-  });
-
-  resetPlaybackTracking();
-  playbackState.lastScrobbleKey = "";
-
-  if (nextValue) {
-    log("Trakt scrobbling enabled");
-    importantOsd("Trakt scrobbling enabled");
-    if (currentMedia && currentMedia.mediaInfo) {
-      setScrobbleStatus({
-        status: "ready",
-        verb: "",
-        mediaLabel: mediaLabel(currentMedia.mediaInfo),
-        detail: "Watching for playback changes.",
-        reason: ""
-      });
-    } else {
-      setScrobbleStatus(createScrobbleStatus());
-    }
-    resyncCurrentPlayback("Re-syncing current playback after enabling scrobbling");
-    return;
-  }
-
-  log("Trakt scrobbling disabled");
-  importantOsd("Trakt scrobbling paused");
-  setScrobbleStatus({
-    status: "disabled",
-    verb: "",
-    mediaLabel: currentMedia && currentMedia.mediaInfo ? mediaLabel(currentMedia.mediaInfo) : "",
-    detail: "Scrobbling is turned off.",
-    reason: "disabled",
-    progress: null
-  });
-}
-
-function queueScrobble(verb, snapshot, options) {
-  if (!isScrobblingEnabled()) {
-    setScrobbleStatus({
-      status: "disabled",
-      verb: "",
-      mediaLabel: snapshot && snapshot.mediaInfo ? mediaLabel(snapshot.mediaInfo) : "",
-      detail: "Scrobbling is turned off.",
-      reason: "disabled",
-      progress: null
-    });
-    return;
-  }
-
-  var payload = cloneSnapshot(snapshot);
-  if (!payload || !payload.mediaInfo) return;
-  // Strict read-before-write: even "start" at 00:00 can regress a saved
-  // Trakt resume point. Never send while the preflight is pending/unavailable.
-  if (!(options && options.journalId)) {
-    var currentGate=currentMedia&&currentMedia.resumeGate;
-    var check=currentGate?currentGate.decision(Number(payload.progress)):null;
-    if (!check || check.blocked) {
-      var reason=check?check.reason:"resume-check-pending";
-      var pendingIdentity=!currentGate
-        ? resumeProtection.pendingIdentityStatus(
-            currentMedia&&currentMedia.mediaInfo,currentMedia&&currentMedia.freshState)
-        : null;
-      var requiresMatch=!!(pendingIdentity&&pendingIdentity.status==="needs-match");
-      setScrobbleStatus({status:requiresMatch?"unmatched":"deferred",verb:verb,
-        mediaLabel:scrobbleTargetLabel(payload),
-        detail:reason==="remote-ahead"
-          ? "Resume Protection: seek to saved Trakt point before syncing."
-          : pendingIdentity ? pendingIdentity.message
-          : "Resume Protection: waiting for verified Trakt resume.",
-        reason:requiresMatch?"missing-trakt-match":"resume-guard",progress:payload.progress});
-      return;
-    }
-  }
-  if (!(options && options.journalId) && currentMedia &&
-      ["resolving","rejected","conflict"].includes(currentMedia.freshState)) {
-    setScrobbleStatus({status:"unmatched",verb:verb,
-      mediaLabel:scrobbleTargetLabel(payload),
-      detail:"External ID must be verified before scrobbling.",
-      reason:"missing-trakt-match",progress:payload.progress});
-    return;
-  }
-  if (payload.mediaInfo.unresolvedShow ||
-      (payload.mediaInfo.type==="episode" &&
-       /^unknown series$/i.test(String(payload.mediaInfo.showTitle||"")))) {
-    setScrobbleStatus({status:"unmatched",verb:verb,mediaLabel:scrobbleTargetLabel(payload),
-      detail:"Select and verify the series using Correct Match before scrobbling.",
-      reason:"missing-trakt-match",progress:payload.progress});
-    return;
-  }
-  var effectiveVerb = (trakt && typeof trakt.normalizeScrobbleVerb === "function")
-    ? trakt.normalizeScrobbleVerb(verb, payload.progress)
-    : verb;
-
-  var scrobbleKey = [
-    effectiveVerb,
-    monitor.mediaKey(payload.mediaInfo),
-    String(Math.round(payload.progress * 100) / 100)
-  ].join("|");
-
-  if (playbackState.lastScrobbleKey === scrobbleKey && !(options && options.journalId)) {
-    return;
-  }
-
-  playbackState.lastScrobbleKey = scrobbleKey;
-  // A synchronous write-ahead record survives app termination before curl can finish.
-  // An acknowledged Trakt stop removes it. Do not include stream URLs or OAuth data.
-  var journalId = options && options.journalId ? String(options.journalId) : "";
-  if (effectiveVerb === "stop" && !journalId) {
-    var savedFinalization = stopJournal.record(payload, trustedReplayProof(payload.mediaInfo));
-    journalId = savedFinalization ? savedFinalization.id : "";
-    if (savedFinalization) log("Saved Trakt stop checkpoint (progress=" + payload.progress.toFixed(2) + "%)");
-    else log("No verified identity for durable stop; attempting direct Trakt validation without unsafe retry");
-  }
-  setScrobbleStatus({
-    status: "queued",
-    verb: effectiveVerb,
-    mediaLabel: scrobbleTargetLabel(payload),
-    detail: "Queued for Trakt at " + payload.progress.toFixed(2) + "%.",
-    reason: "",
-    progress: payload.progress
-  });
-  if (effectiveVerb !== verb) {
-    log(
-      "Scrobble " + verb +
-      " normalized to " + effectiveVerb +
-      " for " + scrobbleTargetLabel(payload) +
-      " at " + payload.progress.toFixed(2) + "%"
-    );
-  }
-  log("Scrobble " + effectiveVerb + " queued for " + scrobbleTargetLabel(payload) + " at " + payload.progress.toFixed(2) + "%");
-  playbackState.scrobbleChain = playbackState.scrobbleChain.then(async function() {
-    if (journalId) activeStopSyncId = journalId;
-    setScrobbleStatus({
-      status: "sending",
-      verb: effectiveVerb,
-      mediaLabel: scrobbleTargetLabel(payload),
-      detail: "Sending " + effectiveVerb + " to Trakt.",
-      reason: "",
-      progress: payload.progress
-    });
-
-    try {
-      var result = await trakt.scrobble(effectiveVerb, payload.mediaInfo, payload.progress);
-      if (result && result.ok) {
-        if (journalId) {
-          var completed = stopJournal.find(journalId);
-          stopJournal.acknowledge(journalId);
-          if (completed) syncHistory.record(completed, "ok");
-        }
-        var confirmedId=Number(result.resolvedTraktId||0);
-        if (Number.isInteger(confirmedId)&&confirmedId>0) {
-          confirmedPlayback={key:monitor.mediaKey(payload.mediaInfo),
-            proof:{kind:"trakt-confirmed",traktId:confirmedId}};
-        }
-        var traktAction = successfulScrobbleAction(effectiveVerb, result);
-        var traktProgress = successfulScrobbleProgress(payload.progress, result);
-        var matchedLabel = labelFromTraktScrobbleBody(result.body, payload.mediaInfo) || scrobbleTargetLabel(payload);
-        if (
-          currentMedia &&
-          currentMedia.mediaInfo &&
-          monitor.mediaKey(currentMedia.mediaInfo) === monitor.mediaKey(payload.mediaInfo)
-        ) {
-          currentMedia.traktTargetLabel = matchedLabel;
-        }
-        setScrobbleStatus({
-          status: "succeeded",
-          verb: effectiveVerb,
-          action: traktAction,
-          mediaLabel: matchedLabel,
-          detail: successfulScrobbleDetail(traktAction, traktProgress),
-          reason: "",
-          progress: traktProgress
-        });
-        log(
-          "Scrobble " + effectiveVerb +
-          " succeeded for " + matchedLabel +
-          " (action=" + traktAction + ", progress=" + traktProgress.toFixed(2) + "%)"
-        );
-        if (traktAction === "scrobble" && trakt && typeof trakt.clearRecentHistoryCache === "function") {
-          trakt.clearRecentHistoryCache();
-        }
-        maybeShowScrobbleStatusOsd(effectiveVerb, traktAction, payload.mediaInfo);
-        if (!firstScrobbleNoticeShown) {
-          debugOsd("Scrobble flow active");
-          firstScrobbleNoticeShown = true;
-        }
-        return;
-      }
-
-      if (result && result.skip) {
-        if (journalId && result.reason === "missing-trakt-match") {
-          stopJournal.markReview(journalId, "Trakt match could not be verified");
-        }
-        if (result.reason === "missing-client-credentials" && !missingCredentialsNoticeShown) {
-          importantOsd("Configure Trakt app credentials for this build");
-          missingCredentialsNoticeShown = true;
-        }
-        if (result.reason === "auth-required" && !authRequiredNoticeShown) {
-          importantOsd("Connect Trakt from the sidebar to start scrobbling");
-          authRequiredNoticeShown = true;
-        }
-        setScrobbleStatus({
-          status: "skipped",
-          verb: effectiveVerb,
-          mediaLabel: scrobbleTargetLabel(payload),
-          reason: result.reason,
-          detail: result.reason === "auth-required"
-            ? "Scrobble skipped until you connect Trakt from the sidebar."
-            : ("Scrobble skipped: " + result.reason),
-          progress: payload.progress
-        });
-        log("Scrobble skipped for " + scrobbleTargetLabel(payload) + ": " + result.reason);
-        return;
-      }
-
-      if (result && result.duplicate) {
-        // Trakt 409 already recorded an identical scrobble; do not replay it.
-        if (journalId) {
-          var duplicate = stopJournal.find(journalId);
-          stopJournal.acknowledge(journalId);
-          if (duplicate) syncHistory.record(duplicate, "duplicate");
-        }
-        setScrobbleStatus({
-          status: "duplicate",
-          verb: effectiveVerb,
-          mediaLabel: scrobbleTargetLabel(payload),
-          detail: "Trakt reported this scrobble as a duplicate.",
-          reason: "",
-          progress: payload.progress
-        });
-        log("Scrobble duplicate ignored for " + scrobbleTargetLabel(payload));
-        return;
-      }
-
-      if (result && result.notFound) {
-        if (journalId) stopJournal.markReview(journalId, "Trakt rejected the resolved media ID");
-        setScrobbleStatus({
-          status: "unmatched",
-          verb: effectiveVerb,
-          mediaLabel: scrobbleTargetLabel(payload),
-          detail: "Trakt could not match this media identity.",
-          reason: "missing-trakt-match",
-          progress: payload.progress
-        });
-        log("Trakt rejected the scrobble because the media was not found: " + scrobbleTargetLabel(payload));
-        return;
-      }
-
-      setScrobbleStatus({
-        status: "unknown",
-        verb: effectiveVerb,
-        mediaLabel: scrobbleTargetLabel(payload),
-        detail: "Trakt returned no actionable result.",
-        reason: "",
-        progress: payload.progress
-      });
-      log("Scrobble returned no actionable result for " + scrobbleTargetLabel(payload));
-    } catch (error) {
-      var deferred = error && (error.code === "TRAKT_COOLDOWN" || error.code === "TRAKT_OFFLINE");
-      setScrobbleStatus({
-        status: deferred ? "deferred" : "failed",
-        verb: effectiveVerb,
-        mediaLabel: scrobbleTargetLabel(payload),
-        detail: deferred
-          ? ("Trakt temporarily unavailable. " + (journalId ? "Final progress queued for recovery." : "Waiting for connection."))
-          : errStr(error),
-        reason: deferred ? error.code : "",
-        progress: payload.progress
-      });
-      log("Scrobble failed for " + scrobbleTargetLabel(payload) + ": " + errStr(error));
-      if (/Missing Trakt client credentials/.test(errStr(error)) && !missingCredentialsNoticeShown) {
-        importantOsd("Configure Trakt app credentials for this build");
-        missingCredentialsNoticeShown = true;
-      }
-    } finally {
-      if (journalId && activeStopSyncId === journalId) activeStopSyncId = "";
-      persistAuthStatus();
-      queueSidebarRefresh(false);
-    }
-  }).catch(function(error) {
-    setScrobbleStatus({
-      status: "failed",
-      verb: verb,
-      mediaLabel: scrobbleTargetLabel(payload),
-      detail: errStr(error),
-      reason: "",
-      progress: payload.progress
-    });
-    log("Scrobble queue failure: " + errStr(error));
-  });
-}
-
-async function replaySavedFinalizations() {
-  if (stopReplayActive || !isScrobblingEnabled()) return;
-  // A previous stop must never be replayed while a newer playback is active.
-  if (currentMedia && playbackState.prevSnapshot &&
-      playbackState.prevSnapshot.state !== monitor.State.Stopped) return;
-  var network = trakt.getApiStatus ? trakt.getApiStatus() : { mode: "online" };
-  if (network.mode !== "online") return;
-  var pending = stopJournal.pending();
-  if (!pending.length) return;
-  stopReplayActive = true;
-  try {
-    log("Replaying " + pending.length + " unacknowledged Trakt stop checkpoint(s)");
-    for (var i = 0; i < pending.length; i++) {
-      if (trakt.getApiStatus && trakt.getApiStatus().mode !== "online") break;
-      if (currentMedia && playbackState.prevSnapshot &&
-          playbackState.prevSnapshot.state !== monitor.State.Stopped) break;
-      var entry = pending[i];
-      // A previous offline stop must not overwrite a newer Trakt checkpoint.
-      // A failed lookup leaves the existing local journal untouched.
-      var remote;
-      try {remote=await trakt.getResumeCheckpoint(entry.mediaInfo);}
-      catch(error) {
-        log("Unable to validate previous stop against Trakt resume: "+errStr(error));
-        break;
-      }
-      if(!remote || remote.status!=="ok")break;
-      var remoteCheck=resumeProtection.assess(remote.progress,entry.progress);
-      if(remoteCheck.blocked) {
-        stopJournal.markReview(entry.id,"Saved Trakt resume is ahead of this old stop");
-        log("Old stop quarantined to Needs Review: remote resume ahead");
-        continue;
-      }
-      var replayInfo=cloneMediaInfo(entry.mediaInfo);
-      if (entry.replayProof && (entry.replayProof.kind==="manual" ||
-          entry.replayProof.kind==="trakt-confirmed"))
-        replayInfo.manualTraktId=Number(entry.replayProof.traktId||0);
-      queueScrobble("stop", {
-        state: monitor.State.Stopped,
-        progress: entry.progress,
-        duration: 0,
-        position: 0,
-        updatedAt: entry.createdAt / 1000,
-        mediaInfo: replayInfo,
-        traktTargetLabel: ""
-      }, { journalId: entry.id });
-      await playbackState.scrobbleChain;
-    }
-  } finally {
-    stopReplayActive = false;
-    queueSidebarRefresh(false);
-  }
-}
-
-async function flushScrobbleQueue(reason, timeoutMs) {
-  var timeout = Math.max(0, Number(timeoutMs || 0));
-  var label = reason ? (" for " + reason) : "";
-  if (timeout > 0) {
-    log("Waiting up to " + timeout + "ms for pending scrobbles" + label);
-  } else {
-    log("Waiting for pending scrobbles" + label);
-  }
-
-  var chain = playbackState.scrobbleChain.catch(function(error) {
-    log("Pending scrobble flush saw error: " + errStr(error));
-  });
-
-  if (!timeout) {
-    await chain;
-    return;
-  }
-
-  await Promise.race([
-    chain,
-    new Promise(function(resolve) {
-      setTimeout(resolve, timeout);
+// Race an HTTP promise against a timeout so search never hangs forever.
+function withTimeout(p, ms, label) {
+  return Promise.race([
+    p,
+    new Promise(function(_, reject) {
+      setTimeout(function() {
+        reject(new Error((label || "Request") + " timed out after " + Math.round(ms/1000) + "s"));
+      }, ms);
     })
   ]);
 }
+var HTTP_TIMEOUT_MS = 10000; // per-call budget
 
-function delayedScrobble(cleanup) {
-  if (playbackState.scrobbleBuffer) {
-    var buffered = cloneSnapshot(playbackState.scrobbleBuffer);
-    queueScrobble(monitor.stateVerb(buffered.state), buffered);
-  }
-  if (typeof cleanup === "function") {
-    cleanup();
-  }
+// OpenSubtitles needs a User-Agent like "AppName vX.Y.Z" or it throttles requests
+var OS_USER_AGENT = "EpisodeInfo v1.3.3";
+
+// Lazy IMDB id resolver: show-level and episode-level ids from TMDB
+async function resolveImdbIds(d, tmdbKey) {
+  if (!tmdbKey) return d;
+  if (!d.tmdbId) return d;
+
+  try {
+    if (d.isMovie) {
+      if (!d.imdbId) {
+        var r = await withTimeout(
+          iina.http.get("https://api.themoviedb.org/3/movie/" + d.tmdbId + "/external_ids", {
+            params: { api_key: tmdbKey }
+          }),
+          HTTP_TIMEOUT_MS,
+          "TMDB external_ids"
+        );
+        var body = r.data || JSON.parse(r.text || "{}");
+        if (r.statusCode === 200 && body.imdb_id) d.imdbId = body.imdb_id;
+      }
+    } else {
+      // TV: show and episode ids in parallel
+      var calls = [];
+      var needShow = !d.parentImdbId;
+      var needEp   = !d.imdbId && d.season && d.episode;
+
+      if (needShow) {
+        calls.push(
+          withTimeout(
+            iina.http.get("https://api.themoviedb.org/3/tv/" + d.tmdbId + "/external_ids", {
+              params: { api_key: tmdbKey }
+            }),
+            HTTP_TIMEOUT_MS,
+            "TMDB show external_ids"
+          ).then(function(r) {
+            var b = r.data || JSON.parse(r.text || "{}");
+            if (r.statusCode === 200 && b.imdb_id) d.parentImdbId = b.imdb_id;
+          }).catch(function(){})
+        );
+      }
+      if (needEp) {
+        calls.push(
+          withTimeout(
+            iina.http.get("https://api.themoviedb.org/3/tv/" + d.tmdbId
+              + "/season/" + d.season + "/episode/" + d.episode + "/external_ids", {
+              params: { api_key: tmdbKey }
+            }),
+            HTTP_TIMEOUT_MS,
+            "TMDB episode external_ids"
+          ).then(function(r) {
+            var b = r.data || JSON.parse(r.text || "{}");
+            if (r.statusCode === 200 && b.imdb_id) d.imdbId = b.imdb_id;
+          }).catch(function(){})
+        );
+      }
+      if (calls.length) await Promise.all(calls);
+    }
+  } catch(_e) {}
+  return d;
 }
 
-function executeAction(action, prevSnapshot, currentSnapshot) {
-  if (action === "scrobble") {
-    queueScrobble(monitor.stateVerb(currentSnapshot.state), currentSnapshot);
-    return;
-  }
-
-  if (action === "stop_previous") {
-    queueScrobble("stop", prevSnapshot);
-    return;
-  }
-
-  if (action === "exit_preview") {
-    exitPreview();
-    return;
-  }
-
-  if (action === "enter_preview") {
-    exitPreview();
-    playbackState.preview = true;
-    playbackState.scrobbleBuffer = cloneSnapshot(currentSnapshot);
-    playbackState.previewTimer = createResumableTimer(playbackConfig().previewDuration * 1000, function() {
-      delayedScrobble(exitPreview);
-    });
-    playbackState.previewTimer.start();
-    log("Entered preview mode for " + mediaLabel(currentSnapshot.mediaInfo));
-    return;
-  }
-
-  if (action === "pause_preview") {
-    playbackState.scrobbleBuffer = cloneSnapshot(currentSnapshot);
-    if (playbackState.previewTimer) {
-      playbackState.previewTimer.pause();
-    }
-    return;
-  }
-
-  if (action === "resume_preview") {
-    playbackState.scrobbleBuffer = cloneSnapshot(currentSnapshot);
-    if (playbackState.previewTimer) {
-      playbackState.previewTimer.resume();
-    }
-    return;
-  }
-
-  if (action === "enter_fast_pause") {
-    playbackState.fastPause = true;
-    playbackState.scrobbleBuffer = cloneSnapshot(currentSnapshot);
-    clearTimer("fastPauseTimer");
-    playbackState.fastPauseTimer = createResumableTimer(playbackConfig().fastPauseDuration * 1000, function() {
-      delayedScrobble(exitFastPause);
-    });
-    playbackState.fastPauseTimer.start();
-    log("Entered fast-pause mode");
-    return;
-  }
-
-  if (action === "clear_buf") {
-    clearTimer("fastPauseTimer");
-    playbackState.scrobbleBuffer = null;
-    return;
-  }
-
-  if (action === "delayed_play") {
-    clearTimer("fastPauseTimer");
-    playbackState.scrobbleBuffer = cloneSnapshot(currentSnapshot);
-    playbackState.fastPauseTimer = createResumableTimer(playbackConfig().fastPauseDuration * 1000, function() {
-      delayedScrobble(exitFastPause);
-    });
-    playbackState.fastPauseTimer.start();
-    return;
-  }
-
-  if (action === "exit_fast_pause") {
-    exitFastPause();
-    return;
-  }
-
-  if (action === "ignore") {
-    log("Ignoring transition for " + mediaLabel(currentSnapshot && currentSnapshot.mediaInfo));
-    return;
-  }
-
-  log("Unhandled action: " + action);
+// OpenSubtitles wants the "tt" prefix and leading zeros stripped
+function stripTtAndZeros(s) {
+  if (!s) return null;
+  var n = String(s).replace(/^tt/i, "").replace(/^0+/, "");
+  return n || null;
 }
 
-function processTransition(prevSnapshot, currentSnapshot, reason) {
-  var actions = monitor.decideActions(prevSnapshot, currentSnapshot, {
-    preview: playbackState.preview,
-    fastPause: playbackState.fastPause
-  }, playbackConfig());
+// Canonical IMDB id, leading zeros kept: the skip databases need it exact
+function canonicalImdb(s) {
+  if (!s) return null;
+  var t = String(s).trim();
+  if (!t) return null;
+  return /^tt/i.test(t) ? t : ("tt" + t);
+}
 
-  if (!actions.length) {
+// Keeps the "tt" prefix, strips leading zeros (for Wyzie)
+function withTtPrefix(s) {
+  if (!s) return null;
+  var n = stripTtAndZeros(s);
+  return n ? ("tt" + n) : null;
+}
+
+var sidebarLoaded      = false;
+var currentEpisode     = null;
+var pauseTimer         = null;
+var overlayVisible     = false;
+var overlayBgOpacity   = 0.72;
+var overlayEnabled     = true; // set from the sidebar
+var overlayVerticalPos = 50;     // 0=top, 50=center, 100=bottom
+var pauseDelay         = 3;      // seconds before overlay shows on pause
+var overlayTheme       = "classic"; // classic | compact | poster
+var skipEnabled        = false;  // opt-in: skip intro/recap/credits
+var cardVisible        = false;  // info card showing?
+var skipVisible        = false;  // skip pill showing?
+var segments           = [];     // resolved skip segments for this file
+var activeSegment      = null;   // the one the pill is currently offering
+var timeWatcher        = null;   // id of the mpv.time-pos observer
+var tmdbKey            = ""; // pushed from the sidebar
+var segmentCache       = {};     // "imdb:season:episode" -> segments
+var currentVideoUrl    = ""; // url of the current file, for the sidebar's per-URL memory
+
+function log(msg) {
+  iina.console.log("[EpInfo] " + msg);
+  if (sidebarLoaded) sidebar.postMessage("overlayStatus", { text: msg });
+}
+
+function showOverlay(d) {
+  if (!overlayEnabled) return;
+  overlay.postMessage("showData", {
+    showTitle:   d.showTitle  || "",
+    epTitle:     d.epTitle    || "",
+    code:        d.code       || "",
+    airDate:     d.airDate    || "",
+    rating:      d.rating     || "",
+    overview:    d.overview   || "",
+    posterUrl:   d.posterUrl  || "",
+    bgOpacity:   overlayBgOpacity,
+    verticalPos: overlayVerticalPos,
+    theme:       overlayTheme
+  });
+  overlay.show();
+  cardVisible = true;
+  overlayVisible = true;
+  sidebar.postMessage("overlayShowing", { visible: true });
+  log("Showing: " + d.epTitle);
+}
+
+function hideOverlay() {
+  if (pauseTimer) { clearTimeout(pauseTimer); pauseTimer = null; }
+  cardVisible = false;
+  overlayVisible = false;
+  overlay.postMessage("hideCard", {});
+  syncOverlay();
+  sidebar.postMessage("overlayShowing", { visible: false });
+}
+
+// The info card and skip pill share the overlay; hide it only when neither is up
+function syncOverlay() {
+  if (cardVisible || skipVisible) overlay.show();
+  else overlay.hide();
+}
+
+// Skip intro / recap / credits: chapters first, then the databases. Never seeks on its own.
+
+var SEGMENT_LABELS = {
+  intro:   "Skip Intro",
+  recap:   "Skip Recap",
+  outro:   "Skip Credits",
+  credits: "Skip Credits",
+  preview: "Skip Preview"
+};
+
+// Crowdsourced data contains reversed and zero-length ranges.
+function validSegment(seg) {
+  return seg && isFinite(seg.start) && isFinite(seg.end) &&
+         seg.end > seg.start && seg.end - seg.start >= 3;
+}
+
+function pushSegment(list, kind, start, end, source, opts) {
+  var seg = {
+    kind: kind, start: Number(start), end: Number(end), source: source,
+    // A value guessed from a null is a placeholder, not a measurement
+    preciseStart: !(opts && opts.vagueStart),
+    preciseEnd:   !(opts && opts.vagueEnd)
+  };
+  if (validSegment(seg)) list.push(seg);
+}
+
+// 1. Chapters: each one ends where the next begins
+function segmentsFromChapters() {
+  var out = [];
+  try {
+    var chapters = core.getChapters() || [];
+    if (chapters.length < 2) return out;
+    var duration = 0;
+    try { duration = iina.mpv.getNumber("duration") || 0; } catch(e) {}
+
+    for (var i = 0; i < chapters.length; i++) {
+      var title = String(chapters[i].title || "").trim();
+      var end   = (i + 1 < chapters.length) ? chapters[i + 1].start : duration;
+      if (!end) continue;
+      if (/^(op|opening|intro|avant|titles?|opening credits)$/i.test(title)) {
+        pushSegment(out, "intro", chapters[i].start, end, "chapters");
+      } else if (/^(recap|previously)/i.test(title)) {
+        pushSegment(out, "recap", chapters[i].start, end, "chapters");
+      } else if (/^(ed|ending|outro|credits|end credits)$/i.test(title)) {
+        pushSegment(out, "outro", chapters[i].start, end, "chapters");
+      }
+    }
+  } catch(e) {}
+  return out;
+}
+
+// 2. The databases, keyed on IMDB id + season + episode
+async function segmentsFromApis(imdbId, season, episode) {
+  var out = [];
+  if (!imdbId) return out;
+
+  var qs = "imdb_id=" + encodeURIComponent(imdbId);
+  if (season)  qs += "&season=" + encodeURIComponent(season);
+  if (episode) qs += "&episode=" + encodeURIComponent(episode);
+
+  async function grab(label, url, parse) {
+    try {
+      var r = await withTimeout(
+        iina.http.get(url, { headers: { "Accept": "application/json" } }),
+        HTTP_TIMEOUT_MS, label
+      );
+      if (r.statusCode !== 200) return;
+      var body = r.data || JSON.parse(r.text || "{}");
+      parse(body);
+    } catch(e) { /* one dead provider must not break the others */ }
+  }
+
+  await Promise.all([
+    // IntroDB — /segments returns every type; /intro is intros-only.
+    grab("IntroDB", "https://api.introdb.app/segments?" + qs, function(b) {
+      ["intro", "recap", "outro"].forEach(function(k) {
+        if (b[k]) pushSegment(out, k, b[k].start_sec, b[k].end_sec, "introdb");
+      });
+    }),
+    // TheIntroDB: start_ms/end_ms may be null (from the start / to the end)
+    grab("TheIntroDB", "https://api.theintrodb.org/v2/media?" + qs, function(b) {
+      var dur = 0;
+      try { dur = iina.mpv.getNumber("duration") || 0; } catch(e) {}
+      [["intro", "intro"], ["credits", "outro"]].forEach(function(pair) {
+        var arr = b[pair[0]];
+        if (!Array.isArray(arr)) return;
+        arr.forEach(function(x) {
+          var vagueStart = (x.start_ms === null || x.start_ms === undefined);
+          var vagueEnd   = (x.end_ms   === null || x.end_ms   === undefined);
+          var st = vagueStart ? 0   : x.start_ms / 1000;
+          var en = vagueEnd   ? dur : x.end_ms   / 1000;
+          pushSegment(out, pair[1], st, en, "theintrodb",
+                      { vagueStart: vagueStart, vagueEnd: vagueEnd });
+        });
+      });
+    }),
+    // SkipDB — 200 with null members when it has nothing.
+    grab("SkipDB", "https://api.skipdb.tv/api/segments?" + qs, function(b) {
+      var segs = b.segments || {};
+      ["intro", "recap", "outro", "preview"].forEach(function(k) {
+        var x = segs[k];
+        if (!x) return;
+        if (typeof x.confidence === "number" && x.confidence < 0.5) return;
+        pushSegment(out, k, x.start_ms / 1000, x.end_ms / 1000, "skipdb");
+      });
+    })
+  ]);
+
+  return out;
+}
+
+// AniSkip uses MyAnimeList ids, so map the IMDB id through ARM first
+async function malIdFor(imdbTt, season) {
+  try {
+    var r = await withTimeout(
+      iina.http.get("https://arm.haglund.dev/api/v2/imdb", {
+        params: { id: imdbTt, include: "myanimelist" },
+        headers: { "Accept": "application/json" }
+      }), HTTP_TIMEOUT_MS, "ARM lookup");
+    if (r.statusCode !== 200) return null;
+    var arr = r.data || JSON.parse(r.text || "[]");
+    if (!Array.isArray(arr) || !arr.length) return null;      // not anime
+    var e = arr[(Number(season) || 1) - 1] || arr[0];
+    return e && e.myanimelist ? String(e.myanimelist) : null;
+  } catch(e) { return null; }
+}
+
+async function segmentsFromAniSkip(malId, episode) {
+  var out = [];
+  try {
+    var url = "https://api.aniskip.com/v2/skip-times/" + encodeURIComponent(malId) +
+              "/" + encodeURIComponent(episode || 1) +
+              "?types[]=op&types[]=ed&types[]=recap&episodeLength=0";
+    var r = await withTimeout(
+      iina.http.get(url, { headers: { "Accept": "application/json" } }),
+      HTTP_TIMEOUT_MS, "AniSkip");
+    if (r.statusCode !== 200) return out;
+    var body = r.data || JSON.parse(r.text || "{}");
+    if (!body.found || !Array.isArray(body.results)) return out;
+    body.results.forEach(function(x) {
+      var kind = { op: "intro", "mixed-op": "intro",
+                   ed: "outro", "mixed-ed": "outro",
+                   recap: "recap" }[String(x.skipType).toLowerCase()];
+      if (!kind || !x.interval) return;
+      pushSegment(out, kind, x.interval.startTime, x.interval.endTime, "aniskip");
+    });
+  } catch(e) {}
+  return out;
+}
+
+// One segment per kind; the stretch most databases agree on wins
+var SOURCE_ORDER = { chapters: 0, introdb: 1, theintrodb: 2, skipdb: 3 };
+
+// Overlap as a fraction of the shorter segment: 1 = identical, 0 = disjoint.
+function overlapRatio(a, b) {
+  var lo = Math.max(a.start, b.start);
+  var hi = Math.min(a.end, b.end);
+  var ov = hi - lo;
+  if (ov <= 0) return 0;
+  var shortest = Math.min(a.end - a.start, b.end - b.start);
+  return shortest > 0 ? ov / shortest : 0;
+}
+
+function median(nums) {
+  var a = nums.slice().sort(function(x, y) { return x - y; });
+  var m = Math.floor(a.length / 2);
+  return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2;
+}
+
+function distinctSources(group) {
+  var seen = {};
+  group.forEach(function(s) { seen[s.source] = 1; });
+  return Object.keys(seen);
+}
+
+function bestRank(group) {
+  return Math.min.apply(null, group.map(function(s) {
+    var r = SOURCE_ORDER[s.source];
+    return r === undefined ? 99 : r;
+  }));
+}
+
+function mergeSegments(list) {
+  var byKind = {};
+  list.forEach(function(seg) {
+    (byKind[seg.kind] = byKind[seg.kind] || []).push(seg);
+  });
+
+  return Object.keys(byKind).map(function(kind) {
+    var segs = byKind[kind];
+
+    // Cluster segments that describe the same stretch of video.
+    var groups = [];
+    segs.forEach(function(seg) {
+      for (var i = 0; i < groups.length; i++) {
+        for (var j = 0; j < groups[i].length; j++) {
+          if (overlapRatio(groups[i][j], seg) > 0.5) { groups[i].push(seg); return; }
+        }
+      }
+      groups.push([seg]);
+    });
+
+    // Most corroborated group wins; ties go to the more reliable source.
+    groups.sort(function(a, b) {
+      var d = distinctSources(b).length - distinctSources(a).length;
+      if (d !== 0) return d;
+      return bestRank(a) - bestRank(b);
+    });
+    var win = groups[0];
+
+    // Prefer measured values over placeholders
+    var starts = win.filter(function(s) { return s.preciseStart; }).map(function(s) { return s.start; });
+    var ends   = win.filter(function(s) { return s.preciseEnd;   }).map(function(s) { return s.end;   });
+    if (!starts.length) starts = win.map(function(s) { return s.start; });
+    if (!ends.length)   ends   = win.map(function(s) { return s.end;   });
+
+    return {
+      kind:    kind,
+      // Earliest start, so the button is up before the intro rolls.
+      start:   Math.min.apply(null, starts),
+      // Median end: overshooting skips real content, and the median resists outliers
+      end:     median(ends),
+      sources: distinctSources(win),
+      agreed:  distinctSources(win).length
+    };
+  }).filter(validSegment);
+}
+
+async function resolveSegments(info, forceRefresh) {
+  segments = [];
+  activeSegment = null;
+  hideSkip();
+  if (!skipEnabled || !info) return;
+
+  var local = segmentsFromChapters();
+  if (local.length) {
+    segments = mergeSegments(local);
+    startTimeWatcher();
+    reportSkip(info, segments);
     return;
   }
 
-  log("Transition " + reason + ": " + actions.join(", "));
-  actions.forEach(function(action) {
-    executeAction(action, prevSnapshot, currentSnapshot);
+  // Keyed on the show's IMDB id, not the episode's
+  function showLevelId() {
+    return canonicalImdb(info.isMovie ? info.imdbId : info.parentImdbId);
+  }
+  var imdb = showLevelId();
+  if (!imdb && tmdbKey && info.tmdbId) {
+    await resolveImdbIds(info, tmdbKey);
+    imdb = showLevelId();
+  }
+  if (!imdb) { reportSkip(info, []); return; }
+
+  var cacheKey = imdb + ":" + (info.season || 0) + ":" + (info.episode || 0);
+  if (segmentCache[cacheKey] && !forceRefresh) {
+    segments = segmentCache[cacheKey];
+    if (segments.length) startTimeWatcher();
+    reportSkip(info, segments);
+    return;
+  }
+
+  // Anime first: AniSkip is more precise for openings and endings
+  var mal = await malIdFor(imdb, info.season);
+  var anime = mal ? await segmentsFromAniSkip(mal, info.episode) : [];
+
+  var remote = await segmentsFromApis(imdb, info.season, info.episode);
+  var merged = mergeSegments(remote);
+
+  // AniSkip wins per kind; the rest falls back to the TV databases
+  if (anime.length) {
+    var byKind = {};
+    mergeSegments(anime).forEach(function(x) { byKind[x.kind] = x; });
+    merged.forEach(function(x) { if (!byKind[x.kind]) byKind[x.kind] = x; });
+    merged = Object.keys(byKind).map(function(k) { return byKind[k]; });
+  }
+  segments = merged;
+  segmentCache[cacheKey] = segments;
+  if (segments.length) startTimeWatcher();
+  reportSkip(info, segments);
+}
+
+// Lets the sidebar's "Search again" button stop spinning and report.
+function reportSkip(info, list) {
+  sidebar.postMessage("skipResult", {
+    count: list.length,
+    label: list.length ? describeSegments(list) : ""
   });
 }
 
-function refreshPlaybackSidebar(reason) {
-  // The time-pos event can fire many times per second. Rate-limit only these
-  // passive UI updates, not pause/stop/identity/auth/queue transitions.
-  if (reason === "time-pos.changed") {
-    var now=Date.now();
-    if (now-lastPlaybackSidebarRefreshAt<PLAYBACK_SIDEBAR_MIN_INTERVAL_MS) return;
-    lastPlaybackSidebarRefreshAt=now;
-  } else {
-    lastPlaybackSidebarRefreshAt=Date.now();
-  }
-  queueSidebarRefresh(false);
+var SOURCE_NAMES = {
+  chapters:   "chapters",
+  introdb:    "IntroDB",
+  theintrodb: "TheIntroDB",
+  skipdb:     "SkipDB"
+};
+
+function fmtTime(sec) {
+  var m = Math.floor(sec / 60), ss = Math.floor(sec % 60);
+  return m + ":" + (ss < 10 ? "0" : "") + ss;
 }
 
-function handleStatusUpdate(reason) {
-  if (!currentMedia || !currentMedia.mediaInfo) {
-    refreshPlaybackSidebar(reason);
-    return;
-  }
-
-  var currentSnapshot = buildLiveSnapshot();
-  if (!currentSnapshot) {
-    refreshPlaybackSidebar(reason);
-    return;
-  }
-
-  var prevSnapshot = playbackState.prevSnapshot;
-  if (prevSnapshot && monitor.shouldIgnoreEndRollover(prevSnapshot, currentSnapshot)) {
-    log(
-      "Ignoring end-of-file rollover reset for " +
-      mediaLabel(prevSnapshot.mediaInfo) +
-      " at " + currentSnapshot.progress.toFixed(2) + "%"
-    );
-    refreshPlaybackSidebar(reason);
-    return;
-  }
-  processTransition(prevSnapshot, currentSnapshot, reason || "status");
-  playbackState.prevSnapshot = currentSnapshot;
-  refreshPlaybackSidebar(reason);
+function describeSegments(list) {
+  var parts = list.map(function(seg) {
+    var name = (SEGMENT_LABELS[seg.kind] || "Skip").replace("Skip ", "");
+    return name + " " + fmtTime(seg.start) + "–" + fmtTime(seg.end);
+  });
+  return "Found: " + parts.join(" · ");
 }
 
-async function finalizeCurrentMedia(reason) {
-  if (!playbackState.prevSnapshot) {
-    currentMedia = null;
-    lastSourceSignature = "";
-    resetCorrectionState();
-    resetPlaybackTracking();
-    setScrobbleStatus({
-      status: "idle",
-      verb: "",
-      mediaLabel: "",
-      detail: "Waiting for playback."
+function showSkip(seg) {
+  activeSegment = seg;
+  skipVisible = true;
+  overlay.postMessage("showSkip", { label: SEGMENT_LABELS[seg.kind] || "Skip" });
+  syncOverlay();
+  // Clickable only while the pill is up, so click-to-pause still works
+  try { overlay.setClickable(true); } catch(e) { log("setClickable(true) failed: " + errStr(e)); }
+}
+
+// Reachable from the overlay button, the Plugins menu and Alt+S.
+function skipNow(via) {
+  if (!activeSegment) {
+    return;
+  }
+  var target = activeSegment.end;
+  var kind   = activeSegment.kind;
+  hideSkip();
+
+  var how = "";
+  try {
+    core.seekTo(target);
+    how = "core.seekTo";
+  } catch(e1) {
+    try {
+      iina.mpv.command("seek", [String(target), "absolute", "exact"]);
+      how = "mpv seek absolute";
+    } catch(e2) {
+      try {
+        iina.mpv.set("time-pos", target);
+        how = "mpv time-pos";
+      } catch(e3) {
+        iina.console.log("[EpInfo] seek failed: " + errStr(e1) + " / " + errStr(e2) + " / " + errStr(e3));
+        return;
+      }
+    }
+  }
+
+  var what = { intro: "intro", recap: "recap", outro: "credits",
+               credits: "credits", preview: "preview" }[kind] || kind;
+  iina.console.log("[EpInfo] skipped " + kind + " to " + target + "s via " + how + " (" + via + ")");
+
+}
+
+function hideSkip() {
+  if (!skipVisible) return;
+  activeSegment = null;
+  skipVisible = false;
+  overlay.postMessage("hideSkip", {});
+  try { overlay.setClickable(false); } catch(e) { log("setClickable(false) failed: " + errStr(e)); }
+  syncOverlay();
+}
+
+// Follows time-pos instead of a timer, which would drift while paused or after a seek
+function startTimeWatcher() {
+  if (timeWatcher) return;
+  timeWatcher = event.on("mpv.time-pos.changed", function() {
+    if (!skipEnabled || !segments.length) return;
+    var t;
+    try { t = iina.mpv.getNumber("time-pos"); } catch(e) { return; }
+    if (!isFinite(t)) return;
+
+    var hit = null;
+    for (var i = 0; i < segments.length; i++) {
+      if (t >= segments[i].start && t < segments[i].end) { hit = segments[i]; break; }
+    }
+    if (hit) {
+      if (activeSegment !== hit) showSkip(hit);
+    } else if (skipVisible) {
+      hideSkip();
+    }
+  });
+}
+
+function stopTimeWatcher() {
+  if (!timeWatcher) return;
+  try { event.off("mpv.time-pos.changed", timeWatcher); } catch(e) {}
+  timeWatcher = null;
+}
+
+// Automatic Lookup (experimental): only runs when the sidebar asks, and answers with a confirmed match or "not sure"
+
+var AL_VIDEO_EXT = /\.(mkv|mp4|m4v|avi|mov|wmv|flv|webm|ts|m2ts|mts|mpg|mpeg|ogv|3gp|divx|m3u8|iso|rmvb|vob)$/i;
+var AL_POSTER = "https://image.tmdb.org/t/p/w500";
+
+// Names that say nothing about what is playing.
+var AL_GENERIC = /^(?:video|videos|stream|streams|index|master|playlist|manifest|media|file|files|download|downloads|play|watch|movie|movies|film|films|show|shows|series|tv|episode|episodes|output|chunklist|default|main|untitled|clip|sample|source|content|data|null|undefined|resolve|playback|dl|get|view|preview|original|encoded|new|test|temp|tmp|seg|segment|part|audio)$/i;
+// Folder names that are never a show or film.
+var AL_FOLDER_DENY = /^(?:users|home|downloads?|movies|films?|tv|tv shows|shows|series|videos?|media|volumes|library|plex|jellyfin|emby|torrents?|complete|completed|incoming|new|private|public|desktop|documents|mnt|data|share|shared|nas|disk ?\d*|drive|storage|anime)$/i;
+// Folders that hold extras rather than the film or episode itself.
+var AL_EXTRA_FOLDER = /^(?:extras?|featurettes?|trailers?|samples?|behind the scenes|deleted scenes|interviews|shorts|scenes|other|specials?)$/i;
+// Trailers, samples and other things that are not the episode or film.
+var AL_EXTRA = /\b(?:trailers?|teasers?|sample|featurettes?|behind the scenes|deleted scenes?|making of|bloopers?|gag reel|extras|bonus|promo|ncop|nced|creditless|music video|full movie|reaction|explained|recap|interviews?|soundtrack|ost|opening|ending)\b/i;
+// Numbering TMDB does not share: "Final Season", "2nd Season", "Part 2".
+var AL_SEASON_WORDS = /\b(?:final season|\d+(?:st|nd|rd|th) season|part \d+|cour \d+)\b/i;
+// Tags that end the title. Words like "web" or "complete" are left out, they show up in real titles
+var AL_CUT = [
+  /\b(?:2160p|1440p|1080p|1080i|720p|576p|480p|4k|uhd)\b/i,
+  /\b(?:blu-?ray|bdrip|brrip|bdremux|remux|web-?dl|webrip|hdtv|pdtv|dvdrip|hdrip|dvdscr|hdcam|camrip|telesync|hdts)\b/i,
+  /\b(?:x26[45]|h ?26[45]|hevc|xvid|divx|av1)\b/i,
+  /\b(?:dts(?:-?hd)?|truehd|atmos|e?ac3|ddp?\d|dd\+|aac\d?)\b/i,
+  /\b(?:hdr10\+?|hdr|dolby ?vision|dovi|10 ?bit|8 ?bit)\b/i,
+  /\b(?:proper|repack|rerip|internal|extended|unrated|uncut|remastered|imax|multi|dual[ -]audio|vostfr|subbed|dubbed)\b/i,
+  /\b(?:amzn|dsnp|hmax|atvp|pcok)\b/i
+];
+
+function alPad2(n) { return (n < 10 ? "0" : "") + n; }
+
+function alDecode(s, plusIsSpace) {
+  var t = String(s == null ? "" : s);
+  if (plusIsSpace) t = t.replace(/\+/g, " ");
+  // Links are sometimes encoded twice.
+  for (var i = 0; i < 2 && /%[0-9a-f]{2}/i.test(t); i++) {
+    try { t = decodeURIComponent(t); } catch (e) { break; }
+  }
+  return t;
+}
+
+// Split a link or local path by hand; IINA's JSContext has no URL class
+function alSplitLink(link) {
+  var s = String(link || "");
+  var out = { scheme: "", host: "", port: "", path: "", query: {}, segments: [] };
+  var m = /^([a-z][a-z0-9+.-]*):\/\/([^\/?#]*)([^?#]*)(\?[^#]*)?/i.exec(s);
+  if (m) {
+    out.scheme = m[1].toLowerCase();
+    var auth = m[2].replace(/^[^@]*@/, "");
+    var hp = /^(\[[^\]]*\]|[^:]*)(?::(\d+))?$/.exec(auth);
+    out.host = (hp ? hp[1] : auth).toLowerCase();
+    out.port = hp && hp[2] ? hp[2] : "";
+    out.path = m[3] || "";
+    (m[4] || "").slice(1).split("&").forEach(function(pair) {
+      if (!pair) return;
+      var eq = pair.indexOf("=");
+      var k = alDecode(eq < 0 ? pair : pair.slice(0, eq), true).toLowerCase();
+      if (!Object.prototype.hasOwnProperty.call(out.query, k)) {
+        out.query[k] = eq < 0 ? "" : alDecode(pair.slice(eq + 1), true);
+      }
     });
-    return;
+  } else if (s.charAt(0) === "/") {
+    out.scheme = "file";
+    out.path = s;
+  }
+  out.segments = out.path.split("/").filter(function(p) { return p; })
+    .map(function(p) { return alDecode(p, false); });
+  return out;
+}
+
+function alQuery(link, key) {
+  return Object.prototype.hasOwnProperty.call(link.query, key) ? String(link.query[key]) : "";
+}
+
+// Dots and underscores to spaces; hyphens stay ("WEB-DL", "Spider-Man").
+function alSeparators(s) {
+  return String(s).replace(/[._]+/g, " ").replace(/\s+/g, " ").trim();
+}
+
+// Index of the first quality/edition tag at or after `from`, or -1.
+function alFirstCut(s, from) {
+  var best = -1, rest = s.slice(from);
+  AL_CUT.forEach(function(re) {
+    var m = re.exec(rest);
+    if (m && (best < 0 || m.index + from < best)) best = m.index + from;
+  });
+  return best;
+}
+
+// A release or file name taken apart. Never throws.
+function alParseName(raw) {
+  var r = { title: "", year: null, season: null, episode: null, episodes: 1, episodeTitle: "",
+            country: null, lead: false, dash: false, dated: false, extra: false, seasonWords: false, tagged: false };
+  var s = String(raw == null ? "" : raw).replace(AL_VIDEO_EXT, "");
+  s = s.replace(/^\s*(?:\[[^\]]{0,60}\]\s*|【[^】]{0,60}】\s*)+/, "");
+  s = s.replace(/^\s*www\.\S+?\s*[-–—:]?\s+/i, "");
+  s = s.replace(/^\s*[a-z0-9-]{2,40}\.(?:com|net|org|to|me|cc|tv|io|se|ru|xyz|info|site|club|lol|vip|co|in)\s+[-–—]\s+/i, "");
+  s = alSeparators(s);
+  if (!s) return r;
+
+  r.dated = /\b(?:19|20)\d{2} (?:0[1-9]|1[0-2]) (?:0[1-9]|[12]\d|3[01])\b/.test(s);
+
+  // Season and episode, most explicit form first.
+  var mark = -1, markEnd = -1, m;
+  if ((m = /\b[Ss](\d{1,2}) ?[Ee](\d{1,4})((?:[ -]?[Ee]\d{1,4}|-\d{1,4})*)\b/.exec(s))) {
+    r.season = +m[1]; r.episode = +m[2];
+    var more = (m[3].match(/\d+/g) || []).map(Number);
+    var last = more.length ? more[more.length - 1] : r.episode;
+    if (last > r.episode && last - r.episode < 10) r.episodes = last - r.episode + 1;
+  } else if ((m = /\b(\d{1,2})[xX](\d{2,3})\b/.exec(s))) {
+    r.season = +m[1]; r.episode = +m[2];
+  } else if ((m = /\bseason ?(\d{1,2})(?: ?[-,] ?| )(?:episode|ep) ?(\d{1,4})\b/i.exec(s))) {
+    r.season = +m[1]; r.episode = +m[2];
+  }
+  if (m) {
+    mark = m.index; markEnd = m.index + m[0].length;
+  } else {
+    var so = /\b(?:[Ss](\d{1,2})|season ?(\d{1,2}))\b/i.exec(s);
+    var eo = /\b(?:episode|ep) ?(\d{1,4})\b|\bE(\d{2,4})\b/i.exec(s);
+    if (so) { r.season = +(so[1] || so[2]); mark = so.index; markEnd = so.index + so[0].length; }
+    if (eo) {
+      r.episode = +(eo[1] || eo[2]);
+      if (mark < 0 || eo.index < mark) mark = eo.index;
+      markEnd = Math.max(markEnd, eo.index + eo[0].length);
+    }
   }
 
-  var prevSnapshot = playbackState.prevSnapshot;
-  var stoppedSnapshot = buildStoppedSnapshot(prevSnapshot);
-  processTransition(prevSnapshot, stoppedSnapshot, reason || "stop");
-  playbackState.prevSnapshot = stoppedSnapshot;
-  currentMedia = null;
-  lastSourceSignature = "";
-  resetCorrectionState();
-  queueSidebarRefresh(false);
-  if (reason === "end-file" || reason === "window-will-close" || reason === "mpv.shutdown") {
-    await flushScrobbleQueue(reason, 3000);
-    if (currentMedia || lastSourceSignature) {
-      log("New media became active during end-file flush; preserving new playback state");
+  // Year: the last plausible one before the episode or quality tags ("1917" alone is a title)
+  var qc = alFirstCut(s, 0);
+  r.tagged = qc >= 0;   // carries release tags (1080p, BluRay, x264…)
+  var hard = Math.min(mark >= 0 ? mark : s.length, qc >= 0 ? qc : s.length);
+  var maxYear = new Date(Date.now()).getFullYear() + 1;
+  var yearAt = -1, ym, yre = /\b(19\d{2}|20\d{2})\b/g;
+  while (!r.dated && (ym = yre.exec(s))) {
+    var y = +ym[1];
+    if (ym.index > 0 && ym.index < hard && y <= maxYear && (mark < 0 || ym.index < mark || ym.index >= markEnd)) {
+      r.year = y; yearAt = ym.index;
+    }
+  }
+
+  // Fansub numbering: "Title - 12". Only without a year, which it could be.
+  if (r.episode == null && r.year == null) {
+    var dm = /(?:^| )[-–] ?(\d{1,4})(?:v\d)?(?= |$|[\[(])/.exec(s);
+    if (dm && +dm[1] > 0) {
+      r.episode = +dm[1]; r.dash = true;
+      if (mark < 0 || dm.index < mark) mark = dm.index;
+      markEnd = Math.max(markEnd, dm.index + dm[0].length);
+    }
+  }
+  // "01 - Pilot": the title has to come from the folder
+  if (r.episode == null && r.season == null && r.year == null) {
+    var lm = /^(\d{1,3})(?:(?: ?[-.] ?| )(?=\S)|$)/.exec(s);
+    if (lm) { r.episode = +lm[1]; r.lead = true; mark = 0; markEnd = lm[0].length; }
+  }
+
+  var cut = s.length;
+  if (mark >= 0) cut = Math.min(cut, mark);
+  if (qc >= 0) cut = Math.min(cut, qc);
+  if (yearAt >= 0) cut = Math.min(cut, yearAt);
+  var title = s.slice(0, cut).replace(/[\[({][^\])}]*$/, "");
+  // Only in the show's own name: "Pilot Part 1" is an episode title.
+  r.seasonWords = AL_SEASON_WORDS.test(title);
+  var c = /\s\(?(US|UK|AU|NZ|CA|IE)\)?\s*$/.exec(title);
+  if (c) { r.country = c[1] === "UK" ? "GB" : c[1]; title = title.slice(0, c.index); }
+  r.title = title.replace(/[\[({][^\])}]*[\])}]/g, " ").replace(/\s+/g, " ")
+    .replace(/^[\s\-–—:,]+|[\s\-–—:,(\[{]+$/g, "");
+
+  var tailAt = markEnd >= 0 ? alFirstCut(s, markEnd) : qc;
+  if (markEnd >= 0) {
+    r.episodeTitle = s.slice(markEnd, tailAt >= 0 ? tailAt : s.length).replace(/^[\s\-–—:]+|[\s\-–—:]+$/g, "");
+  }
+  // Episode titles may contain any word ("The Opening"); everything else may not.
+  var checked = r.episode != null ? r.title + " " + (tailAt >= 0 ? s.slice(tailAt) : "") : s;
+  r.extra = AL_EXTRA.test(checked) || /\bsample\b/i.test(s);
+  return r;
+}
+
+// Is the parsed title something TMDB could be searched for?
+function alTitleOk(r) {
+  var t = r && r.title ? String(r.title) : "";
+  if (!t) return false;
+  var letters = (t.match(/\p{L}/gu) || []).length;
+  var anchored = r.year != null || (r.season != null && r.episode != null && !r.lead);
+  // Numbers ("24", "1917") and two-letter titles ("It") need a year or episode beside them
+  if (/^\d{2,4}$/.test(t)) return anchored;
+  if (letters < 2 || (letters < 3 && !anchored)) return false;
+  if (AL_GENERIC.test(t)) return false;
+  var bare = t.replace(/[^0-9a-z]/gi, "");
+  if (bare.length >= 12 && /^[0-9a-f]+$/i.test(bare)) return false;      // hashes, UUIDs
+  if (/^[A-Za-z0-9_-]{20,}$/.test(t)) return false;                         // keys and tokens
+  if (/[=&]/.test(t) || /[0-9a-f]{16,}/i.test(t)) return false;             // query strings, hashes
+  if (/^(?=.*\d)[0-9a-f]{6,}$/i.test(t)) return false;                       // short hex ids: "0f9a8b7c"
+  if (/^(?=(?:.*\d){3})(?=(?:.*[a-z]){3})[a-z0-9]{10,}$/i.test(t)) return false; // random ids: "aB3kd9Q2x7Lp"
+  if (/^(?:part|vol|volume|disc|cd) ?\d+$/i.test(t)) return false;
+  return true;
+}
+
+// Title from the folder ("Show/Season 1/01.mkv"), but only if the folder looks like a show
+function alFolderContext(folders) {
+  var n = folders.length;
+  if (!n) return null;
+  var parent = String(folders[n - 1]).trim();
+  var sm = /^(?:season|series|staffel|saison|temporada|stagione) ?(\d{1,2})$|^s(\d{1,2})$/i.exec(parent);
+  if (sm) {
+    if (n < 2) return null;
+    var g = alParseName(folders[n - 2]);
+    if (!alTitleOk(g) || AL_FOLDER_DENY.test(g.title)) return null;
+    return { title: g.title, year: g.year, country: g.country, season: +(sm[1] || sm[2]), name: folders[n - 2] + "/" + parent };
+  }
+  var q = alParseName(parent);
+  var strong = q.season != null || q.year != null || alFirstCut(alSeparators(parent), 0) >= 0;
+  if (!strong || !alTitleOk(q) || AL_FOLDER_DENY.test(q.title)) return null;
+  return { title: q.title, year: q.year, country: q.country, season: q.season, name: parent };
+}
+
+// One candidate name; weak ones (titles from IINA) need an episode or a year
+function alReading(name, folders, source, weak) {
+  var p = alParseName(name);
+  var from = String(name);
+  folders = folders || [];
+  if (alTitleOk(p) && p.episode != null && folders.length) {
+    // Scene files often start with the group's name
+    var ctx = alFolderContext(folders);
+    if (ctx && ctx.title && alNorm(p.title) !== alNorm(ctx.title) &&
+        alNorm(p.title).slice(-alNorm(ctx.title).length) === alNorm(ctx.title)) {
+      p.title = ctx.title;
+      from = ctx.name + "/" + name;
+    }
+  } else if (!alTitleOk(p) && p.episode != null && folders.length) {
+    var f = alFolderContext(folders);
+    if (f) {
+      p.title = f.title; p.year = p.year || f.year; p.country = p.country || f.country;
+      if (p.season == null) p.season = f.season;
+      p.lead = false;
+      from = f.name + "/" + name;
+    }
+  } else if (!alTitleOk(p) && p.episode == null && folders.length) {
+    // A generic or numbered file inside a folder that names it
+    var parent = folders[folders.length - 1];
+    var q = alParseName(parent);
+    var named = q.year != null || (q.season != null && q.episode != null);
+    if (named && alUsable({ p: q, weak: false }) && !AL_FOLDER_DENY.test(q.title)) {
+      p = q; from = parent + "/" + name;
+    }
+  }
+  if (folders.slice(-2).some(function(f) { return AL_EXTRA_FOLDER.test(String(f).trim()); })) p.extra = true;
+  // Web page titles like "… Ending Scene" are clips
+  if (weak && AL_EXTRA.test(alSeparators(name))) p.extra = true;
+  return { p: p, source: source, weak: !!weak, from: from };
+}
+
+function alUsable(rd) {
+  var p = rd.p;
+  if (!alTitleOk(p) || p.dated || p.lead) return false;
+  if (p.season != null && p.episode == null) return false;     // a whole-season pack
+  if (rd.weak && p.episode == null && !p.year) return false;
+  return true;
+}
+
+function alDispositionName(v) {
+  var m = /filename\*\s*=\s*[^']*'[^']*'([^;]+)/i.exec(v) || /filename\s*=\s*"([^"]+)"/i.exec(v) ||
+          /filename\s*=\s*([^;]+)/i.exec(v);
+  return m ? alDecode(m[1].trim(), false) : "";
+}
+
+// Ids a link carries, e.g. Comet's media_id and season/episode
+function alIdsFromLink(link) {
+  var ids = { imdb: null, season: null, episode: null };
+  ["media_id", "imdb", "imdb_id", "imdbid"].forEach(function(k) {
+    var v = alQuery(link, k);
+    if (!ids.imdb && /^tt\d{6,9}$/.test(v)) ids.imdb = v;
+  });
+  var i = link.segments.indexOf("playback");
+  if (i >= 0) {
+    var seg = link.segments.slice(i + 1);
+    if (/^[0-9a-f]{40}$/i.test(seg[0] || "") && /^\d+$/.test(seg[3] || "") && /^\d+$/.test(seg[4] || "")) {
+      ids.season = +seg[3]; ids.episode = +seg[4];
+    }
+  }
+  return ids;
+}
+
+// Stremio's local torrent server: /<info hash>/<file index>
+function alStremioPath(link) {
+  var m = /^\/([0-9a-fA-F]{40})\/(-?\d+)\/?$/.exec(link.path);
+  if (!m || !/^https?$/.test(link.scheme)) return null;
+  if (link.host !== "127.0.0.1" && link.host !== "localhost") return null;
+  return { origin: link.scheme + "://" + link.host + (link.port ? ":" + link.port : ""), hash: m[1].toLowerCase(), idx: +m[2] };
+}
+
+// stats.json names the file; for index -1 take the largest video, like Stremio
+async function alStremioName(st) {
+  async function stats(path) {
+    var r = await withTimeout(iina.http.get(st.origin + path, {}), 4000, "Stremio stats");
+    if (r.statusCode !== 200) return null;
+    return r.data || JSON.parse(r.text || "null");
+  }
+  var b = st.idx >= 0 ? await stats("/" + st.hash + "/" + st.idx + "/stats.json") : null;
+  if (b && b.streamName) return { file: String(b.streamName), folder: b.name ? String(b.name) : "" };
+  var t = await stats("/" + st.hash + "/stats.json");
+  if (!t || !t.files || !t.files.length) return null;
+  var pick = null;
+  t.files.forEach(function(f, i) {
+    if (st.idx >= 0 && i !== st.idx) return;
+    if (!AL_VIDEO_EXT.test(String(f.name || ""))) return;
+    if (!pick || (f.length || 0) > (pick.length || 0)) pick = f;
+  });
+  return pick ? { file: String(pick.name), folder: t.name ? String(t.name) : "" } : null;
+}
+
+// Every name the file is known by, best first.
+async function alReadings(h, link) {
+  var out = [];
+  var st = alStremioPath(link);
+  if (st) {
+    var sn = null;
+    try { sn = await alStremioName(st); } catch (e) { sn = null; }
+    if (sn) out.push(alReading(sn.file, sn.folder ? [sn.folder] : [], "Stremio"));
+  }
+  ["filename", "file", "fn", "name", "title", "torrent_name"].forEach(function(k) {
+    var v = alQuery(link, k);
+    if (v) out.push(alReading(v, [], "link"));
+  });
+  ["response-content-disposition", "rscd"].forEach(function(k) {
+    var v = alDispositionName(alQuery(link, k));
+    if (v) out.push(alReading(v, [], "link"));
+  });
+  if (link.segments.length && !st) {
+    var segs = link.segments, last = segs[segs.length - 1];
+    // The end of a link only counts if it looks like a file name
+    out.push(alReading(last, segs.slice(0, -1), link.scheme === "file" ? "file name" : "link",
+                       link.scheme !== "file" && !AL_VIDEO_EXT.test(last)));
+  }
+  var lastSeg = link.segments.length ? link.segments[link.segments.length - 1] : "";
+  if (h.metadataTitle) {
+    out.push(alReading(h.metadataTitle, [], "title in the file", true));
+  } else if (h.mediaTitle && h.mediaTitle !== lastSeg && h.mediaTitle !== h.filename) {
+    out.push(alReading(h.mediaTitle, [], "title", true));
+  }
+  return out;
+}
+
+// TMDB, cached in @data (errors aren't cached, a 404 is kept for a day)
+var AL_CACHE_FILE = "@data/tmdb-cache.json";
+var AL_CACHE_MAX = 300;
+var alCache = null, alCacheDirty = false;
+
+function alCacheLoad() {
+  if (alCache) return;
+  try {
+    var raw = file.exists(AL_CACHE_FILE) ? file.read(AL_CACHE_FILE) : "";
+    alCache = raw ? JSON.parse(raw) : {};
+  } catch (e) { alCache = {}; }
+  if (!alCache || typeof alCache !== "object" || Array.isArray(alCache)) alCache = {};
+}
+
+function alCacheFlush() {
+  if (!alCache || !alCacheDirty) return;
+  var keys = Object.keys(alCache);
+  if (keys.length > AL_CACHE_MAX) {
+    keys.sort(function(a, b) { return alCache[a].t - alCache[b].t; });
+    keys.slice(0, keys.length - AL_CACHE_MAX).forEach(function(k) { delete alCache[k]; });
+  }
+  try { file.write(AL_CACHE_FILE, JSON.stringify(alCache)); } catch (e) {}
+  alCacheDirty = false;
+}
+
+async function alTmdb(path, params, ttlHours, trim) {
+  if (!tmdbKey) throw new Error("no TMDB key");
+  alCacheLoad();
+  var key = path + "?" + Object.keys(params).sort().map(function(k) { return k + "=" + params[k]; }).join("&");
+  var now = Date.now(), hit = alCache[key];
+  if (hit && now - hit.t < (hit.v === null ? 24 : ttlHours) * 3600000) return hit.v;
+  var p = { api_key: tmdbKey };
+  Object.keys(params).forEach(function(k) { p[k] = params[k]; });
+  var r = await withTimeout(iina.http.get("https://api.themoviedb.org/3" + path, { params: p }), HTTP_TIMEOUT_MS, "TMDB");
+  if (r.statusCode === 404) { alCache[key] = { t: now, v: null }; alCacheDirty = true; return null; }
+  if (r.statusCode !== 200) throw new Error("TMDB answered " + r.statusCode);
+  var v = trim(r.data || JSON.parse(r.text || "{}"));
+  alCache[key] = { t: now, v: v };
+  alCacheDirty = true;
+  return v;
+}
+
+async function alSearch(kind, title, extra) {
+  var params = { query: title, include_adult: "false" };
+  Object.keys(extra || {}).forEach(function(k) { params[k] = String(extra[k]); });
+  var v = await alTmdb("/search/" + kind, params, 168, function(d) {
+    return (d.results || []).slice(0, 20).map(function(x) {
+      return { id: x.id, name: x.name || x.title || "", original: x.original_name || x.original_title || "",
+               date: x.first_air_date || x.release_date || "", country: x.origin_country || [],
+               votes: x.vote_count || 0 };
+    });
+  });
+  return v || [];
+}
+
+function alTvDetails(id) {
+  return alTmdb("/tv/" + id, { append_to_response: "alternative_titles,external_ids" }, 24, function(d) {
+    return { id: d.id, name: d.name || "", original: d.original_name || "", date: d.first_air_date || "",
+             poster: d.poster_path || "", votes: d.vote_count || 0,
+             seasons: (d.seasons || []).map(function(s) { return s.season_number; }),
+             alt: ((d.alternative_titles && d.alternative_titles.results) || []).map(function(t) { return t.title; }),
+             imdb: (d.external_ids && d.external_ids.imdb_id) || "" };
+  });
+}
+
+function alSeason(id, n) {
+  return alTmdb("/tv/" + id + "/season/" + n, {}, 24, function(d) {
+    return { poster: d.poster_path || "",
+             episodes: (d.episodes || []).map(function(e) {
+               return { n: e.episode_number, name: e.name || "", air: e.air_date || "",
+                        rating: e.vote_average || 0, overview: e.overview || "", runtime: e.runtime || 0 };
+             }) };
+  });
+}
+
+function alMovieDetails(id) {
+  return alTmdb("/movie/" + id, { append_to_response: "alternative_titles,external_ids" }, 168, function(d) {
+    return { id: d.id, title: d.title || "", original: d.original_title || "", date: d.release_date || "",
+             runtime: d.runtime || 0, rating: d.vote_average || 0, overview: d.overview || "",
+             poster: d.poster_path || "", votes: d.vote_count || 0,
+             alt: ((d.alternative_titles && d.alternative_titles.titles) || []).map(function(t) { return t.title; }),
+             imdb: d.imdb_id || (d.external_ids && d.external_ids.imdb_id) || "" };
+  });
+}
+
+function alFind(imdb) {
+  return alTmdb("/find/" + imdb, { external_source: "imdb_id" }, 168, function(d) {
+    return { movie: (d.movie_results || []).map(function(x) { return x.id; }),
+             tv: (d.tv_results || []).map(function(x) { return x.id; }),
+             episode: (d.tv_episode_results || []).map(function(x) {
+               return { show: x.show_id, season: x.season_number, episode: x.episode_number };
+             }) };
+  });
+}
+
+// Deciding
+function alNorm(s) {
+  return String(s || "").normalize("NFKD").replace(/\p{M}/gu, "").toLowerCase()
+    .replace(/&/g, " and ").replace(/['’`ʼ]/g, "").replace(/[^\p{L}\p{N}]+/gu, "");
+}
+
+function alTitleMatches(title, names) {
+  var a = alNorm(title), a2 = alNorm(String(title).replace(/^\s*(?:the|a|an)\s+/i, ""));
+  if (!a) return false;
+  return (names || []).some(function(n) {
+    var b = alNorm(n);
+    return b && (b === a || alNorm(String(n).replace(/^\s*(?:the|a|an)\s+/i, "")) === a2);
+  });
+}
+
+function alYearOf(date) { var y = parseInt(String(date || "").slice(0, 4), 10); return isNaN(y) ? 0 : y; }
+
+// The file's length should be close to TMDB's runtime
+function alLengthFits(seconds, minutes, count) {
+  if (!(minutes > 0)) return true;
+  var ratio = seconds / (minutes * 60 * (count || 1));
+  return ratio >= 0.5 && ratio <= 2;
+}
+
+// Search results whose title (or original or alternative title) is the name.
+async function alTitleCandidates(kind, list, title) {
+  var out = list.slice(0, 10).filter(function(x) { return alTitleMatches(title, [x.name, x.original]); });
+  if (out.length) return out;
+  for (var i = 0; i < Math.min(3, list.length); i++) {
+    var d = kind === "tv" ? await alTvDetails(list[i].id) : await alMovieDetails(list[i].id);
+    if (d && alTitleMatches(title, d.alt)) out.push(list[i]);
+  }
+  return out;
+}
+
+// Several fit: only take the first if it towers over the rest.
+function alDominant(fits) {
+  fits.sort(function(a, b) { return b.votes - a.votes; });
+  return fits[0].votes >= 50 && fits[0].votes >= 10 * (fits[1].votes || 0) ? fits[0] : null;
+}
+
+function alNotSure(reason, query) { return { info: null, reason: reason, query: query || "" }; }
+
+function alTvInfo(d, sd, ep, season) {
+  var info = { isStream: false, showTitle: d.name, epTitle: ep.name || ("Episode " + ep.n),
+    code: "S" + alPad2(season) + "E" + alPad2(ep.n), airDate: ep.air,
+    rating: ep.rating ? ep.rating.toFixed(1) : "", overview: ep.overview,
+    posterUrl: sd.poster ? AL_POSTER + sd.poster : (d.poster ? AL_POSTER + d.poster : ""),
+    tmdbId: String(d.id), season: season, episode: ep.n, isMovie: false };
+  if (d.imdb) info.parentImdbId = d.imdb;
+  return info;
+}
+
+function alMovieInfo(d) {
+  var info = { showTitle: "Movie", epTitle: d.title, code: d.date ? d.date.slice(0, 4) : "",
+    airDate: d.date, isStream: false, rating: d.rating ? d.rating.toFixed(1) : "",
+    overview: d.overview, posterUrl: d.poster ? AL_POSTER + d.poster : "",
+    tmdbId: String(d.id), season: null, episode: null, isMovie: true };
+  if (d.imdb) info.imdbId = d.imdb;
+  return info;
+}
+
+async function alMatchTv(p, seconds) {
+  if (p.seasonWords) return alNotSure("its season numbering may not match TMDB's", p.title);
+  if (p.season === 0) return alNotSure("specials are numbered differently everywhere", p.title);
+  var list = await alSearch("tv", p.title, p.year ? { first_air_date_year: p.year } : null);
+  var loose = false;
+  if (p.year && !(await alTitleCandidates("tv", list, p.title)).length) {
+    // A year in an episode's name is sometimes when it aired, not when the show began.
+    list = await alSearch("tv", p.title, null);
+    loose = true;
+  }
+  var cands = await alTitleCandidates("tv", list, p.title);
+  if (p.year) {
+    cands = cands.filter(function(c) {
+      var y = alYearOf(c.date);
+      return y && (loose ? y <= p.year : Math.abs(y - p.year) <= 1);
+    });
+  }
+  if (p.country) cands = cands.filter(function(c) { return c.country.indexOf(p.country) >= 0; });
+  if (!cands.length) return alNotSure("TMDB has no show called “" + p.title + "”", p.title);
+
+  // A show we can't check (no season number) still counts against one that fits
+  var fits = [], why = "", unresolved = "";
+  for (var i = 0; i < Math.min(3, cands.length); i++) {
+    var d = await alTvDetails(cands[i].id);
+    if (!d) continue;
+    var regular = d.seasons.filter(function(n) { return n > 0; });
+    var season = p.season;
+    if (season == null) {
+      if (regular.length !== 1) { why = unresolved = "no season number, and “" + d.name + "” has several"; continue; }
+      season = regular[0];
+    }
+    var sd = await alSeason(d.id, season);
+    var ep = sd ? sd.episodes.filter(function(e) { return e.n === p.episode; })[0] : null;
+    if (!ep) { why = "“" + d.name + "” has no S" + alPad2(season) + "E" + alPad2(p.episode); continue; }
+    if (!alLengthFits(seconds, ep.runtime, p.episodes)) { why = "the video's length doesn't match the episode"; continue; }
+    fits.push({ votes: d.votes, info: alTvInfo(d, sd, ep, season) });
+  }
+  if (fits.length && unresolved) return alNotSure(unresolved, p.title);
+  if (fits.length === 1) return { info: fits[0].info, query: p.title };
+  if (fits.length > 1) {
+    var top = alDominant(fits);
+    return top ? { info: top.info, query: p.title } : alNotSure("several shows called “" + p.title + "” fit", p.title);
+  }
+  return alNotSure(unresolved || why || "no matching episode", p.title);
+}
+
+async function alMatchMovie(p, seconds) {
+  var list = await alSearch("movie", p.title, p.year ? { primary_release_year: p.year } : null);
+  var cands = await alTitleCandidates("movie", list, p.title);
+  if (p.year && !cands.length) {
+    // Released elsewhere first or a year off: retry without the year
+    list = await alSearch("movie", p.title, null);
+    cands = await alTitleCandidates("movie", list, p.title);
+  }
+  if (p.year) cands = cands.filter(function(c) { var y = alYearOf(c.date); return y && Math.abs(y - p.year) <= 1; });
+  if (!cands.length) return alNotSure("TMDB has no film called “" + p.title + "”" + (p.year ? " from " + p.year : ""), p.title);
+
+  var fits = [], why = "";
+  for (var i = 0; i < Math.min(3, cands.length); i++) {
+    var d = await alMovieDetails(cands[i].id);
+    if (!d) continue;
+    if (!alLengthFits(seconds, d.runtime, 1)) { why = "the video's length doesn't match the film"; continue; }
+    // On a plain name an obscure film is more likely a home video
+    if (d.votes < 10 && !p.tagged) { why = "“" + d.title + "” is too little-known to match on a plain name"; continue; }
+    fits.push({ votes: d.votes, info: alMovieInfo(d) });
+  }
+  if (fits.length === 1) return { info: fits[0].info, query: p.title };
+  if (fits.length > 1) {
+    var top = alDominant(fits);
+    return top ? { info: top.info, query: p.title } : alNotSure("several films called “" + p.title + "” fit", p.title);
+  }
+  return alNotSure(why || "no matching film", p.title);
+}
+
+// An IMDb id in the link settles it
+async function alFromImdb(ids, readings) {
+  var f = await alFind(ids.imdb);
+  if (!f) return null;
+  if (f.episode.length) {
+    var x = f.episode[0];
+    return alExactTv(x.show, x.season, x.episode);
+  }
+  if (f.tv.length) {
+    var s = ids.season, e = ids.episode;
+    if (s == null || e == null) {
+      var named = readings.filter(function(rd) { return rd.p.season != null && rd.p.episode != null; })[0];
+      if (named) { s = named.p.season; e = named.p.episode; }
+    }
+    if (s == null || e == null) return alNotSure("the link names the show but not the episode", "");
+    return alExactTv(f.tv[0], s, e);
+  }
+  if (f.movie.length) {
+    var d = await alMovieDetails(f.movie[0]);
+    return d ? { info: alMovieInfo(d), query: d.title } : null;
+  }
+  return null;
+}
+
+async function alExactTv(showId, season, episode) {
+  var d = await alTvDetails(showId);
+  var sd = d ? await alSeason(showId, season) : null;
+  var ep = sd ? sd.episodes.filter(function(e) { return e.n === episode; })[0] : null;
+  if (!ep) return alNotSure("TMDB has no S" + alPad2(season) + "E" + alPad2(episode) + (d ? " of “" + d.name + "”" : ""), d ? d.name : "");
+  return { info: alTvInfo(d, sd, ep, season), query: d.name };
+}
+
+// seconds() is read late: the length can arrive after the file
+// Links that hide the name (TorBox, signed CDN links): ask the server, headers only
+async function alServerName(url) {
+  var out = "";
+  // A second try only if the server didn't answer at all; idle debrid files can be slow to wake up
+  for (var attempt = 0; attempt < 2 && !/^HTTP\//m.test(out); attempt++) {
+    try {
+      var r = await withTimeout(utils.exec("/usr/bin/curl", [
+        "-sS", "-L", "--connect-timeout", "5", "--max-time", "10", "--max-filesize", "1", "-r", "0-0", "-A", "libmpv",
+        "-o", "/dev/null", "-D", "-", "-w", "\n%{url_effective}\n", url
+      ]), 14000, "server name");
+      out = String((r && r.stdout) || "");
+    } catch (e) { out = ""; }
+  }
+  var lines = out.split(/\r?\n/);
+  var name = "";
+  lines.forEach(function(l) {
+    var m = /^content-disposition\s*:\s*(.+)$/i.exec(l);
+    if (m && alDispositionName(m[1])) name = alDispositionName(m[1]);
+  });
+  if (!name) {
+    var segs = alSplitLink(lines.filter(function(l) { return /^https?:\/\//i.test(l); }).pop() || "").segments;
+    if (segs.length && AL_VIDEO_EXT.test(segs[segs.length - 1])) name = segs[segs.length - 1];
+  }
+  return name.split(/[\\/]/).pop();
+}
+
+async function alLookup(h, seconds) {
+  var link = alSplitLink(h.path || h.url || "");
+  var readings = await alReadings(h, link);
+  var ids = alIdsFromLink(link);
+  var lastSeg = link.segments.length ? link.segments[link.segments.length - 1] : "";
+  var webPage = h.mediaTitle && !h.metadataTitle && h.mediaTitle !== h.filename && h.mediaTitle !== lastSeg;
+  if (!ids.imdb && !readings.some(alUsable) && /^https?$/.test(link.scheme) && !alStremioPath(link) && !webPage) {
+    var served = "";
+    try { served = await alServerName(h.path || h.url); } catch (e) { served = ""; }
+    if (served) readings.push(alReading(served, [], "server"));
+  }
+  if (ids.imdb) {
+    var exact = await alFromImdb(ids, readings);
+    if (exact) return exact;
+  }
+
+  var extra = readings.filter(function(rd) { return rd.p.extra; })[0];
+  if (extra) return alNotSure("it looks like a trailer, sample or extra", "");
+  var usable = readings.filter(alUsable);
+  var primary = usable[0];
+  if (!primary) {
+    var named = readings.filter(function(rd) { return alTitleOk(rd.p); })[0];
+    return alNotSure("there is no usable name", named ? named.p.title : "");
+  }
+  var p = primary.p;
+  for (var i = 1; i < usable.length; i++) {
+    var o = usable[i].p;
+    var sameShape = (o.episode != null) === (p.episode != null);
+    if (!sameShape) continue;
+    if (alNorm(o.title) !== alNorm(p.title) ||
+        (o.episode != null && (o.episode !== p.episode || (o.season != null && p.season != null && o.season !== p.season)))) {
+      return alNotSure("its names disagree (“" + p.title + "”, “" + o.title + "”)", p.title);
+    }
+  }
+  var len = seconds();
+  if (!(len > 0)) return alNotSure("its length is unknown (a live stream?)", p.title);
+  var out = p.episode != null ? await alMatchTv(p, len) : await alMatchMovie(p, len);
+  if (out.info) out.from = primary.from;
+  return out;
+}
+
+function alHints() {
+  function str(prop) { try { return String(iina.mpv.getString(prop) || ""); } catch (e) { return ""; } }
+  return { path: str("path"), url: currentVideoUrl, filename: str("filename"),
+           mediaTitle: str("media-title"), metadataTitle: str("metadata/by-key/title") };
+}
+
+function alSeconds() {
+  try { return iina.mpv.getNumber("duration") || 0; } catch (e) { return 0; }
+}
+
+// Only answer if that file is still playing
+async function autoLookup(d) {
+  var forUrl = currentVideoUrl;
+  if (!d || !d.url || d.url !== forUrl) return;
+  var reply = { url: forUrl, info: null, query: "", reason: "" };
+  try {
+    var out = await alLookup(alHints(), alSeconds);
+    reply.info = out.info || null;
+    reply.query = out.query || "";
+    reply.reason = out.reason || "";
+    if (out.info) reply.info.auto = { from: out.from || "" };
+  } catch (e) {
+    reply.reason = "the lookup failed (" + errStr(e) + ")";
+  }
+  alCacheFlush();
+  if (currentVideoUrl !== forUrl) return;
+  log("Automatic Lookup: " + (reply.info
+    ? "found " + reply.info.showTitle + (reply.info.isMovie ? "" : " " + reply.info.code)
+    : "not sure — " + reply.reason));
+  sidebar.postMessage("autoLookupResult", reply);
+}
+
+// Sidebar handlers
+function registerSidebarHandlers() {
+
+  sidebar.onMessage("episodeSelected", function(info) {
+    log("episodeSelected: " + (info ? info.epTitle : "null"));
+    currentEpisode = info;
+    resolveSegments(info);
+  });
+
+  sidebar.onMessage("clearEpisode", function() {
+    currentEpisode = null;
+    segments = [];
+    hideSkip();
+    hideOverlay();
+  });
+
+  sidebar.onMessage("overlayCloseRequest", function() {
+    hideOverlay();
+  });
+
+  // ON/OFF toggle from sidebar
+  sidebar.onMessage("setOverlayEnabled", function(d) {
+    overlayEnabled = !!d.enabled;
+    if (!overlayEnabled) hideOverlay();
+    log("Overlay " + (overlayEnabled ? "enabled" : "disabled"));
+  });
+
+  // Opacity slider
+  sidebar.onMessage("setOverlayOpacity", function(d) {
+    var v = parseFloat(d.value);
+    if (isNaN(v)) return;
+    overlayBgOpacity = Math.max(0, Math.min(1, v));
+    if (overlayVisible) overlay.postMessage("setBgOpacity", { value: overlayBgOpacity });
+  });
+
+  // Vertical position slider
+  sidebar.onMessage("setOverlayVerticalPos", function(d) {
+    var v = parseFloat(d.value);
+    if (!isNaN(v)) {
+      overlayVerticalPos = Math.max(0, Math.min(100, v));
+      if (overlayVisible) overlay.postMessage("setVerticalPos", { value: overlayVerticalPos });
+    }
+  });
+
+  // Configurable pause delay
+  sidebar.onMessage("setPauseDelay", function(d) {
+    var v = parseFloat(d.value);
+    if (!isNaN(v) && v >= 0.5) pauseDelay = v;
+  });
+
+  // Overlay theme: classic | compact | poster
+  sidebar.onMessage("setOverlayTheme", function(d) {
+    overlayTheme = d && d.value ? String(d.value) : "classic";
+    overlay.postMessage("setTheme", { value: overlayTheme });
+  });
+
+  // The sidebar's TMDB key, needed for IMDB ids
+  sidebar.onMessage("setTmdbKey", function(d) {
+    tmdbKey = (d && d.key) ? String(d.key) : "";
+  });
+
+  // Automatic Lookup: only asked for when switched on
+  sidebar.onMessage("autoLookup", function(d) { autoLookup(d); });
+
+  // "Search again" in the sidebar: ignore the cache and look once more.
+  sidebar.onMessage("refreshSkip", function() {
+    if (!skipEnabled || !currentEpisode) {
+      sidebar.postMessage("skipResult", { count: 0, label: "" });
       return;
     }
-  }
-  resetPlaybackTracking();
-  queueSidebarRefresh(false);
-}
+    resolveSegments(currentEpisode, true);
+  });
 
-function scheduleBootstrapTicks() {
-  [250, 1000, 2000].forEach(function(delayMs) {
-    setTimeout(function() {
-      handleStatusUpdate("bootstrap:" + delayMs);
-    }, delayMs);
+  // Skip intro/recap/credits toggle
+  sidebar.onMessage("setSkipEnabled", function(d) {
+    skipEnabled = !!(d && d.enabled);
+    if (!skipEnabled) {
+      segments = [];
+      hideSkip();
+      stopTimeWatcher();
+    } else if (currentEpisode) {
+      resolveSegments(currentEpisode);
+    }
+    log("Skip segments " + (skipEnabled ? "enabled" : "disabled"));
+  });
+
+  // Sidebar is ready: resend the file in case the first fileChanged came too early
+  sidebar.onMessage("sidebarReady", function() {
+    if (currentVideoUrl) {
+      sidebar.postMessage("fileChanged", { url: currentVideoUrl });
+    }
+  });
+
+  // Open a URL in the browser; target=_blank doesn't work in IINA's web view
+  sidebar.onMessage("openExternalUrl", function(d) {
+    if (d && d.url) {
+      try {
+        if (utils && typeof utils.openURL === "function") {
+          utils.openURL(d.url);
+        } else if (core && typeof core.openUrl === "function") {
+          core.openUrl(d.url);
+        } else {
+          // Last-ditch fallback: shell out to /usr/bin/open
+          utils.exec("/usr/bin/open", [d.url]);
+        }
+      } catch(e) {
+        log("Failed to open URL: " + errStr(e));
+      }
+    }
+  });
+
+  // Resolve IMDB ids early so the opensubtitles.org link is ready
+  sidebar.onMessage("resolveImdbOnly", async function(d) {
+    if (!d || !d.tmdbId) return;
+    try {
+      var resolved = await resolveImdbIds(d, d.tmdbKey || "");
+      sidebar.postMessage("imdbResolved", {
+        imdb:       resolved.imdbId       || null,
+        parentImdb: resolved.parentImdbId || null
+      });
+    } catch(e) {
+      // fine if this fails, the link just won't show
+    }
+  });
+
+  // Wyzie Subs
+  sidebar.onMessage("searchWyzie", async function(d) {
+    async function wzCall(idParam, includeSE) {
+      var params = {
+        id:       idParam,
+        language: d.lang || "en",
+        format:   "srt",
+        key:      d.key
+      };
+      if (includeSE) {
+        if (d.season)  params.season  = String(d.season);
+        if (d.episode) params.episode = String(d.episode);
+      }
+      try {
+        var resp = await withTimeout(
+          iina.http.get("https://sub.wyzie.io/search", {
+            params:  params,
+            headers: { "Accept": "application/json" }
+          }),
+          HTTP_TIMEOUT_MS,
+          "Wyzie search"
+        );
+        var body = resp.data || JSON.parse(resp.text || "[]");
+        if (resp.statusCode === 200) {
+          var arr = Array.isArray(body) ? body : (body.results || []);
+          return { results: arr, status: 200 };
+        }
+        var msg = (!Array.isArray(body) && body && body.message)
+          ? errStr(body.message) : ("HTTP " + resp.statusCode);
+        return { error: msg, status: resp.statusCode };
+      } catch(e) {
+        return { error: errStr(e) };
+      }
+    }
+
+    function progress(msg) {
+      sidebar.postMessage("wyzieSearchProgress", { text: msg });
+    }
+
+    try {
+      var includeSE = !d.broadShow && !d.isMovie && d.season && d.episode;
+      var tried     = [];
+      var lastErr   = null;
+      var attempt = async function(label, idParam, useSE) {
+        if (!idParam) return null;
+        progress(label + "…");
+        var r = await wzCall(idParam, useSE);
+        tried.push(label);
+        if (r.error) { lastErr = r.error; return null; }
+        if (r.results && r.results.length) return r.results;
+        return null;
+      };
+
+      var results = null;
+
+      // Wyzie: TMDB id first (fastest), then IMDB id, then the whole show
+
+      if (d.tmdbId && !results) {
+        results = await attempt("TMDB lookup", String(d.tmdbId), includeSE);
+      }
+
+      if (!results) {
+        d = await resolveImdbIds(d, d.tmdbKey || "");
+        var imdbForWyzie = withTtPrefix(d.parentImdbId || (d.isMovie ? d.imdbId : null));
+        if (imdbForWyzie) {
+          results = await attempt("IMDB lookup", imdbForWyzie, includeSE);
+        }
+      }
+
+      // Whole show, for TV, unless that was already the request
+      if (!results && !d.broadShow && !d.isMovie && d.tmdbId && includeSE) {
+        results = await attempt("Whole-show fallback", String(d.tmdbId), false);
+      }
+
+      sidebar.postMessage("wyzieSearchResult", {
+        results: results || [],
+        triedSteps: tried,
+        error: (results === null && lastErr) ? lastErr : null,
+        resolvedImdb: d.imdbId || null,
+        resolvedParentImdb: d.parentImdbId || null
+      });
+    } catch(e) {
+      sidebar.postMessage("wyzieSearchResult", { error: errStr(e) });
+    }
+  });
+
+  sidebar.onMessage("loadWyzieSub", function(d) {
+    if (d && d.url) {
+      try {
+        iina.mpv.command("sub-add", [d.url, "select"]);
+        log("Subtitle loaded");
+        sidebar.postMessage("wyzieLoadResult", { success: true });
+      } catch(e) {
+        sidebar.postMessage("wyzieLoadResult", { success: false, error: errStr(e) });
+      }
+    }
+  });
+
+  // SubDL (https://subdl.com/api-doc), separate from OpenSubtitles
+  sidebar.onMessage("searchSubdl", async function(d) {
+    function progress(msg) {
+      sidebar.postMessage("subdlSearchProgress", { text: msg });
+    }
+    async function sdCall(params) {
+      params.api_key = d.key;
+      try {
+        var resp = await withTimeout(
+          iina.http.get("https://api.subdl.com/api/v1/subtitles", {
+            params:  params,
+            headers: { "Accept": "application/json" }
+          }),
+          HTTP_TIMEOUT_MS,
+          "SubDL search"
+        );
+        var body = resp.data || JSON.parse(resp.text || "{}");
+        if (resp.statusCode === 200 && body.status === true) {
+          return { results: body.subtitles || [], status: 200 };
+        }
+        var msg = (body && body.error) ? errStr(body.error) : ("HTTP " + resp.statusCode);
+        return { error: msg, status: resp.statusCode };
+      } catch(e) {
+        return { error: errStr(e) };
+      }
+    }
+    try {
+      var lang     = (d.lang || "EN").toUpperCase(); // SubDL uses uppercase codes
+      var perPage  = "30"; // max
+      var tried    = [];
+      var lastErr  = null;
+      var attempt = async function(label, params) {
+        progress(label + "…");
+        params.subs_per_page = perPage;
+        var r = await sdCall(params);
+        tried.push(label);
+        if (r.error) { lastErr = r.error; return null; }
+        if (r.results && r.results.length) return r.results;
+        return null;
+      };
+
+      var results = null;
+
+      // Manual query: plain text search
+      if (d.manualQuery) {
+        progress("Searching SubDL…");
+        var mr = await sdCall({ film_name: d.manualQuery, languages: lang, subs_per_page: perPage });
+        if (mr.error) sidebar.postMessage("subdlSearchResult", { error: mr.error });
+        else          sidebar.postMessage("subdlSearchResult", { results: mr.results });
+        return;
+      }
+
+      // Auto search: resolve IMDB ids first
+      progress("Resolving IMDB ID…");
+      d = await resolveImdbIds(d, d.tmdbKey || "");
+
+      if (d.isMovie) {
+        // MOVIE cascade
+        if (d.tmdbId && !results) {
+          var p = { tmdb_id: String(d.tmdbId), type: "movie", languages: lang };
+          if (d.year) p.year = String(d.year);
+          results = await attempt("TMDB lookup", p);
+        }
+        if (!results && d.imdbId) {
+          // SubDL takes imdb_id with the "tt" prefix
+          results = await attempt("IMDB lookup", {
+            imdb_id:   String(d.imdbId),
+            type:      "movie",
+            languages: lang
+          });
+        }
+        if (!results && (d.query || d.epTitle || d.showTitle)) {
+          var qp = { film_name: d.query || d.epTitle || d.showTitle, type: "movie", languages: lang };
+          if (d.year) qp.year = String(d.year);
+          results = await attempt("Text search", qp);
+        }
+      } else {
+        // TV cascade
+        if (d.tmdbId && d.season && d.episode && !results) {
+          results = await attempt("TMDB lookup", {
+            tmdb_id:        String(d.tmdbId),
+            type:           "tv",
+            season_number:  String(d.season),
+            episode_number: String(d.episode),
+            languages:      lang
+          });
+        }
+        if (!results && d.parentImdbId && d.season && d.episode) {
+          results = await attempt("IMDB lookup", {
+            imdb_id:        String(d.parentImdbId),
+            type:           "tv",
+            season_number:  String(d.season),
+            episode_number: String(d.episode),
+            languages:      lang
+          });
+        }
+        // Fallback: full-season pack
+        if (!results && d.tmdbId) {
+          results = await attempt("Full-season fallback", {
+            tmdb_id:     String(d.tmdbId),
+            type:        "tv",
+            full_season: "1",
+            languages:   lang
+          });
+        }
+        // Last-ditch: text search
+        if (!results && (d.query || d.showTitle)) {
+          var ep = { film_name: d.query || d.showTitle, type: "tv", languages: lang };
+          if (d.season)  ep.season_number  = String(d.season);
+          if (d.episode) ep.episode_number = String(d.episode);
+          results = await attempt("Text search", ep);
+        }
+      }
+
+      sidebar.postMessage("subdlSearchResult", {
+        results: results || [],
+        triedSteps: tried,
+        error: (results === null && lastErr) ? lastErr : null,
+        resolvedImdb: d.imdbId || null,
+        resolvedParentImdb: d.parentImdbId || null
+      });
+    } catch(e) {
+      sidebar.postMessage("subdlSearchResult", { error: errStr(e) });
+    }
+  });
+
+  // SubDL serves ZIPs: download to @tmp, unzip, load the subtitle
+  sidebar.onMessage("loadSubdlSub", async function(d) {
+    if (!d || !d.url) {
+      sidebar.postMessage("subdlLoadResult", { success: false, error: "No URL" });
+      return;
+    }
+
+    // which step failed, for the error message
+    var step = "starting";
+
+    try {
+      // SubDL gives relative URLs like "/subtitle/123-456.zip"
+      var url = d.url;
+      if (url.charAt(0) === "/") url = "https://dl.subdl.com" + url;
+      else if (!/^https?:\/\//i.test(url)) url = "https://dl.subdl.com/" + url;
+
+      // so downloads don't clash
+      var stamp = Date.now() + "-" + Math.floor(Math.random() * 1e6);
+      var zipPath    = "@tmp/subdl-" + stamp + ".zip";
+      var extractDir = "@tmp/subdl-" + stamp;
+
+      // 1. Download
+      step = "download";
+      var downloadedZipAbsPath = await withTimeout(
+        iina.http.download(url, zipPath),
+        HTTP_TIMEOUT_MS,
+        "SubDL download"
+      );
+      var zipAbs = downloadedZipAbsPath;
+      if (!zipAbs && utils && typeof utils.resolvePath === "function") {
+        zipAbs = utils.resolvePath(zipPath);
+      }
+      if (!zipAbs) zipAbs = zipPath;
+
+      // 2. Extract dir
+      step = "prepare-extract-dir";
+      var extractAbs;
+      if (utils && typeof utils.resolvePath === "function") {
+        extractAbs = utils.resolvePath(extractDir);
+      } else {
+        extractAbs = String(zipAbs).replace(/\.zip$/i, "");
+      }
+      var mkdirResult = await utils.exec("/bin/mkdir", ["-p", String(extractAbs)]);
+      if (mkdirResult.status !== 0) {
+        throw new Error("mkdir failed: " + (mkdirResult.stderr || mkdirResult.stdout || "no output"));
+      }
+
+      // 3. Unzip (macOS's UnZip 6.00 has no -O, so plain flags only)
+      step = "unzip";
+      var execResult = await utils.exec("/usr/bin/unzip", ["-j", "-o", String(zipAbs), "-d", String(extractAbs)]);
+      if (execResult.status !== 0) {
+        throw new Error("Unzip failed: " + (execResult.stderr || execResult.stdout || ("exit " + execResult.status)));
+      }
+
+      // 4. Find the subtitle, nested zips too
+      step = "find-subtitle";
+      var subFile = null;
+      var nestedZip = null;
+
+      var lsResult = await utils.exec("/bin/ls", ["-1", String(extractAbs)]);
+      var fileNames = [];
+      if (lsResult.status === 0 && lsResult.stdout) {
+        var lines = lsResult.stdout.split("\n");
+        for (var li = 0; li < lines.length; li++) {
+          var nm = lines[li].trim();
+          if (nm) fileNames.push(nm);
+        }
+      }
+
+      // First pass: subtitle files
+      for (var i1 = 0; i1 < fileNames.length; i1++) {
+        if (/\.(srt|ass|ssa|vtt|sub)$/i.test(fileNames[i1])) {
+          subFile = String(extractAbs) + "/" + fileNames[i1];
+          break;
+        }
+      }
+      // Second pass: nested zip
+      if (!subFile) {
+        for (var i2 = 0; i2 < fileNames.length; i2++) {
+          if (/\.zip$/i.test(fileNames[i2])) {
+            nestedZip = String(extractAbs) + "/" + fileNames[i2];
+            break;
+          }
+        }
+      }
+      if (!subFile && nestedZip) {
+        var nested2 = String(extractAbs) + "/inner";
+        await utils.exec("/bin/mkdir", ["-p", nested2]);
+        var unzip2 = await utils.exec("/usr/bin/unzip", ["-j", "-o", nestedZip, "-d", nested2]);
+        if (unzip2.status === 0) {
+          var ls2 = await utils.exec("/bin/ls", ["-1", nested2]);
+          if (ls2.status === 0 && ls2.stdout) {
+            var ll = ls2.stdout.split("\n");
+            for (var i3 = 0; i3 < ll.length; i3++) {
+              var nm2 = ll[i3].trim();
+              if (/\.(srt|ass|ssa|vtt|sub)$/i.test(nm2)) {
+                subFile = nested2 + "/" + nm2;
+                break;
+              }
+            }
+          }
+        }
+      }
+      if (!subFile) {
+        throw new Error("No subtitle (.srt/.ass/.ssa/.vtt) found inside the zip" + (fileNames.length ? " — got: " + fileNames.join(", ") : ""));
+      }
+
+      // 5. An empty file means unzip quietly failed
+      step = "validate";
+      var statResult = await utils.exec("/usr/bin/stat", ["-f", "%z", String(subFile)]);
+      var fileSize = parseInt((statResult.stdout || "0").trim(), 10);
+      if (!fileSize || fileSize < 10) {
+        throw new Error("Extracted subtitle is empty or too small (" + fileSize + " bytes)");
+      }
+
+      // 6. Load it; mpv handles the encoding
+      step = "sub-add";
+      var loaded = false;
+      try {
+        if (core && core.subtitle && typeof core.subtitle.loadTrack === "function") {
+          core.subtitle.loadTrack(subFile);
+          loaded = true;
+        }
+      } catch(_e) { /* fall through to mpv command */ }
+
+      if (!loaded) {
+        iina.mpv.command("sub-add", [subFile, "select"]);
+        // Select the new track in case `select` didn't take
+        try {
+          var tracks = iina.mpv.getNative ? iina.mpv.getNative("track-list") : null;
+          if (tracks && tracks.length) {
+            var maxSid = 0;
+            for (var ti = 0; ti < tracks.length; ti++) {
+              var t = tracks[ti];
+              if (t && t.type === "sub" && typeof t.id === "number" && t.id > maxSid) {
+                maxSid = t.id;
+              }
+            }
+            if (maxSid > 0) {
+              try { iina.mpv.set("sid", maxSid); } catch(_e2) {}
+            }
+          }
+        } catch(_e3) { /* best effort */ }
+      }
+
+      log("SubDL subtitle loaded from " + subFile);
+      sidebar.postMessage("subdlLoadResult", { success: true });
+    } catch(e) {
+      log("SubDL load failed at step '" + step + "': " + errStr(e));
+      sidebar.postMessage("subdlLoadResult", {
+        success: false,
+        error:   "[" + step + "] " + errStr(e)
+      });
+    }
+  });
+
+  // OpenSubtitles
+  sidebar.onMessage("osLogin", async function(d) {
+    try {
+      var resp = await withTimeout(
+        iina.http.post("https://api.opensubtitles.com/api/v1/login", {
+          headers: {
+            "Api-Key":      d.key,
+            "Content-Type": "application/json",
+            "User-Agent":   OS_USER_AGENT  // required by OS
+          },
+          data:    { username: d.username, password: d.password }
+        }),
+        HTTP_TIMEOUT_MS,
+        "OpenSubtitles login"
+      );
+      var body = resp.data || JSON.parse(resp.text || "{}");
+      if (resp.statusCode === 200 && body.token) {
+        sidebar.postMessage("osLoginResult", { success: true, token: body.token, username: d.username, downloads: body.user ? body.user.allowed_downloads : null });
+      } else {
+        var msg = (body && typeof body.message === "string") ? body.message : ("HTTP " + resp.statusCode);
+        sidebar.postMessage("osLoginResult", { success: false, error: msg });
+      }
+    } catch(e) {
+      sidebar.postMessage("osLoginResult", { success: false, error: errStr(e) });
+    }
+  });
+
+  sidebar.onMessage("searchSubs", async function(d) {
+    // One API call: { results, error, status }
+    async function osCall(params, hdrs) {
+      try {
+        var resp = await withTimeout(
+          iina.http.get("https://api.opensubtitles.com/api/v1/subtitles", {
+            params: params, headers: hdrs
+          }),
+          HTTP_TIMEOUT_MS,
+          "OpenSubtitles search"
+        );
+        var body = resp.data || JSON.parse(resp.text || "{}");
+        if (resp.statusCode === 200) {
+          return { results: body.data || [], status: 200 };
+        }
+        return { error: (body && body.message) || ("HTTP " + resp.statusCode), status: resp.statusCode };
+      } catch(e) {
+        return { error: errStr(e) };
+      }
+    }
+
+    function progress(msg) {
+      sidebar.postMessage("subSearchProgress", { text: msg });
+    }
+
+    try {
+      var hdrs = { "Api-Key": d.key, "User-Agent": OS_USER_AGENT };
+      if (d.token) hdrs["Authorization"] = "Bearer " + d.token;
+      var lang  = d.lang || "en";
+
+      // Manual query: plain text search
+      if (d.manualQuery) {
+        progress("Searching OpenSubtitles…");
+        var mq = await osCall({ query: d.manualQuery, languages: lang }, hdrs);
+        if (mq.error) sidebar.postMessage("subSearchResult", { error: mq.error });
+        else          sidebar.postMessage("subSearchResult", { results: mq.results });
+        return;
+      }
+
+      // Auto search: resolve IMDB ids, then try in order
+      progress("Resolving IMDB ID…");
+      d = await resolveImdbIds(d, d.tmdbKey || "");
+
+      var tried   = [];
+      var lastErr = null;
+      var attempt = async function(label, params) {
+        progress(label + "…");
+        var r = await osCall(params, hdrs);
+        tried.push(label);
+        if (r.error) { lastErr = r.error; return null; }
+        if (r.results && r.results.length) return r.results;
+        return null;
+      };
+
+      var results = null;
+
+      if (d.isMovie) {
+        // Movies: imdb_id, then tmdb_id + year, then a text query
+        var movieImdb = stripTtAndZeros(d.imdbId);
+        if (movieImdb && !results) {
+          results = await attempt("IMDB lookup", { imdb_id: movieImdb, languages: lang });
+        }
+        if (!results && d.tmdbId) {
+          var p = { tmdb_id: String(d.tmdbId), languages: lang };
+          if (d.year) p.year = String(d.year);
+          results = await attempt("TMDB lookup", p);
+        }
+        if (!results && (d.query || d.epTitle || d.showTitle)) {
+          var qp = { query: d.query || d.epTitle || d.showTitle, type: "movie", languages: lang };
+          if (d.year) qp.year = String(d.year);
+          results = await attempt("Text search", qp);
+        }
+      } else {
+        // Episodes: parent imdb id + season/episode first, as OpenSubtitles recommends, then the fallbacks
+        var epImdb = stripTtAndZeros(d.imdbId);
+        if (epImdb && !results) {
+          results = await attempt("Episode IMDB lookup", {
+            imdb_id:   epImdb,
+            languages: lang
+          });
+        }
+        var pImdb = stripTtAndZeros(d.parentImdbId);
+        if (!results && pImdb && d.season && d.episode) {
+          results = await attempt("Show IMDB lookup", {
+            parent_imdb_id: pImdb,
+            season_number:  String(d.season),
+            episode_number: String(d.episode),
+            languages:      lang
+          });
+        }
+        if (!results && d.tmdbId && d.season && d.episode) {
+          results = await attempt("TMDB lookup", {
+            parent_tmdb_id: String(d.tmdbId),
+            season_number:  String(d.season),
+            episode_number: String(d.episode),
+            languages:      lang
+          });
+        }
+        if (!results && (d.query || d.showTitle)) {
+          var ep = { query: d.query || d.showTitle, type: "episode", languages: lang };
+          if (d.season)  ep.season_number  = String(d.season);
+          if (d.episode) ep.episode_number = String(d.episode);
+          results = await attempt("Text search", ep);
+        }
+      }
+
+      sidebar.postMessage("subSearchResult", {
+        results: results || [],
+        triedSteps: tried,
+        error: (results === null && lastErr) ? lastErr : null,
+        resolvedImdb: d.imdbId || null,
+        resolvedParentImdb: d.parentImdbId || null
+      });
+    } catch(e) {
+      sidebar.postMessage("subSearchResult", { error: errStr(e) });
+    }
+  });
+
+  sidebar.onMessage("downloadSub", async function(d) {
+    try {
+      var hdrs = {
+        "Api-Key":      d.key,
+        "Content-Type": "application/json",
+        "User-Agent":   OS_USER_AGENT  // required by OS
+      };
+      if (d.token) hdrs["Authorization"] = "Bearer " + d.token;
+      var resp = await withTimeout(
+        iina.http.post("https://api.opensubtitles.com/api/v1/download", {
+          headers: hdrs, data: { file_id: d.file_id }
+        }),
+        HTTP_TIMEOUT_MS,
+        "OpenSubtitles download"
+      );
+      var body = resp.data || JSON.parse(resp.text || "{}");
+      if (resp.statusCode === 200 && body.link) {
+        iina.mpv.command("sub-add", [body.link, "select"]);
+        sidebar.postMessage("subDownloadResult", { success: true, remaining: typeof body.remaining === "number" ? body.remaining : null });
+      } else {
+        sidebar.postMessage("subDownloadResult", { success: false, error: (body && body.message) || ("HTTP " + resp.statusCode) });
+      }
+    } catch(e) {
+      sidebar.postMessage("subDownloadResult", { success: false, error: errStr(e) });
+    }
+  });
+
+  sidebar.onMessage("clearSub", function() {
+    try { iina.mpv.set("sid", "no"); } catch(e) {}
   });
 }
 
-function ensurePollTimer() {
-  if (pollTimer !== null) return;
-  pollTimer = setInterval(function() {
-    handleStatusUpdate("poll");
-  }, POLL_INTERVAL_MS);
-}
-
-function ensureUiPollTimer() {
-  if (uiPollTimer !== null) return;
-  uiPollTimer = setInterval(function() {
-    if (trakt.getAuthStatus().busy) {
-      persistAuthStatus();
-    }
-    checkAuthActionRequest();
-    queueSidebarRefresh(false);
-  }, UI_POLL_INTERVAL_MS);
-}
-
-async function handleFileLoaded() {
-  var source = getCurrentSource();
-  var signature = source.path || source.url || source.filename || source.title;
-  if (signature && signature === lastSourceSignature && currentMedia) {
-    return;
+function setupSidebar() {
+  if (!sidebarLoaded) {
+    sidebar.loadFile("sidebar.html");
+    sidebarLoaded = true;
+    setTimeout(registerSidebarHandlers, 500);
   }
+}
 
-  if (currentMedia && lastSourceSignature && signature && signature !== lastSourceSignature) {
-    await finalizeCurrentMedia("new-file");
+var overlayHandlersRegistered = false;
+function registerOverlayHandlers() {
+  if (overlayHandlersRegistered) return;   // never stack duplicates
+  overlayHandlersRegistered = true;
+  overlay.onMessage("closeOverlay", function() { hideOverlay(); });
+  overlay.onMessage("skipSegment", function() { skipNow("button"); });
+}
+
+// A trigger that does not involve the overlay web view at all.
+try {
+  menu.addItem(menu.item("Skip Intro / Recap / Credits", function() {
+    skipNow("menu");
+  }, { keyBinding: "Alt+s" }));
+} catch(e) {
+  iina.console.log("[EpInfo] menu item failed: " + errStr(e));
+}
+
+// Events
+event.on("iina.window-loaded", function() {
+  overlay.loadFile("overlay.html");
+  // Handlers registered right after loadFile don't survive the page load
+  setTimeout(registerOverlayHandlers, 500);
+  setupSidebar();
+});
+
+event.on("iina.file-loaded", function() {
+  setupSidebar();
+  currentEpisode = null;
+  segments = [];
+  hideSkip();
+  stopTimeWatcher();
+  hideOverlay();
+  // The sidebar looks this URL up in its per-URL memory
+  try { currentVideoUrl = core.status.url || ""; } catch(e) { currentVideoUrl = ""; }
+  sidebar.postMessage("fileChanged", { url: currentVideoUrl });
+  sidebar.postMessage("overlayStatus", { text: "Select an episode, then pause" });
+});
+
+event.on("mpv.pause.changed", function() {
+  if (core.status.paused) {
+    if (pauseTimer) { clearTimeout(pauseTimer); pauseTimer = null; }
+    if (!overlayEnabled) return;
+    if (currentEpisode) {
+      pauseTimer = setTimeout(function() {
+        pauseTimer = null;
+        if (core.status.paused && currentEpisode) showOverlay(currentEpisode);
+      }, pauseDelay * 1000);
+    } else {
+      log("Paused — no episode selected");
+    }
   } else {
-    resetPlaybackTracking();
-    currentMedia = null;
-    resetCorrectionState();
+    hideOverlay();
   }
-
-  lastSourceSignature = signature;
-  missingCredentialsNoticeShown = false;
-  authRequiredNoticeShown = false;
-  identifyCurrentMedia();
-  scheduleBootstrapTicks();
-}
-
-appendDebugLog("[IINATraktScrobbler] --------------------------------------------------");
-appendDebugLog("[IINATraktScrobbler] Session start");
-log("Plugin main loaded");
-appendDebugLog("[IINATraktScrobbler] Parser mode default=guessit-with-heuristic-fallback");
-persistAuthStatus();
-registerMenuItems();
-ensurePollTimer();
-ensureUiPollTimer();
-// Prevent a 200KB read+rewrite for every diagnostic line (on Mac field tests
-// this happened repeatedly within a single second).
-setInterval(function() { debugLog.flush(); }, DEBUG_LOG_FLUSH_INTERVAL_MS);
-debugLog.flush();
-replaySavedFinalizations();
-stopReplayTimer = setInterval(function() {
-  void replaySavedFinalizations();
-}, 30000);
-
-event.on("iina.window-loaded", wrapEvent("iina.window-loaded", function() {
-  initializeSidebar();
-  debugOsd("Plugin loaded");
-}));
-
-event.on("iina.file-loaded", wrapEvent("iina.file-loaded", function() {
-  return handleFileLoaded();
-}));
-
-event.on("mpv.pause.changed", wrapEvent("mpv.pause.changed", function() {
-  handleStatusUpdate("pause.changed");
-}));
-
-event.on("mpv.time-pos.changed", wrapEvent("mpv.time-pos.changed", function() {
-  handleStatusUpdate("time-pos.changed");
-}));
-
-event.on("mpv.duration.changed", wrapEvent("mpv.duration.changed", function() {
-  handleStatusUpdate("duration.changed");
-}));
-
-event.on("mpv.end-file", wrapEvent("mpv.end-file", function() {
-  return finalizeCurrentMedia("end-file");
-}));
-
-// This fires before the IINA player window is torn down. Save stop checkpoint
-// synchronously so that an interrupted network request is replayed next launch.
-event.on("iina.window-will-close", wrapEvent("iina.window-will-close", function() {
-  if (playbackState.prevSnapshot && playbackState.prevSnapshot.state !== monitor.State.Stopped) {
-    var latest = buildLiveSnapshot();
-    if (latest && latest.progress >= 1 &&
-        monitor.mediaKey(latest.mediaInfo) === monitor.mediaKey(playbackState.prevSnapshot.mediaInfo) &&
-        !monitor.shouldIgnoreEndRollover(playbackState.prevSnapshot, latest)) {
-      playbackState.prevSnapshot = latest;
-    }
-  }
-  // Capture the current diagnostic batch before IINA starts teardown.
-  debugLog.flush();
-  return Promise.resolve(finalizeCurrentMedia("window-will-close")).finally(function() {
-    debugLog.flush();
-  });
-}));
-
-// Additional late safety net for IINA builds that skip the window lifecycle
-// event during process shutdown. The journal prevents loss across teardown.
-event.on("mpv.shutdown", wrapEvent("mpv.shutdown", function() {
-  debugLog.flush();
-  return Promise.resolve(finalizeCurrentMedia("mpv.shutdown")).finally(function() {
-    debugLog.flush();
-  });
-}));
+});

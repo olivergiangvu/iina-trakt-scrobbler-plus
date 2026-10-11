@@ -1,2117 +1,2051 @@
 <!DOCTYPE html>
 <html>
-
 <head>
-  <meta charset="UTF-8">
-  <style>
-    :root {
-      color-scheme: light dark;
-      --text: #dadada;
-      --secondary: rgba(255, 255, 255, 0.58);
-      --tertiary: rgba(255, 255, 255, 0.36);
-      --highlight-color: #2561dd;
-      --highlight-text: #fff;
-      --input-border: rgba(255, 255, 255, 0.2);
-      --input-border-light: rgba(255, 255, 255, 0.1);
-      --input-border-dark: rgba(255, 255, 255, 0.3);
-      --box-bg: rgba(0, 0, 0, 0.2);
-      --control-bg: rgba(255, 255, 255, 0.08);
-      --control-border: rgba(255, 255, 255, 0.12);
-      --blue: #2561dd;
-      --red: #ff453a;
-      --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Open Sans", "Helvetica Neue", sans-serif;
-      --font-mono: "SF Mono", "SFMono-Regular", "Menlo", monospace;
-    }
-
-    @media (prefers-color-scheme: light) {
-      :root {
-        --text: #1f2023;
-        --secondary: rgba(0, 0, 0, 0.58);
-        --tertiary: rgba(0, 0, 0, 0.42);
-        --highlight-color: #087fff;
-        --highlight-text: #fff;
-        --input-border: rgba(0, 0, 0, 0.1);
-        --input-border-light: rgba(0, 0, 0, 0.05);
-        --input-border-dark: rgba(0, 0, 0, 0.08);
-        --box-bg: rgba(0, 0, 0, 0.05);
-        --control-bg: rgba(0, 0, 0, 0.04);
-        --control-border: rgba(0, 0, 0, 0.08);
-        --blue: #087fff;
-      }
-    }
-
-    * {
-      box-sizing: border-box;
-    }
-
-    html,
-    body {
-      margin: 0;
-      min-height: 100%;
-      background: transparent;
-    }
-
-    body {
-      color: var(--text);
-      font-family: var(--font-ui);
-      font-size: 13px;
-      line-height: 1.35;
-      background: none;
-      -webkit-font-smoothing: antialiased;
-      text-rendering: optimizeLegibility;
-    }
-
-    .shell {
-      display: flex;
-      flex-direction: column;
-      min-height: 100vh;
-      padding: 8px 0 12px;
-    }
-
-    .header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 10px;
-      margin: 0 7px 8px;
-      padding: 0 1px;
-    }
-
-    .brand {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      min-width: 0;
-    }
-
-    .brand-mark {
-      display: block;
-      width: 18px;
-      height: 18px;
-      flex: 0 0 auto;
-    }
-
-    h1 {
-      margin: 0;
-      font-size: 18px;
-      line-height: 1.15;
-      letter-spacing: -0.015em;
-      font-weight: 700;
-    }
-
-    .status-pill {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      min-height: 22px;
-      padding: 0 8px;
-      border-radius: 999px;
-      border: 1px solid var(--input-border);
-      background: var(--control-bg);
-      color: var(--secondary);
-      font-size: 10px;
-      font-weight: 600;
-      letter-spacing: 0.02em;
-      text-transform: uppercase;
-      white-space: nowrap;
-    }
-
-    .status-pill[data-state="error"],
-    .status-pill[data-state="missing_credentials"] {
-      color: var(--red);
-      border-color: rgba(255, 69, 58, 0.18);
-    }
-
-    .hero-status {
-      color: var(--secondary);
-      font-size: 11px;
-      font-weight: 700;
-      letter-spacing: 0.04em;
-      text-transform: uppercase;
-      white-space: nowrap;
-    }
-
-    .hero-status[data-state="error"],
-    .hero-status[data-state="missing_credentials"] {
-      color: var(--red);
-    }
-
-    .section {
-      margin: 0 7px;
-      padding: 0 1px;
-      background: none;
-      border: none;
-    }
-
-    .section+.section {
-      margin-top: 8px;
-      padding-top: 10px;
-      border-top: 1px solid var(--input-border);
-    }
-
-    .section-head {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 10px;
-      padding: 8px 0 0;
-    }
-
-    .section-label {
-      margin: 0;
-      font-size: 10px;
-      font-weight: 600;
-      letter-spacing: 0.04em;
-      text-transform: uppercase;
-      color: var(--tertiary);
-    }
-
-    .section-body {
-      padding: 6px 0 8px;
-    }
-
-    .top-row {
-      display: flex;
-      align-items: flex-start;
-      justify-content: space-between;
-      gap: 10px;
-    }
-
-    .title {
-      margin: 0;
-      font-size: 15px;
-      font-weight: 700;
-      line-height: 1.2;
-      letter-spacing: -0.01em;
-    }
-
-    .title[data-tone="soft"] {
-      font-size: 14px;
-      font-weight: 400;
-      letter-spacing: 0;
-    }
-
-    .title em {
-      font-style: italic;
-      font-weight: inherit;
-    }
-
-    .caption {
-      margin: 3px 0 0;
-      color: var(--secondary);
-      font-size: 12px;
-    }
-
-    .code-box {
-      margin-top: 10px;
-      padding: 10px 12px;
-      border-radius: 3px;
-      border: 1px solid var(--input-border);
-      background: rgba(0, 0, 0, 0.08);
-    }
-
-    .code-row {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-
-    .code-label {
-      margin: 0 0 6px;
-      color: var(--tertiary);
-      font-size: 10px;
-      font-weight: 600;
-      letter-spacing: 0.03em;
-      text-transform: uppercase;
-    }
-
-    .code-value {
-      width: 100%;
-      min-width: 0;
-      margin: 0;
-      padding: 0;
-      border: none;
-      outline: none;
-      background: transparent;
-      font-family: var(--font-mono);
-      font-size: 19px;
-      font-weight: 700;
-      letter-spacing: 0.12em;
-      font-variant-numeric: tabular-nums;
-      color: var(--text);
-      -webkit-appearance: none;
-      appearance: none;
-      user-select: text;
-    }
-
-    .pill-row {
-      display: flex;
-      gap: 6px;
-      flex-wrap: wrap;
-      margin-top: 8px;
-    }
-
-    .control-row {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-      margin-top: 10px;
-    }
-
-    .control-copy {
-      min-width: 0;
-    }
-
-    .control-label {
-      margin: 0;
-      font-size: 12px;
-      font-weight: 600;
-      color: var(--text);
-    }
-
-    .control-caption {
-      margin: 2px 0 0;
-      font-size: 11px;
-      color: var(--secondary);
-    }
-
-    .media-name {
-      margin: 0;
-      font-size: 15px;
-      font-weight: 700;
-      line-height: 1.2;
-      letter-spacing: -0.01em;
-    }
-
-    .media-meta {
-      margin: 4px 0 0;
-      color: var(--secondary);
-      font-size: 12px;
-    }
-
-    .progress-wrap {
-      margin-top: 8px;
-    }
-
-    .progress-bar {
-      position: relative;
-      height: 5px;
-      border-radius: 999px;
-      overflow: hidden;
-      background: var(--input-border-light);
-    }
-
-    .progress-fill {
-      position: absolute;
-      inset: 0 auto 0 0;
-      width: 0%;
-      border-radius: 999px;
-      background: var(--blue);
-    }
-
-    .progress-meta {
-      display: flex;
-      justify-content: space-between;
-      gap: 10px;
-      margin-top: 6px;
-      color: var(--secondary);
-      font-size: 11px;
-      font-variant-numeric: tabular-nums;
-    }
-
-    .scrobble-title {
-      margin: 0;
-      font-size: 14px;
-      font-weight: 700;
-      line-height: 1.25;
-      display: inline-flex;
-      align-items: center;
-      gap: 7px;
-    }
-
-    .scrobble-title.is-pending::after {
-      content: "";
-      width: 6px;
-      height: 6px;
-      border-radius: 999px;
-      background: var(--blue);
-      box-shadow: 0 0 0 0 rgba(37, 97, 221, 0.34);
-      animation: traktPulse 1.4s ease-out infinite;
-    }
-
-    .scrobble-head {
-      display: flex;
-      align-items: baseline;
-      justify-content: space-between;
-      gap: 10px;
-    }
-
-    .scrobble-updated {
-      flex: 0 0 auto;
-      color: var(--secondary);
-      font-size: 11px;
-      font-variant-numeric: tabular-nums;
-      white-space: nowrap;
-    }
-
-    .scrobble-target {
-      margin: 6px 0 0;
-      color: var(--secondary);
-      font-size: 12px;
-      line-height: 1.35;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-
-    .scrobble-detail {
-      margin: 4px 0 0;
-      color: var(--secondary);
-      font-size: 12px;
-    }
-
-.sync-list { display:flex; flex-direction:column; gap:5px; margin-top:8px; }
-    .sync-line { display:flex; align-items:center; justify-content:space-between;
-      gap:9px; border:1px solid var(--control-border); border-radius:5px;
-      padding:7px 9px; background:var(--control-bg); }
-    .sync-label { overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
-      font-size:12px; min-width:0; flex:1; }
-    .sync-sub { font-size:10px; color:var(--secondary); white-space:nowrap; flex:0 0 auto; }
-    .sync-group-label { color:var(--secondary); font-size:10px; letter-spacing:.04em;
-      text-transform:uppercase; margin:10px 0 4px; }
-    .sync-note { color:var(--secondary); font-size:11px; margin:7px 0 0;
-      line-height:1.35; }
-    .sync-meta { color:var(--secondary); font-size:11px; }
-    .sync-headline { display:flex; align-items:center; justify-content:space-between;
-      gap:8px; }
-    .sync-review-item { align-items:stretch; flex-direction:column; gap:7px; }
-    .sync-review-title { font-size:12px; font-weight:600; overflow-wrap:anywhere; line-height:1.35; }
-    .sync-review-reason { font-size:11px; color:var(--secondary); line-height:1.4; overflow-wrap:anywhere; }
-    .sync-review-actions { display:flex; justify-content:flex-end; align-items:center; gap:7px; }
-    .sync-review-help { font-size:11px; line-height:1.4; color:var(--secondary); }
-    .sync-review-feedback { margin:7px 0 0; line-height:1.4; font-size:11px; color:var(--secondary); }
-    .sync-review-action[disabled] { opacity:.55; cursor:default; }
-
-    .correction-summary,
-    .correction-current,
-    .correction-status,
-    .correction-reference-label {
-      margin: 0;
-      color: var(--secondary);
-      font-size: 12px;
-      line-height: 1.4;
-    }
-
-    .correction-summary {
-      min-width: 0;
-      flex: 1 1 auto;
-    }
-
-    .correction-open {
-      display: flex;
-      flex-direction: column;
-      gap: 9px;
-    }
-
-    .correction-closed {
-      display: flex;
-      align-items: flex-start;
-      justify-content: space-between;
-      gap: 10px;
-    }
-
-    .correction-query-row {
-      display: flex;
-      gap: 7px;
-      align-items: center;
-    }
-
-    .text-input {
-      min-width: 0;
-      flex: 1 1 auto;
-      min-height: 28px;
-      padding: 0 8px;
-      border-radius: 3px;
-      border: 1px solid var(--input-border);
-      color: var(--text);
-      background: var(--input-bg);
-      font: inherit;
-    }
-
-    .text-input::placeholder {
-      color: var(--tertiary);
-    }
-
-    .correction-actions {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      flex: 0 0 auto;
-    }
-
-    .correction-results {
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-    }
-
-    .correction-reference {
-      display: flex;
-      flex-direction: column;
-      gap: 7px;
-      padding-top: 2px;
-    }
-
-    .correction-reference-row {
-      align-items: center;
-    }
-
-    .correction-reference-input {
-      min-width: 0;
-      flex: 1 1 auto;
-    }
-
-    .correction-result {
-      display: grid;
-      grid-template-columns: 38px minmax(0, 1fr) auto;
-      align-items: start;
-      column-gap: 10px;
-    }
-
-    .correction-result + .correction-result {
-      padding-top: 8px;
-      border-top: 1px solid var(--input-border-light);
-    }
-
-    .correction-poster {
-      flex: 0 0 auto;
-      width: 38px;
-      height: 56px;
-      border-radius: 4px;
-      overflow: hidden;
-      background: var(--input-border-light);
-      border: 1px solid var(--input-border);
-    }
-
-    .correction-poster img {
-      display: block;
-      width: 100%;
-      height: 100%;
-      object-fit: cover;
-    }
-
-    .correction-copy {
-      min-width: 0;
-      flex: 1 1 auto;
-    }
-
-    .correction-title {
-      margin: 0;
-      color: var(--text);
-      font-size: 13px;
-      font-weight: 600;
-      line-height: 1.3;
-      word-break: break-word;
-    }
-
-    .correction-subtitle {
-      margin: 3px 0 0;
-      color: var(--secondary);
-      font-size: 11px;
-      line-height: 1.35;
-    }
-
-    .correction-detail-line {
-      margin: 2px 0 0;
-      color: var(--tertiary);
-      font-size: 11px;
-      line-height: 1.35;
-    }
-
-    .correction-use {
-      align-self: center;
-      min-width: 56px;
-      padding-inline: 12px;
-    }
-
-    .history-list {
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-    }
-
-    .history-item {
-      display: flex;
-      align-items: flex-start;
-      justify-content: space-between;
-      gap: 12px;
-    }
-
-    .history-title {
-      margin: 0;
-      min-width: 0;
-      flex: 1 1 auto;
-      color: var(--text);
-      font-size: 12px;
-      line-height: 1.35;
-      word-break: break-word;
-    }
-
-    .history-time {
-      flex: 0 0 auto;
-      color: var(--secondary);
-      font-size: 11px;
-      white-space: nowrap;
-    }
-
-    .history-empty {
-      margin: 0;
-      color: var(--secondary);
-      font-size: 12px;
-    }
-
-    .footer {
-      margin: 8px 7px 0;
-      padding: 10px 1px 0;
-      background: none;
-      border: none;
-      border-top: 1px solid var(--input-border);
-    }
-
-    .footer-actions {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      flex-wrap: wrap;
-    }
-
-    .footer-stack {
-      position: relative;
-      display: grid;
-    }
-
-    .footer-panel {
-      grid-area: 1 / 1;
-      transition: opacity 160ms ease, transform 160ms ease;
-    }
-
-    .footer-panel[aria-hidden="true"] {
-      opacity: 0;
-      pointer-events: none;
-      transform: translateY(-4px);
-    }
-
-    .confirm-copy {
-      margin: 0;
-      color: var(--secondary);
-      font-size: 11px;
-    }
-
-    .footer-row {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 10px;
-      min-height: 28px;
-    }
-
-    .footer-note {
-      margin: 8px 0 0;
-      color: var(--secondary);
-      font-size: 11px;
-      opacity: 0;
-      transform: translateY(-2px);
-      transition: opacity 160ms ease, transform 160ms ease;
-    }
-
-    .footer-note.show {
-      opacity: 1;
-      transform: translateY(0);
-    }
-
-    .provider {
-      margin: auto 7px 0;
-      padding: 14px 1px 0;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 10px;
-      color: var(--tertiary);
-      font-size: 10px;
-      letter-spacing: 0.04em;
-      text-transform: uppercase;
-    }
-
-    .provider-copy {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      min-width: 0;
-    }
-
-    .provider-logo {
-      display: block;
-      height: 12px;
-      width: auto;
-      opacity: 0.9;
-    }
-
-    .provider-version {
-      flex: 0 0 auto;
-      white-space: nowrap;
-      font-variant-numeric: tabular-nums;
-    }
-
-    @keyframes traktPulse {
-      0% {
-        transform: scale(0.92);
-        box-shadow: 0 0 0 0 rgba(37, 97, 221, 0.34);
-      }
-
-      70% {
-        transform: scale(1);
-        box-shadow: 0 0 0 7px rgba(37, 97, 221, 0);
-      }
-
-      100% {
-        transform: scale(0.92);
-        box-shadow: 0 0 0 0 rgba(37, 97, 221, 0);
-      }
-    }
-
-    button {
-      min-height: 28px;
-      padding: 0 11px;
-      border-radius: 3px;
-      border: 1px solid var(--input-border);
-      font: inherit;
-      font-weight: 600;
-      cursor: pointer;
-      color: var(--text);
-      background: var(--input-border-light);
-      touch-action: manipulation;
-      -webkit-user-select: none;
-      user-select: none;
-      white-space: nowrap;
-      transition: opacity 120ms ease, background 120ms ease, border-color 120ms ease;
-    }
-
-    button:disabled {
-      opacity: 0.45;
-      cursor: default;
-    }
-
-    button.primary {
-      color: var(--highlight-text);
-      background: var(--highlight-color);
-      border-color: transparent;
-    }
-
-    button.secondary {
-      background: var(--input-border-light);
-    }
-
-    button.ghost {
-      color: var(--secondary);
-      background: transparent;
-    }
-
-    button.danger {
-      color: var(--red);
-      background: transparent;
-      border-color: rgba(255, 69, 58, 0.18);
-    }
-
-    button.switch {
-      display: inline-flex;
-      align-items: center;
-      justify-content: flex-start;
-      min-width: 38px;
-      min-height: 22px;
-      padding: 2px;
-      border-radius: 999px;
-      border-color: var(--input-border);
-      background: rgba(120, 120, 128, 0.32);
-    }
-
-    button.switch[aria-checked="true"] {
-      background: var(--blue);
-    }
-
-    button.switch[aria-checked="false"] {
-      background: rgba(120, 120, 128, 0.32);
-    }
-
-    .switch-thumb {
-      display: block;
-      width: 18px;
-      height: 18px;
-      border-radius: 50%;
-      background: #fff;
-      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
-      transform: translateX(0);
-      transition: transform 120ms ease;
-    }
-
-    button.switch[aria-checked="true"] .switch-thumb {
-      transform: translateX(16px);
-    }
-
-    .small {
-      font-size: 11px;
-      color: var(--secondary);
-    }
-
-    [hidden] {
-      display: none !important;
-    }
-  </style>
+<meta charset="UTF-8">
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    font-family: -apple-system, 'Helvetica Neue', sans-serif;
+    font-size: 13px; color: #ccc; background: transparent;
+    padding: 10px; overflow-x: hidden;
+  }
+
+  /* Saved card */
+  #saved {
+    display: none; background: rgba(229,9,20,.1);
+    border: 1px solid rgba(229,9,20,.28); border-radius: 8px;
+    padding: 10px 11px 9px; margin-bottom: 10px;
+  }
+  #saved.on { display: block; }
+  #s-show {
+    font-size: 10px; font-weight: 700; letter-spacing: .1em;
+    text-transform: uppercase; color: rgba(255,255,255,.45); margin-bottom: 3px;
+  }
+  #s-title { font-size: 15px; font-weight: 700; color: #fff; margin-bottom: 4px; line-height: 1.3; }
+  #s-meta  { font-size: 11px; color: rgba(255,255,255,.45); margin-bottom: 8px; }
+  #s-meta .rat { color: #f5c518; }
+
+  /* Description with show more */
+  #s-desc { font-size: 12px; color: rgba(255,255,255,.55); line-height: 1.45; margin-bottom: 5px; }
+  #s-desc.collapsed {
+    display: -webkit-box; -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical; overflow: hidden;
+  }
+  #show-more {
+    display: none; font-size: 11px; color: rgba(229,9,20,.9);
+    cursor: pointer; margin-bottom: 8px; background: none; border: none;
+    padding: 0; font-family: inherit;
+  }
+  #show-more:hover { color: #e50914; }
+
+  #clear-btn {
+    display: block; width: 100%;
+    background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.1);
+    color: rgba(255,255,255,.5); font-size: 11px; padding: 5px;
+    border-radius: 5px; cursor: pointer; text-align: center;
+  }
+  #clear-btn:hover { background: rgba(255,255,255,.1); color: #fff; }
+
+  /* Search */
+  .row { display: flex; gap: 6px; margin-bottom: 8px; }
+  #q {
+    flex: 1; background: rgba(255,255,255,.08);
+    border: 1px solid rgba(255,255,255,.14);
+    border-radius: 6px; padding: 7px 10px;
+    color: #fff; font-size: 13px; font-family: inherit; outline: none;
+  }
+  #q::placeholder { color: rgba(255,255,255,.3); }
+  #q:focus { border-color: rgba(255,255,255,.28); }
+  #go {
+    background: #c0392b; border: none; color: #fff;
+    font-size: 12px; font-weight: 600; padding: 0 13px;
+    border-radius: 6px; cursor: pointer;
+  }
+  #go:hover { background: #e50914; }
+  #go:disabled { background: rgba(192,57,43,.3); cursor: default; }
+
+  /* Results */
+  .rrow {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,.07);
+  }
+  .rrow:last-child { border-bottom: none; }
+  .rposter {
+    width: 28px; height: 40px; border-radius: 3px;
+    object-fit: cover; background: rgba(255,255,255,.08); flex-shrink: 0;
+  }
+  .ri { flex: 1; min-width: 0; }
+  .rn { font-size: 13px; font-weight: 600; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .rs { font-size: 11px; color: rgba(255,255,255,.38); margin-top: 1px; }
+  .pb {
+    flex-shrink: 0; background: rgba(255,255,255,.09);
+    border: 1px solid rgba(255,255,255,.16);
+    color: rgba(255,255,255,.78); font-size: 11px; font-weight: 600;
+    padding: 4px 10px; border-radius: 5px; cursor: pointer; transition: all .15s;
+  }
+  .pb:hover { background: #e50914; border-color: #e50914; color: #fff; }
+
+  /* Pickers */
+  .sec { margin-top: 8px; }
+  .sl { font-size: 10px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: rgba(255,255,255,.35); margin-bottom: 6px; }
+  .pills { display: flex; flex-wrap: wrap; gap: 4px; }
+  .pill {
+    background: rgba(255,255,255,.07); border: 1px solid rgba(255,255,255,.11);
+    color: rgba(255,255,255,.6); font-size: 11px; font-weight: 600;
+    padding: 4px 10px; border-radius: 4px; cursor: pointer; transition: all .15s;
+  }
+  .pill:hover { background: rgba(255,255,255,.14); color: #fff; }
+  .pill.on { background: #e50914; border-color: #e50914; color: #fff; }
+
+  /* Status */
+  .msg { padding: 8px 0; text-align: center; color: rgba(255,255,255,.3); font-size: 12px; }
+  .ok  { padding: 7px 0; text-align: center; color: rgba(80,200,80,.9); font-size: 12px; font-weight: 600; }
+  .sp  {
+    display: inline-block; width: 12px; height: 12px;
+    border: 2px solid rgba(255,255,255,.1); border-top-color: rgba(255,255,255,.5);
+    border-radius: 50%; animation: sp .7s linear infinite;
+    margin-right: 5px; vertical-align: middle;
+  }
+  @keyframes sp { to { transform: rotate(360deg); } }
+  hr.div { border: none; border-top: 1px solid rgba(255,255,255,.09); margin: 10px 0; }
+
+  /* Shared by the shade and position sliders */
+  .op-wrap { background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.09); border-radius: 7px; padding: 8px 10px; margin-bottom: 10px; }
+  .op-row  { display: flex; align-items: center; gap: 8px; }
+  #opacity-slider, #vpos-slider { flex: 1; -webkit-appearance: none; height: 4px; background: rgba(255,255,255,.18); border-radius: 2px; outline: none; cursor: pointer; }
+  #opacity-slider::-webkit-slider-thumb, #vpos-slider::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 14px; border-radius: 50%; background: #e50914; cursor: pointer; }
+  #opacity-val, #vpos-val { font-size: 11px; color: rgba(255,255,255,.45); min-width: 50px; text-align: right; }
+
+  /* Dismiss button */
+  #ov-dismiss { display: none; margin-bottom: 8px; }
+  #ov-dismiss button { width: 100%; background: rgba(255,80,80,.15); border: 1px solid rgba(255,80,80,.35); color: rgba(255,180,180,.9); font-size: 12px; font-weight: 600; padding: 7px; border-radius: 6px; cursor: pointer; }
+
+  /* Subtitle section */
+  .sub-hd { font-size: 10px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: rgba(255,255,255,.35); margin-bottom: 8px; }
+  .sub-sec { margin-bottom: 2px; }
+  /* Theme pills */
+  .thm { flex:1; background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.12);
+    color: rgba(255,255,255,.55); font-size: 10px; font-weight: 600; padding: 4px 0;
+    border-radius: 5px; cursor: pointer; font-family: inherit; transition: all .15s; }
+  .thm:hover { background: rgba(255,255,255,.1); color: rgba(255,255,255,.8); }
+  .thm.on { background: rgba(229,9,20,.22); border-color: rgba(229,9,20,.55); color: #fff; }
+  /* Recent search chips */
+  .sq { background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.12);
+    color: rgba(255,255,255,.6); font-size: 11px; padding: 3px 9px; border-radius: 11px;
+    cursor: pointer; font-family: inherit; max-width: 100%; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; transition: all .15s; }
+  .sq:hover { background: rgba(229,9,20,.18); border-color: rgba(229,9,20,.45); color: #fff; }
+  /* Recent picks rows */
+  .rc { display: flex; align-items: center; gap: 7px; padding: 6px 7px; border-radius: 6px;
+    cursor: pointer; transition: background .12s; }
+  .rc:hover { background: rgba(255,255,255,.06); }
+  .rc-img { width: 26px; height: 38px; border-radius: 3px; flex-shrink: 0;
+    background: rgba(255,255,255,.07) center/cover no-repeat; }
+  .rc-txt { flex: 1; min-width: 0; }
+  .rc-t { font-size: 12px; font-weight: 600; color: #fff; white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis; }
+  .rc-s { font-size: 10px; color: rgba(255,255,255,.38); margin-top: 1px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .rc-b { background: none; border: none; cursor: pointer; font-size: 12px; padding: 2px 3px;
+    color: rgba(255,255,255,.25); font-family: inherit; line-height: 1; }
+  .rc-b:hover { color: rgba(255,255,255,.7); }
+  .rc-b.pinned { color: #e5b400; }
+  summary.sub-hd { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 6px;
+    padding: 5px 0; margin-bottom: 0; user-select: none; transition: color .15s; }
+  summary.sub-hd::-webkit-details-marker { display: none; }
+  summary.sub-hd:hover { color: rgba(255,255,255,.6); }
+  summary.sub-hd::before { content: "\25B6"; font-size: 8px; color: rgba(255,255,255,.55);
+    transition: transform .18s ease; display: inline-block; width: 10px; }
+  summary.sub-hd:hover::before { color: #fff; }
+  .sub-sec[open] > summary.sub-hd { margin-bottom: 8px; color: rgba(255,255,255,.5); }
+  .sub-sec[open] > summary.sub-hd::before { transform: rotate(90deg); color: rgba(255,255,255,.75); }
+  .key-box { background: rgba(255,140,0,.07); border: 1px solid rgba(255,140,0,.3); border-radius: 8px; padding: 8px 10px; margin-bottom: 8px; }
+  .key-title { font-size: 10px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; color: rgba(255,140,0,.85); margin-bottom: 4px; }
+  .key-desc  { font-size: 11px; color: rgba(255,255,255,.5); line-height: 1.4; margin-bottom: 6px; }
+  .key-row   { display: flex; gap: 6px; margin-bottom: 5px; }
+  .key-row input { flex: 1; background: rgba(255,255,255,.07); border: 1px solid rgba(255,255,255,.14); border-radius: 6px; padding: 6px 9px; color: #fff; font-size: 12px; font-family: inherit; outline: none; }
+  .key-msg:not(:empty) { margin-top: 4px; }
+  .key-msg   { font-size: 11px; min-height: 0; color: rgba(255,255,255,.4); }
+  .key-ok    { background: rgba(48,209,88,.09); border: 1px solid rgba(48,209,88,.3); border-radius: 7px; padding: 6px 12px; margin-bottom: 10px; font-size: 11px; display: none; justify-content: space-between; align-items: center; }
+  .lang-row  { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+  .lang-lbl  { font-size: 10px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; color: rgba(255,255,255,.35); flex-shrink: 0; }
+  .lang-inp  { flex: 1; background: rgba(255,255,255,.07); border: 1px solid rgba(255,255,255,.14); border-radius: 6px; padding: 5px 9px; color: #fff; font-size: 12px; font-family: inherit; outline: none; }
+  .sub-btn2  { width: 100%; background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.16); color: rgba(255,255,255,.8); font-size: 12px; font-weight: 600; padding: 7px; border-radius: 6px; cursor: pointer; margin-bottom: 8px; }
+  .sub-btn2:hover:not(:disabled) { background: rgba(255,255,255,.15); }
+  .sub-btn2:disabled { opacity: .35; cursor: default; }
+  .sub-row { display: flex; align-items: flex-start; gap: 8px; padding: 7px 0; border-bottom: 1px solid rgba(255,255,255,.06); }
+  .sub-row:last-child { border-bottom: none; }
+  .sub-info { flex: 1; min-width: 0; }
+  .sub-name { font-size: 12px; color: rgba(255,255,255,.75); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sub-meta { font-size: 10px; color: rgba(255,255,255,.35); margin-top: 2px; }
+  .sub-load { flex-shrink: 0; background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.15); color: rgba(255,255,255,.7); font-size: 10px; font-weight: 600; padding: 3px 8px; border-radius: 4px; cursor: pointer; white-space: nowrap; }
+  .sub-load:hover:not(:disabled) { background: #27ae60; border-color: #27ae60; color: #fff; }
+  .sub-load.loaded { background: #27ae60; border-color: #27ae60; color: #fff; }
+  .sub-none-row { display: flex; align-items: center; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,.06); font-size: 12px; color: rgba(255,255,255,.4); font-style: italic; }
+  .sub-none-btn { background: rgba(255,255,255,.07); border: 1px solid rgba(255,255,255,.14); color: rgba(255,255,255,.55); font-size: 10px; font-weight: 600; padding: 3px 8px; border-radius: 4px; cursor: pointer; }
+  .sub-none-btn.on { background: #555; border-color: #666; color: #fff; }
+</style>
 </head>
-
 <body>
-  <div class="shell">
-    <header class="header">
-      <div class="brand">
-        <img class="brand-mark" src="assets/trakt-logomark-mono-dark.svg" alt="" aria-hidden="true">
-        <h1>Trakt Scrobbler Plus</h1>
-      </div>
-      <span id="hero-pill" class="hero-status" data-state="disconnected">Disconnected</span>
-    </header>
+<!-- Overlay controls -->
+<div style="display:flex;align-items:center;justify-content:space-between;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.09);border-radius:7px;padding:7px 10px;margin-bottom:8px">
+  <div style="font-size:12px;font-weight:600;color:#fff">Show Overlay on Pause</div>
+  <label style="position:relative;display:inline-block;width:44px;height:26px;flex-shrink:0;margin-left:10px;cursor:pointer">
+    <input type="checkbox" id="overlay-toggle" style="opacity:0;width:0;height:0;position:absolute" onchange="doToggleOverlay(this.checked)" />
+    <span id="toggle-track" style="position:absolute;top:0;left:0;right:0;bottom:0;background:rgba(255,255,255,.2);border-radius:26px;transition:background .2s">
+      <span id="toggle-thumb" style="position:absolute;height:20px;width:20px;left:3px;bottom:3px;background:#fff;border-radius:50%;transition:left .2s"></span>
+    </span>
+  </label>
+</div>
 
-    <section id="auth-section" class="section">
-      <div class="section-body">
-        <div class="top-row">
-          <div>
-            <p id="auth-summary" class="title">Not connected</p>
-            <p id="auth-detail" class="caption">Connect to start.</p>
-          </div>
-          <button id="connect-button" class="primary" type="button">Connect</button>
-        </div>
-        <div id="device-code-box" class="code-box" hidden>
-          <p class="code-label">Activation Code</p>
-          <div class="code-row">
-            <input id="device-code" class="code-value" type="text" value="" readonly spellcheck="false"
-              aria-label="Trakt activation code">
-            <button id="copy-code-button" class="secondary" type="button">Copy</button>
-          </div>
-          <p id="device-code-note" class="small">Copied to clipboard.</p>
-        </div>
-        <div id="scrobble-control" class="control-row" hidden>
-          <div class="control-copy">
-            <p class="control-label">Scrobbling</p>
-            <p id="scrobble-toggle-caption" class="control-caption">On</p>
-          </div>
-          <button id="scrobble-toggle" class="switch" type="button" role="switch" aria-checked="true"
-            aria-label="Toggle scrobbling">
-            <span class="switch-thumb"></span>
-          </button>
-        </div>
-        <div id="status-osd-control" class="control-row" hidden>
-          <div class="control-copy">
-            <p class="control-label">Show Scrobble OSD</p>
-            <p id="status-osd-toggle-caption" class="control-caption">On</p>
-          </div>
-          <button id="status-osd-toggle" class="switch" type="button" role="switch" aria-checked="true"
-            aria-label="Toggle scrobble OSD">
-            <span class="switch-thumb"></span>
-          </button>
-        </div>
-      </div>
-    </section>
+<!-- Automatic Lookup -->
+<div style="background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.09);border-radius:7px;padding:7px 10px;margin-bottom:8px">
+  <div style="display:flex;align-items:center;justify-content:space-between">
+    <div>
+      <div style="font-size:12px;font-weight:600;color:#fff">Automatic Lookup</div>
+      <div style="font-size:10px;color:rgba(255,255,255,.35);margin-top:2px">Experimental &nbsp;·&nbsp; Identifies the file by its name &nbsp;·&nbsp; shows nothing when unsure</div>
+    </div>
+    <label style="position:relative;display:inline-block;width:44px;height:26px;flex-shrink:0;margin-left:10px;cursor:pointer">
+      <input type="checkbox" id="auto-toggle" style="opacity:0;width:0;height:0;position:absolute" onchange="doToggleAutoLookup(this.checked)" />
+      <span id="auto-track" style="position:absolute;top:0;left:0;right:0;bottom:0;background:rgba(255,255,255,.2);border-radius:26px;transition:background .2s">
+        <span id="auto-thumb" style="position:absolute;height:20px;width:20px;left:3px;bottom:3px;background:#fff;border-radius:50%;transition:left .2s"></span>
+      </span>
+    </label>
+  </div>
+  <div id="auto-status" style="display:none;font-size:11px;color:rgba(255,255,255,.5);line-height:1.45;margin-top:6px"></div>
+</div>
 
-    <section id="playback-section" class="section">
-      <div class="section-head">
-        <p class="section-label">Playback</p>
-        <span id="playback-pill" class="status-pill" data-state="idle">Idle</span>
-      </div>
-      <div class="section-body">
-        <p id="media-name" class="media-name">No active media</p>
-        <p id="media-meta" class="media-meta">Load a movie or episode.</p>
-        <p id="match-provenance" class="sync-meta" hidden></p>
-        <div id="resume-protection" class="sync-review-item" hidden
-             style="margin:8px 0; padding:9px; border:1px solid var(--input-border);border-radius:6px">
-          <p class="sync-meta" style="font-weight:700;margin:0 0 5px">Resume Protection</p>
-          <p id="resume-protection-status" class="sync-review-reason" aria-live="polite"></p>
-          <button id="restore-remote-resume" type="button" class="secondary" hidden
-                  style="width:100%; margin-top:7px">Resume from saved Trakt position</button>
-        </div>
-        <div class="progress-wrap">
-          <div class="progress-bar">
-            <div id="progress-fill" class="progress-fill"></div>
-          </div>
-          <div class="progress-meta">
-            <span id="progress-left">0%</span>
-            <span id="progress-right">00:00 / 00:00</span>
-          </div>
-        </div>
-      </div>
-    </section>
+<div id="ov-dismiss">
+  <button onclick="iina.postMessage('overlayCloseRequest',{})">&#10005;&nbsp; Dismiss overlay</button>
+</div>
 
-    <section id="scrobble-section" class="section">
-      <div class="section-head">
-        <p class="section-label">Scrobble Status</p>
-      </div>
-      <div class="section-body">
-        <div class="scrobble-head">
-          <p id="scrobble-verb" class="scrobble-title">No scrobble yet</p>
-          <span id="scrobble-updated" class="scrobble-updated">Just now</span>
-        </div>
-        <p id="scrobble-target" class="scrobble-target">No target</p>
-        <p id="scrobble-detail" class="scrobble-detail">Waiting for playback.</p>
-        <div style="display:flex; justify-content:space-between; gap:8px; margin-top:10px;">
-          <span class="small">Trakt API</span>
-          <span id="network-status" class="small" aria-live="polite">Online</span>
-        </div>
-        <p id="network-detail" class="small" hidden></p>
-      </div>
-    </section>
+<!-- Hidden, but main.js's overlayStatus messages still land here -->
+<div id="ov-status-box" style="display:none;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);border-radius:7px;padding:8px 12px;margin-bottom:12px;"><div style="font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:rgba(255,255,255,0.3);margin-bottom:3px">Overlay Status</div><div id="ov-st" style="font-size:11px;color:rgba(255,255,255,0.6);line-height:1.4">Waiting...</div></div>
 
-    <section id="sync-queue-section" class="section" hidden>
-      <div class="section-head">
-        <p class="section-label">Sync Queue</p>
-      </div>
-      <div class="section-body">
-        <div class="sync-headline">
-          <span id="sync-queue-summary" class="sync-meta">No pending stops</span>
-          <button id="sync-queue-retry" class="secondary" type="button" disabled>Retry Now</button>
-        </div>
-        <p id="sync-queue-notice" class="sync-note" hidden></p>
-        <p id="sync-queue-blocked" class="sync-note" hidden></p>
-        <div id="sync-queue-pending-header" class="sync-group-label" hidden>Pending / Syncing</div>
-        <div id="sync-queue-pending" class="sync-list"></div>
-        <div id="sync-queue-review-header" class="sync-group-label" hidden>Needs Review — not sent automatically</div>
-        <div id="sync-queue-review" class="sync-list"></div>
-        <p id="sync-queue-review-feedback" class="sync-review-feedback" role="status" aria-live="polite" hidden></p>
-        <div id="sync-queue-synced-header" class="sync-group-label" hidden>Recently Synced</div>
-        <div id="sync-queue-synced" class="sync-list"></div>
-        <p id="sync-queue-last-sync" class="sync-note" hidden></p>
-      </div>
-    </section>
+<!-- Saved card -->
+<div id="saved">
+  <div id="s-show"></div>
+  <div id="s-title"></div>
+  <div id="s-meta"></div>
+  <div id="s-desc" class="collapsed"></div>
+  <button id="show-more" onclick="toggleDesc()">Show more ▾</button>
+  <div id="s-auto" style="display:none;font-size:10px;color:rgba(255,255,255,.4);margin:6px 0 2px">
+    Found automatically &nbsp;·&nbsp;
+    <button onclick="doAutoWrong()" style="background:none;border:none;color:rgba(120,180,255,.95);font-size:10px;cursor:pointer;padding:0;font-family:inherit">Not right? Search</button>
+  </div>
+  <button id="clear-btn" onclick="doClear()">✕  Clear selection</button>
+</div>
 
-    <section id="correction-section" class="section" hidden>
-      <div class="section-head">
-        <p class="section-label">Correct Match</p>
-      </div>
-      <div class="section-body">
-        <div id="correction-closed" class="correction-closed">
-          <p id="correction-summary" class="correction-summary">Wrong title? Search Trakt and pick a better match.</p>
-          <button id="open-correction-button" class="secondary" type="button">Correct Match</button>
-        </div>
-        <div id="correction-open" class="correction-open" hidden>
-          <p id="correction-current" class="correction-current">Current match</p>
-          <div class="correction-query-row">
-            <label style="font-size:12px;flex:1;min-width:0">Search type
-              <select id="correction-kind" class="text-input" aria-label="Search media type">
-                <option value="episode">TV Series / Episode</option>
-                <option value="movie">Movie</option>
-              </select>
-            </label>
-          </div>
-          <div class="correction-query-row">
-            <input id="correction-query" class="text-input" type="text" value="" placeholder="Search Trakt" spellcheck="false">
-            <div class="correction-actions">
-              <button id="correction-search-button" class="secondary" type="button">Search</button>
-              <button id="correction-close-button" class="ghost" type="button">Close</button>
-            </div>
-          </div>
-          <p id="correction-status" class="correction-status">Search Trakt for a better match.</p>
-          <div id="correction-episode-editor" class="correction-query-row" hidden>
-            <label style="flex:1; min-width:0; font-size:12px">Season
-              <input id="correction-season" class="text-input" type="number" min="0" max="100" step="1" placeholder="2">
-            </label>
-            <label style="flex:1; min-width:0; font-size:12px">Episode
-              <input id="correction-episode" class="text-input" type="number" min="1" max="9999" step="1" placeholder="6">
-            </label>
-          </div>
-          <p id="correction-episode-help" class="caption" hidden>Correct Season/Episode first, then select Use. The episode must exist on Trakt.</p>
-          <div id="correction-results" class="correction-results" hidden></div>
-          <div class="correction-reference">
-            <p class="correction-reference-label">Know the exact Trakt ID or slug?</p>
-            <div class="correction-query-row correction-reference-row">
-              <input id="correction-reference" class="text-input correction-reference-input" type="text" value="" placeholder="Trakt ID or slug" spellcheck="false">
-              <button id="correction-reference-button" class="secondary" type="button">Lookup</button>
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
+<!-- API key -->
+<div id="api-section" style="margin-bottom:12px">
+  <div style="background:rgba(255,165,0,0.08);border:1px solid rgba(255,165,0,0.35);border-radius:8px;padding:11px 12px">
+    <div style="font-size:10px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:rgba(255,165,0,0.85);margin-bottom:5px">&#9888; TMDB API Key Required</div>
+    <p style="font-size:11px;color:rgba(255,255,255,0.5);line-height:1.5;margin-bottom:8px">Get a free key at <strong style="color:rgba(255,255,255,0.7)">themoviedb.org &rarr; Settings &rarr; API</strong></p>
+    <div style="display:flex;gap:6px;align-items:center;margin-bottom:5px">
+      <input type="password" id="api-input" placeholder="Paste API key here&hellip;" onkeydown="if(event.key==='Enter')doSaveKey()"
+        style="flex:1;background:rgba(255,255,255,0.07);border:1px solid rgba(255,255,255,0.14);border-radius:6px;padding:6px 9px;color:#fff;font-size:12px;font-family:inherit;outline:none">
+      <button onclick="doSaveKey()" style="background:#c0392b;border:none;color:#fff;font-size:11px;font-weight:600;padding:6px 13px;border-radius:6px;cursor:pointer">Save</button>
+    </div>
+    <div id="api-msg" style="font-size:11px;min-height:15px;color:rgba(255,255,255,0.4)"></div>
+  </div>
+</div>
+<div id="api-ok" style="display:none;background:rgba(48,209,88,0.09);border:1px solid rgba(48,209,88,0.3);border-radius:7px;padding:6px 12px;margin-bottom:12px;font-size:11px;display:none;justify-content:space-between;align-items:center">
+  <span style="color:rgba(48,209,88,0.9)">&#10003; API key active</span>
+  <button onclick="doChangeKey()" style="background:none;border:none;color:rgba(255,255,255,0.4);font-size:11px;cursor:pointer;padding:0">Change</button>
+</div>
 
-    <section id="diagnostics-section" class="section">
-      <div class="section-head"><p class="section-label">Playback Diagnostics</p></div>
-      <div class="section-body">
-        <div class="sync-headline">
-          <span class="sync-meta">Share metadata without stream credentials</span>
-          <button id="copy-playback-diagnostics" class="secondary" type="button">Copy Diagnostics</button>
-        </div>
-        <p id="diagnostics-feedback" class="sync-note" hidden></p>
-      </div>
-    </section>
+<!-- Search -->
+<div class="row">
+  <input id="q" type="text" placeholder="Show or movie name…"
+         onkeydown="if(event.key==='Enter'&&!this.disabled) doSearch()" />
+  <button id="go" onclick="doSearch()">GO</button>
+</div>
 
-    <section id="history-section" class="section">
-      <div class="section-head">
-        <p class="section-label">Watch History</p>
-      </div>
-      <div class="section-body">
-        <div id="history-list" class="history-list" hidden></div>
-        <p id="history-empty" class="history-empty">No watched history in the last 24 hours.</p>
-      </div>
-    </section>
+<div id="panel"><div class="msg">Search above to find a show or movie.</div></div>
 
-    <footer id="bottom-actions" class="footer" hidden>
-      <div class="footer-stack">
-        <div id="footer-default" class="footer-panel" aria-hidden="false">
-          <div class="footer-row">
-            <div></div>
-            <div class="footer-actions">
-              <button id="reauth-button" class="secondary" type="button">Re-auth</button>
-              <button id="signout-button" class="danger" type="button">Sign Out</button>
-            </div>
-          </div>
-        </div>
-        <div id="footer-confirm" class="footer-panel" aria-hidden="true">
-          <div class="footer-row">
-            <p class="confirm-copy">Sign out of Trakt?</p>
-            <div class="footer-actions">
-              <button id="signout-cancel-button" class="secondary" type="button">No</button>
-              <button id="signout-confirm-button" class="danger" type="button">Yes</button>
-            </div>
-          </div>
-        </div>
-      </div>
-      <p id="footer-note" class="footer-note" hidden></p>
-    </footer>
+<!-- Recent searches -->
+<div id="searches-sec" style="display:none;margin-top:8px">
+  <div class="sl" style="margin-bottom:5px">Recent Searches</div>
+  <div id="searches-list" style="display:flex;flex-wrap:wrap;gap:5px"></div>
+</div>
 
-    <div class="provider" aria-label="Trakt integration">
-      <div class="provider-copy">
-        <span>Scrobbler for</span>
-        <img class="provider-logo" src="assets/trakt-logo-dark.svg" alt="Trakt">
-      </div>
-      <span id="provider-version" class="provider-version" hidden>v0.1.33</span>
+<!-- Recent picks -->
+<div id="recents-sec" style="display:none">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin:10px 0 6px">
+    <div class="sl" style="margin:0">Recent Picks</div>
+    <button id="rc-clear" onclick="clearRecents()"
+      style="background:none;border:none;color:rgba(255,255,255,.3);font-size:10px;cursor:pointer;padding:0;font-family:inherit">Clear all</button>
+  </div>
+  <div id="recents-list"></div>
+</div>
+
+<hr class="div" />
+
+<div id="sub-section">
+  <!-- OpenSubtitles.com -->
+  <details class="sub-sec" data-k="os" open>
+    <summary class="sub-hd">Subtitles — OpenSubtitles.com</summary>
+  <div id="os-key-box" class="key-box">
+    <div class="key-title">⚠ API Key required (free)</div>
+    <div class="key-desc">opensubtitles.com → My Account → API Consumers → Create consumer</div>
+    <div class="key-row">
+      <input type="password" id="os-key-input" placeholder="Paste API Key…" onkeydown="if(event.key==='Enter')doSaveOsKey()" />
+      <button onclick="doSaveOsKey()" style="background:#c0392b;border:none;color:#fff;font-size:11px;font-weight:600;padding:6px 13px;border-radius:6px;cursor:pointer">Save</button>
+    </div>
+    <div id="os-key-msg" class="key-msg"></div>
+  </div>
+  <div id="os-key-ok" class="key-ok">
+    <span style="color:rgba(48,209,88,.9)">✓ API Key active (5 downloads/day)</span>
+    <button onclick="doChangeOsKey()" style="background:none;border:none;color:rgba(255,255,255,.4);font-size:11px;cursor:pointer;padding:0">Change</button>
+  </div>
+  <!-- Login -->
+  <div id="os-login-form" style="background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.09);border-radius:8px;padding:8px 12px;margin-bottom:10px">
+    <div style="font-size:10px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:rgba(255,255,255,.35);margin-bottom:5px">Sign in (optional — more downloads)</div>
+    <div style="display:flex;align-items:center;gap:6px;margin-bottom:5px">
+      <span style="font-size:11px;color:rgba(255,255,255,.4);width:64px;flex-shrink:0">Username</span>
+      <input type="text" id="os-user" placeholder="username" autocomplete="off" style="flex:1;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.14);border-radius:6px;padding:5px 9px;color:#fff;font-size:12px;font-family:inherit;outline:none" />
+    </div>
+    <div style="display:flex;align-items:center;gap:6px;margin-bottom:7px">
+      <span style="font-size:11px;color:rgba(255,255,255,.4);width:64px;flex-shrink:0">Password</span>
+      <input type="password" id="os-pass" placeholder="password" onkeydown="if(event.key==='Enter')doOsLogin()" style="flex:1;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.14);border-radius:6px;padding:5px 9px;color:#fff;font-size:12px;font-family:inherit;outline:none" />
+    </div>
+    <button id="os-login-btn" onclick="doOsLogin()" style="width:100%;background:#c0392b;border:none;color:#fff;font-size:12px;font-weight:600;padding:6px;border-radius:6px;cursor:pointer">Sign In</button>
+    <div id="os-login-msg" style="font-size:11px;min-height:14px;color:rgba(255,255,255,.4);margin-top:4px"></div>
+    <div id="os-key-required-note" style="display:none;font-size:10px;color:rgba(255,200,100,.6);margin-top:3px">⚠ Enter API Key above before signing in</div>
+  </div>
+  <div id="os-logged" style="display:none;background:rgba(48,209,88,.09);border:1px solid rgba(48,209,88,.3);border-radius:7px;padding:6px 12px;margin-bottom:10px;font-size:11px;justify-content:space-between;align-items:center">
+    <span style="color:rgba(48,209,88,.9)">✓ Signed in as <strong id="os-uname"></strong></span>
+    <button onclick="doOsLogout()" style="background:none;border:none;color:rgba(255,255,255,.4);font-size:11px;cursor:pointer;padding:0">Sign out</button>
+  </div>
+  <div class="lang-row">
+    <span class="lang-lbl">Language</span>
+    <input id="os-lang" type="text" value="en" placeholder="en, fr…" class="lang-inp" />
+  </div>
+  <button id="os-search-btn" class="sub-btn2" onclick="doOsSearch()" disabled>Search OpenSubtitles</button>
+
+  <!-- Manual search -->
+  <div id="os-manual-row" style="margin-top:7px">
+    <div style="font-size:10px;color:rgba(255,255,255,.32);margin-bottom:4px">Or search by custom title (e.g. "The Boys S05E02"):</div>
+    <div style="display:flex;gap:6px">
+      <input id="os-manual-q" type="text" placeholder="Custom search…"
+             onkeydown="if(event.key==='Enter')doOsSearch(this.value)"
+             style="flex:1;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:6px;padding:6px 9px;color:#fff;font-size:11px;font-family:inherit;outline:none" />
+      <button id="os-manual-btn" onclick="doOsSearch(document.getElementById('os-manual-q').value)"
+              style="background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.15);color:#fff;font-size:11px;padding:6px 12px;border-radius:6px;cursor:pointer;flex-shrink:0">Search</button>
     </div>
   </div>
 
-  <script>
-    (function () {
-      var state = {
-        scrobblingEnabled: true,
-        statusOsdEnabled: true,
-        auth: {
-          state: "disconnected",
-          summary: "Not connected to Trakt",
-          detail: "Use Connect to start device authorization.",
-          busy: false,
-          connected: false,
-          credentialMode: "bundled",
-          deviceCode: "",
-          verificationUrl: "",
-          user: null,
-          token: null
-        },
-        playback: {
-          available: false,
-          mediaLabel: "",
-          parserSource: "",
-          state: "idle",
-          progress: 0,
-          position: 0,
-          duration: 0,
-          preview: false,
-          fastPause: false
-        },
-        network: {
-          mode: "online",
-          retryInSeconds: 0,
-          pendingFinalizations: 0,
-          lastFailure: ""
-        },
-        syncQueue: {
-          pending: [], needsReview: [], recentlySynced: [], flushing: false,
-          canRetry: false, blockedReason: "", notice: ""
-        },
-        scrobble: {
-          status: "idle",
-          verb: "",
-          action: "",
-          mediaLabel: "",
-          detail: "No scrobble has been attempted in this window yet.",
-          progress: null,
-          updatedAt: ""
-        },
-        history: {
-          items: [],
-          fetchedAt: "",
-          error: ""
-        },
-        correction: {
-          active: false,
-          busy: false,
-          query: "",
-          error: "",
-          mediaLabel: "",
-          mediaKey: "",
-          results: []
-        },
-        app: {
-          version: ""
-        }
-      };
-      var stateReady = false;
-      var pendingAction = "";
-      var confirmingSignout = false;
-      var authRequestMode = "";
-      var footerNotice = "";
-      var footerNoticeTimer = 0;
-      var copyCodeBusy = false;
-      var copyCodeFeedback = "";
-      var copyCodeFeedbackTimer = 0;
-      var lastActionAt = 0;
-      var lastActionKind = "";
-      var confirmDiscardId = "";
-      var discardBusyId = "";
-      var reviewFeedback = "";
-
-      function send(name, payload) {
-        if (!window.iina || typeof iina.postMessage !== "function") return;
-        iina.postMessage(name, payload);
-      }
-
-      function formatStateLabel(stateName) {
-        if (stateName === "authorizing") return "Waiting";
-        if (stateName === "missing_credentials") return "Missing";
-        if (stateName === "disconnected") return "Disconnected";
-        return titleCase(stateName || "idle");
-      }
-
-      function formatDuration(totalSeconds) {
-        var value = Math.max(0, Math.floor(Number(totalSeconds || 0)));
-        var hours = Math.floor(value / 3600);
-        var minutes = Math.floor((value % 3600) / 60);
-        var seconds = value % 60;
-        if (hours > 0) {
-          return String(hours).padStart(2, "0") + ":" +
-            String(minutes).padStart(2, "0") + ":" +
-            String(seconds).padStart(2, "0");
-        }
-        return String(minutes).padStart(2, "0") + ":" + String(seconds).padStart(2, "0");
-      }
-
-      function formatProgress(progress) {
-        var value = Number(progress || 0);
-        if (!Number.isFinite(value)) value = 0;
-        return String(Math.round(value)) + "%";
-      }
-
-      function formatUpdatedAt(value) {
-        if (!value) return "just now";
-        var date = new Date(value);
-        if (Number.isNaN(date.getTime())) return "just now";
-
-        var diffSeconds = Math.max(0, Math.floor((Date.now() - date.getTime()) / 1000));
-        if (diffSeconds < 5) return "just now";
-        if (diffSeconds < 60) return diffSeconds + "s ago";
-
-        var diffMinutes = Math.floor(diffSeconds / 60);
-        if (diffMinutes < 60) return diffMinutes + "m ago";
-
-        var diffHours = Math.floor(diffMinutes / 60);
-        if (diffHours < 24) return diffHours + "h ago";
-
-        var diffDays = Math.floor(diffHours / 24);
-        if (diffDays < 7) return diffDays + "d ago";
-
-        return date.toLocaleDateString([], {
-          month: "short",
-          day: "numeric"
-        });
-      }
-
-      function formatRemaining(totalSeconds) {
-        var value = Math.max(0, Math.floor(Number(totalSeconds || 0)));
-        if (!Number.isFinite(value) || value <= 0) return "";
-        var hours = Math.floor(value / 3600);
-        var minutes = Math.floor((value % 3600) / 60);
-        if (hours > 0 && minutes > 0) return hours + "h " + minutes + "m";
-        if (hours > 0) return hours + "h";
-        if (minutes > 0) return minutes + "m";
-        return value + "s";
-      }
-
-      function formatVerificationTarget(value) {
-        return String(value || "")
-          .replace(/^https?:\/\//, "")
-          .replace(/\/+$/, "");
-      }
-
-      function titleCase(value) {
-        return String(value || "").replace(/(^|[_\s-])([a-z])/g, function (_m, prefix, chr) {
-          return (prefix === "_" ? " " : prefix) + chr.toUpperCase();
-        });
-      }
-
-      function compactAuthSummary(auth) {
-        if (!auth) return "Not connected";
-        if (auth.busy) return "Authorize in browser";
-        if (auth.connected && auth.user && auth.user.username) return "Logged in as";
-        if (auth.connected) return "Connected";
-        if (auth.state === "error") return "Auth failed";
-        if (auth.state === "missing_credentials") return "No credentials";
-        return "Not connected";
-      }
-
-      function compactAuthDetail(auth) {
-        if (!auth) return "Connect to start.";
-        if (auth.busy) return "Use the code below.";
-        if (auth.connected) return "";
-        if (auth.state === "error") return "Connect again.";
-        if (auth.state === "missing_credentials") return "This build has no Trakt credentials.";
-        return "Connect to start.";
-      }
-
-      function compactScrobbleTitle(scrobble) {
-        var action = scrobble && scrobble.action ? scrobble.action : "";
-        if (!scrobble) return "Waiting";
-        if ((scrobble.status === "queued" || scrobble.status === "sending") && scrobble.verb) {
-          if (scrobble.verb === "start") return "Watching on Trakt";
-          if (scrobble.verb === "pause") return "Paused on Trakt";
-          if (scrobble.verb === "stop") return "Stopped on Trakt";
-        }
-        if (scrobble.status === "ready") return "Ready";
-        if (scrobble.status === "queued" || scrobble.status === "sending") return "Updating Trakt";
-        if (scrobble.status === "succeeded") {
-          if (action === "scrobble") return "Watched on Trakt";
-          if (action === "pause") return "Paused on Trakt";
-          if (action === "start") return "Watching on Trakt";
-          if (scrobble.verb === "start") return "Watching on Trakt";
-          if (scrobble.verb === "pause") return "Paused on Trakt";
-          if (scrobble.verb === "stop") return "Stopped on Trakt";
-          return "Synced to Trakt";
-        }
-        if (scrobble.status === "duplicate") return "Already up to date";
-        if (scrobble.status === "unmatched") return scrobble.reason === "missing-trakt-match" ? "Manual Match Required" : "Title not matched";
-        if (scrobble.status === "skipped") {
-          if (scrobble.reason === "auth-required") return "Connect Trakt";
-          if (scrobble.reason === "missing-client-credentials") return "Missing credentials";
-          if (scrobble.reason === "missing-trakt-match") return "Title not matched";
-          return "Skipped";
-        }
-        if (scrobble.status === "deferred") return "Waiting to sync";
-        if (scrobble.status === "failed") return "Trakt error";
-        if (scrobble.status === "disabled") return "Scrobbling off";
-        return "Waiting";
-      }
-
-      function compactScrobbleDetail(scrobble) {
-        if (!scrobble) return "Waiting for playback.";
-        if (scrobble.status === "ready") return "";
-        if (scrobble.status === "queued" || scrobble.status === "sending") return "";
-        if (scrobble.status === "succeeded") return "";
-        if (scrobble.status === "duplicate") return "";
-        if (scrobble.status === "unmatched") return scrobble.detail || "Use Correct Match to verify the Trakt identity.";
-        if (scrobble.status === "skipped") {
-          if (scrobble.reason === "auth-required") return "Connect from the top.";
-          if (scrobble.reason === "missing-client-credentials") return "This build needs Trakt app credentials.";
-          if (scrobble.reason === "missing-trakt-match") return "Try a cleaner file name.";
-          return "Skipped.";
-        }
-        if (scrobble.status === "deferred") return scrobble.detail || "Will retry when Trakt reconnects.";
-        if (scrobble.status === "failed") return scrobble.detail || "Failed.";
-        if (scrobble.status === "disabled") return "No updates will be sent.";
-        return "Waiting for playback.";
-      }
-
-      function setText(id, value) {
-        var node = document.getElementById(id);
-        if (node) node.textContent = value;
-      }
-
-      function renderAuthSummary(auth) {
-        var node = document.getElementById("auth-summary");
-        if (!node) return;
-
-        node.textContent = "";
-
-        if (auth && auth.connected && auth.user && auth.user.username) {
-          node.appendChild(document.createTextNode("Logged in as "));
-          var emphasis = document.createElement("em");
-          emphasis.textContent = "@" + auth.user.username;
-          node.appendChild(emphasis);
-          return;
-        }
-
-        node.textContent = compactAuthSummary(auth);
-      }
-
-      function setValue(id, value) {
-        var node = document.getElementById(id);
-        if (node) node.value = value;
-      }
-
-      function setHidden(id, hidden) {
-        var node = document.getElementById(id);
-        if (node) node.hidden = !!hidden;
-      }
-
-      function showFooterNotice(message, durationMs) {
-        if (footerNoticeTimer) {
-          clearTimeout(footerNoticeTimer);
-          footerNoticeTimer = 0;
-        }
-
-        footerNotice = String(message || "").trim();
-        render();
-
-        if (!footerNotice) {
-          return;
-        }
-
-        footerNoticeTimer = setTimeout(function () {
-          footerNotice = "";
-          footerNoticeTimer = 0;
-          render();
-        }, durationMs || 4200);
-      }
-
-      function showCopyCodeFeedback(message, durationMs) {
-        if (copyCodeFeedbackTimer) {
-          clearTimeout(copyCodeFeedbackTimer);
-          copyCodeFeedbackTimer = 0;
-        }
-
-        copyCodeFeedback = String(message || "").trim();
-        render();
-
-        if (!copyCodeFeedback) {
-          return;
-        }
-
-        copyCodeFeedbackTimer = setTimeout(function () {
-          copyCodeFeedback = "";
-          copyCodeFeedbackTimer = 0;
-          render();
-        }, durationMs || 2600);
-      }
-
-      function requestAction(kind, payload) {
-        if (!stateReady) return;
-
-        var now = Date.now();
-        if (kind === lastActionKind && (now - lastActionAt) < 350) {
-          return;
-        }
-        lastActionAt = now;
-        lastActionKind = kind;
-        pendingAction = kind;
-
-        if (kind === "connect") {
-          state.auth.busy = true;
-          authRequestMode = state.auth.connected ? "reauth" : "connect";
-          footerNotice = "";
-        }
-
-        if (
-          kind === "search_correction" ||
-          kind === "choose_correction" ||
-          kind === "lookup_correction_reference"
-        ) {
-          state.correction.busy = true;
-          state.correction.error = "";
-        }
-
-        render();
-        send(kind, payload);
-      }
-
-      function bindAction(buttonId, kind) {
-        var button = document.getElementById(buttonId);
-        if (!button) return;
-
-        var activate = function (event) {
-          if (event) {
-            event.preventDefault();
-            event.stopPropagation();
-          }
-          requestAction(kind);
-        };
-
-        button.addEventListener("pointerdown", activate);
-        button.addEventListener("click", activate);
-        button.addEventListener("keydown", function (event) {
-          if (event.key === "Enter" || event.key === " ") {
-            activate(event);
-          }
-        });
-      }
-
-      function bindLocalAction(buttonId, handler) {
-        var button = document.getElementById(buttonId);
-        if (!button) return;
-
-        var activate = function (event) {
-          if (event) {
-            event.preventDefault();
-            event.stopPropagation();
-          }
-          handler();
-        };
-
-        button.addEventListener("pointerdown", activate);
-        button.addEventListener("click", activate);
-        button.addEventListener("keydown", function (event) {
-          if (event.key === "Enter" || event.key === " ") {
-            activate(event);
-          }
-        });
-      }
-
-      function bindScrobbleToggle(buttonId) {
-        var button = document.getElementById(buttonId);
-        if (!button) return;
-
-        var activate = function (event) {
-          if (event) {
-            event.preventDefault();
-            event.stopPropagation();
-          }
-          requestAction("toggle_scrobbling", {
-            enabled: !state.scrobblingEnabled
-          });
-        };
-
-        button.addEventListener("pointerdown", activate);
-        button.addEventListener("click", activate);
-        button.addEventListener("keydown", function (event) {
-          if (event.key === "Enter" || event.key === " ") {
-            activate(event);
-          }
-        });
-      }
-
-      function bindStatusOsdToggle(buttonId) {
-        var button = document.getElementById(buttonId);
-        if (!button) return;
-
-        var activate = function (event) {
-          if (event) {
-            event.preventDefault();
-            event.stopPropagation();
-          }
-          requestAction("toggle_status_osd", {
-            enabled: !state.statusOsdEnabled
-          });
-        };
-
-        button.addEventListener("pointerdown", activate);
-        button.addEventListener("click", activate);
-        button.addEventListener("keydown", function (event) {
-          if (event.key === "Enter" || event.key === " ") {
-            activate(event);
-          }
-        });
-      }
-
-      function bindSelectableInput(inputId) {
-        var input = document.getElementById(inputId);
-        if (!input) return;
-
-        var selectAll = function () {
-          try {
-            input.focus();
-            input.select();
-          } catch (_error) { }
-        };
-
-        input.addEventListener("focus", selectAll);
-        input.addEventListener("click", selectAll);
-      }
-
-      function renderAuth() {
-        var auth = state.auth || {};
-        var connected = !!auth.connected;
-        var hasCode = !!auth.deviceCode;
-        var detail = compactAuthDetail(auth);
-        var heroPill = document.getElementById("hero-pill");
-        var authSummary = document.getElementById("auth-summary");
-        var connectButton = document.getElementById("connect-button");
-        var reauthButton = document.getElementById("reauth-button");
-        var signOutButton = document.getElementById("signout-button");
-        var signOutConfirmButton = document.getElementById("signout-confirm-button");
-        var signOutCancelButton = document.getElementById("signout-cancel-button");
-        var footerDefault = document.getElementById("footer-default");
-        var footerConfirm = document.getElementById("footer-confirm");
-        var footerNote = document.getElementById("footer-note");
-        var copyCodeButton = document.getElementById("copy-code-button");
-        var scrobbleToggle = document.getElementById("scrobble-toggle");
-        var statusOsdToggle = document.getElementById("status-osd-toggle");
-        var reauthInFlight = pendingAction === "connect" && authRequestMode === "reauth";
-        var showConnectButton = !connected && !(auth.busy && authRequestMode === "reauth");
-        var showFooter = connected || reauthInFlight;
-        var showMainSections = connected || reauthInFlight;
-        var showScrobbleControl = connected || reauthInFlight;
-        var showStatusOsdControl = connected || reauthInFlight;
-        var showCorrectionSection = showMainSections && !!(state.playback && state.playback.available);
-        var showHistorySection = showMainSections && !(state.correction && state.correction.active);
-
-        if (!connected || auth.busy) {
-          confirmingSignout = false;
-        }
-
-        heroPill.dataset.state = auth.state || "disconnected";
-        heroPill.textContent = formatStateLabel(auth.state);
-
-        renderAuthSummary(auth);
-        if (authSummary) {
-          authSummary.dataset.tone = connected && !auth.busy ? "soft" : "strong";
-        }
-        setText("auth-detail", detail);
-        connectButton.disabled = !stateReady || !!auth.busy || pendingAction === "connect";
-        connectButton.textContent = auth.busy
-          ? (authRequestMode === "reauth" ? "Re-auth…" : "Connecting…")
-          : "Connect";
-        connectButton.hidden = !showConnectButton;
-
-        reauthButton.disabled = !stateReady || !!auth.busy || pendingAction === "connect";
-        reauthButton.textContent = reauthInFlight ? "Re-auth…" : "Re-auth";
-        signOutButton.disabled = !stateReady || !!auth.busy || !connected || pendingAction === "signout";
-        signOutConfirmButton.disabled = !stateReady || !!auth.busy || pendingAction === "signout";
-        signOutCancelButton.disabled = !stateReady || !!auth.busy || pendingAction === "signout";
-        copyCodeButton.disabled = !stateReady || !hasCode || copyCodeBusy;
-        copyCodeButton.textContent = copyCodeBusy ? "Copying…" : "Copy";
-        scrobbleToggle.disabled = !stateReady || pendingAction === "toggle_scrobbling";
-        scrobbleToggle.setAttribute("aria-checked", state.scrobblingEnabled ? "true" : "false");
-        setText("scrobble-toggle-caption", state.scrobblingEnabled ? "On" : "Off");
-        statusOsdToggle.disabled = !stateReady || pendingAction === "toggle_status_osd";
-        statusOsdToggle.setAttribute("aria-checked", state.statusOsdEnabled ? "true" : "false");
-        setText("status-osd-toggle-caption", state.statusOsdEnabled ? "On" : "Off");
-
-        setHidden("auth-detail", !detail);
-        setHidden("scrobble-control", !showScrobbleControl);
-        setHidden("status-osd-control", !showStatusOsdControl);
-        setHidden("playback-section", !showMainSections);
-        setHidden("scrobble-section", !showMainSections);
-        setHidden("correction-section", !showCorrectionSection);
-        setHidden("history-section", !showHistorySection);
-        setHidden("bottom-actions", !showFooter);
-        setHidden("device-code-box", !hasCode);
-        footerDefault.setAttribute("aria-hidden", confirmingSignout ? "true" : "false");
-        footerConfirm.setAttribute("aria-hidden", confirmingSignout ? "false" : "true");
-        if (footerNote) {
-          footerNote.textContent = footerNotice;
-          footerNote.hidden = !footerNotice;
-          footerNote.classList.toggle("show", !!footerNotice);
-        }
-
-        if (hasCode) {
-          var verifyTarget = formatVerificationTarget(auth.verificationUrl) || "trakt.tv/activate";
-          setValue("device-code", auth.deviceCode);
-          setText("device-code-note", copyCodeFeedback || ("Enter at " + verifyTarget + "."));
-        }
-      }
-
-      function renderPlayback() {
-        var playback = state.playback || {};
-        var playbackPill = document.getElementById("playback-pill");
-        var mediaMeta = document.getElementById("media-meta");
-        var fill = document.getElementById("progress-fill");
-        var progress = Math.max(0, Math.min(100, Number(playback.progress || 0)));
-
-        playbackPill.dataset.state = playback.state || "idle";
-        playbackPill.textContent = titleCase(playback.state || "idle");
-
-        setText("media-name", playback.available ? (playback.mediaLabel || "Unknown media") : "No active media");
-
-        if (!playback.available) {
-          mediaMeta.textContent = "Load a movie or episode.";
-          mediaMeta.hidden = false;
-        } else if (!state.scrobblingEnabled) {
-          mediaMeta.textContent = "Scrobbling is off.";
-          mediaMeta.hidden = false;
-        } else if (playback.preview) {
-          mediaMeta.textContent = "Preview guard.";
-          mediaMeta.hidden = false;
-        } else {
-          mediaMeta.textContent = "";
-          mediaMeta.hidden = true;
-        }
-
-        var p=playback.matchProvenance||{};
-        setText("match-provenance",p.label ? "Match source: "+p.label : "");
-        setHidden("match-provenance",!playback.available||!p.label);
-        var resume = playback.resumeProtection || {};
-        var blocked = playback.available && !!resume.blocked;
-        setHidden("resume-protection",!blocked);
-        setText("resume-protection-status",blocked ? resume.message||"Checking Trakt resume." : "");
-        setHidden("restore-remote-resume",!blocked||!resume.canRestore);
-        fill.style.width = progress + "%";
-        setText("progress-left", formatProgress(progress));
-        setText("progress-right", formatDuration(playback.position) + " / " + formatDuration(playback.duration));
-      }
-
-      function renderScrobble() {
-        var scrobble = state.scrobble || {};
-        var targetVisible = !!scrobble.mediaLabel;
-        var updatedVisible = !!scrobble.updatedAt && scrobble.status !== "idle" && scrobble.status !== "ready";
-        var detail = compactScrobbleDetail(scrobble);
-        var scrobbleVerb = document.getElementById("scrobble-verb");
-        setText("scrobble-verb", compactScrobbleTitle(scrobble));
-        setText("scrobble-detail", detail);
-        setText("scrobble-target", scrobble.mediaLabel || "No target");
-        setText("scrobble-updated", formatUpdatedAt(scrobble.updatedAt));
-        if (scrobbleVerb) {
-          scrobbleVerb.classList.toggle("is-pending", scrobble.status === "queued" || scrobble.status === "sending");
-        }
-        setHidden("scrobble-target", !targetVisible);
-        setHidden("scrobble-updated", !updatedVisible);
-        setHidden("scrobble-detail", !detail);
-      }
-
-      function renderNetwork() {
-        var net = state.network || {};
-        var mode = net.mode || "online";
-        var pending = Math.max(0, Number(net.pendingFinalizations || 0));
-        var seconds = Math.max(0, Math.ceil(Number(net.retryInSeconds || 0)));
-        var caption = mode === "rate_limited" ? "Rate limited"
-          : mode === "offline" ? "Offline / retrying"
-          : pending ? "Recovering" : "Online";
-        var detail = mode !== "online"
-          ? "Retry in " + seconds + "s; " + pending + " saved stop update(s)."
-          : pending ? pending + " saved stop update(s) awaiting confirmation." : "";
-        if (net.lastFailure) {
-          var issue = String(net.lastFailure).replace(/_/g, " ");
-          var http = Number(net.lastHttpStatus || 0);
-          detail += (detail ? " " : "") + "Last issue: " + issue +
-            (http ? " (HTTP " + http + ")" : "") +
-            (net.lastFailureAt ? " · " + formatUpdatedAt(net.lastFailureAt) : "") + ".";
-        }
-        setText("network-status", caption);
-        setText("network-detail", detail);
-        setHidden("network-detail", !detail);
-      }
-
-      function renderSyncQueue() {
-        var q = state.syncQueue || {};
-        var pending = Array.isArray(q.pending) ? q.pending : [];
-        var review = Array.isArray(q.needsReview) ? q.needsReview : [];
-        var recent = Array.isArray(q.recentlySynced) ? q.recentlySynced : [];
-        var section = document.getElementById("sync-queue-section");
-        var retry = document.getElementById("sync-queue-retry");
-        var waiting = document.getElementById("sync-queue-pending");
-        var reviewList = document.getElementById("sync-queue-review");
-        var synced = document.getElementById("sync-queue-synced");
-        if (!section || !retry || !waiting || !synced || !reviewList) return;
-
-        section.hidden = !pending.length && !review.length && !recent.length;
-        if (section.hidden) return;
-        retry.disabled = !stateReady || !q.canRetry || q.flushing;
-        retry.hidden = !pending.length;
-        retry.textContent = q.flushing ? "Syncing…" : "Retry Now";
-
-        var active = pending.filter(function(item) { return !!item.syncing; }).length;
-        setText("sync-queue-summary", pending.length +
-          " pending · " + review.length + " needs review" +
-          (active ? " · " + active + " syncing" : ""));
-        setText("sync-queue-notice", q.notice || "");
-        setHidden("sync-queue-notice", !q.notice);
-        setText("sync-queue-blocked", pending.length && q.blockedReason ? q.blockedReason : "");
-        setHidden("sync-queue-blocked", !pending.length || !q.blockedReason);
-
-        setHidden("sync-queue-pending-header", !pending.length);
-        setHidden("sync-queue-review-header", !review.length);
-        setText("sync-queue-review-feedback", reviewFeedback);
-        setHidden("sync-queue-review-feedback", !reviewFeedback);
-        setHidden("sync-queue-synced-header", !recent.length);
-        waiting.textContent = "";
-        reviewList.textContent = "";
-        synced.textContent = "";
-
-        function addItem(root, label, sub) {
-          var line = document.createElement("div");
-          line.className = "sync-line";
-          var name = document.createElement("span");
-          name.className = "sync-label";
-          name.title = label;
-          name.textContent = label;
-          var info = document.createElement("span");
-          info.className = "sync-sub";
-          info.textContent = sub;
-          line.appendChild(name);
-          line.appendChild(info);
-          root.appendChild(line);
-        }
-
-        pending.forEach(function(item) {
-          var status = item.syncing ? "Syncing" : "Pending";
-          addItem(waiting, item.label || "Media", status + " · " +
-            formatProgress(item.progress) + " · " + formatUpdatedAt(item.queuedAt));
-        });
-        // Dynamic buttons MUST handle pointerdown: IINA sidebar can intercept
-        // click in its WKWebView, just as the existing static sidebar controls do.
-        // No double activation from pointerdown followed by click.
-        function bindReviewAction(button, action) {
-          var pointerUsed = false;
-          function activate(ev) {
-            if (ev) { ev.preventDefault(); ev.stopPropagation(); }
-            if (button.disabled) return;
-            action();
-          }
-          button.addEventListener("pointerdown", function(ev) {
-            if (typeof ev.button === "number" && ev.button !== 0) return;
-            pointerUsed = true;
-            activate(ev);
-          });
-          button.addEventListener("click", function(ev) {
-            if (pointerUsed) { pointerUsed = false; ev.preventDefault(); return; }
-            activate(ev);
-          });
-          button.addEventListener("keydown", function(ev) {
-            if (ev.key === "Enter" || ev.key === " ") activate(ev);
-          });
-        }
-        review.forEach(function(item) {
-          var row = document.createElement("div");
-          row.className = "sync-line sync-review-item";
-          var title = document.createElement("div");
-          title.className = "sync-review-title";
-          title.textContent = item.label || "Unverified media";
-          var reason = document.createElement("div");
-          reason.className = "sync-review-reason";
-          reason.textContent = (item.reason || "Unverified identity") +
-            " · " + formatProgress(item.progress) + " · " + formatUpdatedAt(item.queuedAt);
-          row.appendChild(title);
-          row.appendChild(reason);
-          if (confirmDiscardId === item.id) {
-            var warning = document.createElement("div");
-            warning.className = "sync-review-help";
-            warning.textContent = "Remove this LOCAL checkpoint only? Trakt watched history is unchanged.";
-            row.appendChild(warning);
-          }
-          var actions = document.createElement("div");
-          actions.className = "sync-review-actions";
-          if (confirmDiscardId === item.id && !discardBusyId) {
-            var cancel = document.createElement("button");
-            cancel.type = "button";
-            cancel.className = "secondary";
-            cancel.textContent = "Cancel";
-            bindReviewAction(cancel, function() {
-              confirmDiscardId = "";
-              reviewFeedback = "Removal cancelled.";
-              renderSyncQueue();
-            });
-            actions.appendChild(cancel);
-          }
-          var button = document.createElement("button");
-          button.type = "button";
-          button.className = "secondary sync-review-action";
-          button.disabled = !!discardBusyId;
-          button.textContent = discardBusyId === item.id ? "Removing…"
-            : confirmDiscardId === item.id ? "Confirm remove" : "Remove";
-          button.title = "Review-only removal, never a Trakt history deletion.";
-          bindReviewAction(button, function() {
-            if (discardBusyId) return;
-            if (confirmDiscardId !== item.id) {
-              confirmDiscardId = item.id;
-              reviewFeedback = "Confirm or Cancel below. No data has been removed.";
-              renderSyncQueue();
-              return;
-            }
-            discardBusyId = item.id;
-            reviewFeedback = "Removing the selected local checkpoint…";
-            renderSyncQueue();
-            send("discard_unverified_stop", {id:item.id});
-          });
-          actions.appendChild(button);
-          row.appendChild(actions);
-          reviewList.appendChild(row);
-        });
-        recent.slice(0, 5).forEach(function(item) {
-          var note = item.status === "confirmed_duplicate" ? "Already recorded" : "Confirmed";
-          addItem(synced, item.label || "Media", note + " · " + formatUpdatedAt(item.syncedAt));
-        });
-        var last = recent.length ? recent[0].syncedAt : null;
-        setText("sync-queue-last-sync", last ? "Last confirmed stop: " + formatUpdatedAt(last) : "");
-        setHidden("sync-queue-last-sync", !last);
-      }
-
-      function renderCorrection() {
-        var correction = state.correction || {};
-        var open = !!correction.active;
-        var busy = !!correction.busy;
-        var input = document.getElementById("correction-query");
-        var kindInput = document.getElementById("correction-kind");
-        var referenceInput = document.getElementById("correction-reference");
-        var seasonInput = document.getElementById("correction-season");
-        var episodeInput = document.getElementById("correction-episode");
-        var resultsRoot = document.getElementById("correction-results");
-        var searchButton = document.getElementById("correction-search-button");
-        var referenceButton = document.getElementById("correction-reference-button");
-        var closeButton = document.getElementById("correction-close-button");
-        var openButton = document.getElementById("open-correction-button");
-        var statusNode = document.getElementById("correction-status");
-        var summary = document.getElementById("correction-summary");
-        var results = Array.isArray(correction.results) ? correction.results : [];
-        var hasUnmatched = state.scrobble && state.scrobble.reason === "missing-trakt-match";
-        var statusText = "Search Trakt for a better match.";
-
-        if (!resultsRoot || !statusNode || !summary) {
-          return;
-        }
-
-        summary.textContent = hasUnmatched
-          ? "This file did not match on Trakt. Search and pick the correct title."
-          : "Wrong title? Search Trakt and pick a better match.";
-
-        setHidden("correction-closed", open);
-        setHidden("correction-open", !open);
-        setText("correction-current", correction.mediaLabel ? ("Current: " + correction.mediaLabel) : "Current file");
-
-        if (kindInput) kindInput.value = correction.kind === "episode" ? "episode" : "movie";
-        if (input && document.activeElement !== input) {
-          input.value = correction.query || "";
-        }
-
-        if (referenceInput && document.activeElement !== referenceInput) {
-          referenceInput.value = correction.reference || "";
-        }
-        var episodeMode = correction.kind === "episode";
-        setHidden("correction-episode-editor", !episodeMode);
-        setHidden("correction-episode-help", !episodeMode);
-        if (seasonInput && document.activeElement !== seasonInput) {
-          seasonInput.value = correction.season != null ? String(correction.season) : "";
-        }
-        if (episodeInput && document.activeElement !== episodeInput) {
-          episodeInput.value = correction.episode != null ? String(correction.episode) : "";
-        }
-
-        if (openButton) {
-          openButton.disabled = !stateReady || busy;
-        }
-
-        if (searchButton) {
-          searchButton.disabled = !stateReady || busy;
-          searchButton.textContent = busy ? "Searching…" : "Search";
-        }
-
-        if (referenceButton) {
-          referenceButton.disabled = !stateReady || busy;
-          referenceButton.textContent = busy && pendingAction === "lookup_correction_reference"
-            ? "Looking…"
-            : "Lookup";
-        }
-
-        if (closeButton) {
-          closeButton.disabled = !stateReady || busy;
-        }
-
-        resultsRoot.textContent = "";
-
-        if (busy && pendingAction === "choose_correction") {
-          statusText = "Applying Trakt match…";
-        } else if (busy && pendingAction === "lookup_correction_reference") {
-          statusText = "Resolving Trakt match…";
-        } else if (busy) {
-          statusText = "Searching Trakt…";
-        } else if (correction.error) {
-          statusText = correction.error;
-        } else if (results.length) {
-          statusText = "Choose the correct Trakt match.";
-        }
-
-        if (results.length) {
-          results.forEach(function (result) {
-            var row = document.createElement("div");
-            row.className = "correction-result";
-
-            if (result.posterUrl) {
-              var poster = document.createElement("div");
-              poster.className = "correction-poster";
-
-              var image = document.createElement("img");
-              image.src = result.posterUrl;
-              image.alt = "";
-              image.loading = "lazy";
-              poster.appendChild(image);
-              row.appendChild(poster);
-            }
-
-            var copy = document.createElement("div");
-            copy.className = "correction-copy";
-
-            var title = document.createElement("p");
-            title.className = "correction-title";
-            title.textContent = result.title || "Unknown title";
-
-            var subtitle = document.createElement("p");
-            subtitle.className = "correction-subtitle";
-            subtitle.textContent = result.subtitle || "";
-
-            copy.appendChild(title);
-            if (result.subtitle) {
-              copy.appendChild(subtitle);
-            }
-
-            if (result.detail) {
-              var detail = document.createElement("p");
-              detail.className = "correction-detail-line";
-              detail.textContent = result.detail;
-              copy.appendChild(detail);
-            }
-
-            var button = document.createElement("button");
-            button.className = "secondary correction-use";
-            button.type = "button";
-            button.textContent = "Use";
-            button.disabled = !stateReady || busy || !Number(result.trakt || 0);
-
-            var activate = function (event) {
-              event.preventDefault();
-              event.stopPropagation();
-              requestAction("choose_correction", {
-                trakt: result.trakt,
-                season: (document.getElementById("correction-season") || {}).value,
-                episode: (document.getElementById("correction-episode") || {}).value
-              });
-            };
-
-            button.addEventListener("pointerdown", activate);
-            button.addEventListener("click", activate);
-            button.addEventListener("keydown", function (event) {
-              if (event.key === "Enter" || event.key === " ") {
-                activate(event);
-              }
-            });
-
-            row.appendChild(copy);
-            row.appendChild(button);
-            resultsRoot.appendChild(row);
-          });
-        }
-
-        setText("correction-status", statusText);
-        setHidden("correction-results", !results.length);
-      }
-
-      function renderHistory() {
-        var history = state.history || {};
-        var items = Array.isArray(history.items) ? history.items : [];
-        var list = document.getElementById("history-list");
-        var empty = document.getElementById("history-empty");
-
-        if (!list || !empty) {
-          return;
-        }
-
-        list.textContent = "";
-
-        if (!items.length) {
-          empty.textContent = history.error ? "History unavailable." : "No watched history in the last 24 hours.";
-          setHidden("history-list", true);
-          setHidden("history-empty", false);
-          return;
-        }
-
-        items.forEach(function(item) {
-          var row = document.createElement("div");
-          row.className = "history-item";
-
-          var title = document.createElement("p");
-          title.className = "history-title";
-          title.textContent = item.label || "Unknown item";
-
-          var time = document.createElement("span");
-          time.className = "history-time";
-          time.textContent = formatUpdatedAt(item.watchedAt);
-
-          row.appendChild(title);
-          row.appendChild(time);
-          list.appendChild(row);
-        });
-
-        setHidden("history-list", false);
-        setHidden("history-empty", true);
-      }
-
-      function renderProvider() {
-        var version = state.app && state.app.version ? ("v" + state.app.version) : "";
-        setText("provider-version", version);
-        setHidden("provider-version", !version);
-      }
-
-      function render() {
-        renderAuth();
-        renderPlayback();
-        renderScrobble();
-        renderNetwork();
-        renderSyncQueue();
-        renderCorrection();
-        renderHistory();
-        renderProvider();
-      }
-
-      bindAction("connect-button", "connect");
-      bindAction("reauth-button", "connect");
-      bindScrobbleToggle("scrobble-toggle");
-      bindStatusOsdToggle("status-osd-toggle");
-      bindSelectableInput("device-code");
-      bindAction("open-correction-button", "open_correction");
-      bindLocalAction("restore-remote-resume", function() {
-        if (!stateReady || !state.playback || !state.playback.resumeProtection ||
-            !state.playback.resumeProtection.canRestore) return;
-        send("restore_remote_resume");
+  <div id="os-results"><div class="msg" style="padding:6px 0">Set API Key above first.</div></div>
+
+  <!-- opensubtitles.org link, once we have an IMDB id -->
+  <div id="os-dotorg-row" style="display:none;margin-top:8px">
+    <button id="os-dotorg-link" onclick="openOsDotOrg()"
+       style="display:block;width:100%;text-align:center;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);color:rgba(255,255,255,.75);padding:7px;border-radius:6px;cursor:pointer;font-size:11px;font-family:inherit">
+      View on opensubtitles.org →
+    </button>
+    <div style="font-size:10px;color:rgba(255,255,255,.3);margin-top:3px;text-align:center">
+      Legacy site — often has uploads not yet on .com
+    </div>
+  </div>
+
+  </details>
+  <hr class="div" />
+
+  <!-- SubDL -->
+  <details class="sub-sec" data-k="sd">
+    <summary class="sub-hd">Subtitles — SubDL</summary>
+  <div style="font-size:10px;color:rgba(255,255,255,.25);margin-bottom:8px">
+    Independent subtitle source &nbsp;·&nbsp; Free key: <strong style="color:rgba(255,255,255,.4)">subdl.com/panel/api</strong>
+  </div>
+  <div id="sd-key-box" class="key-box">
+    <div class="key-title">⚠ SubDL API Key (free, no payment)</div>
+    <div class="key-desc">Sign up at subdl.com → Profile → API → copy key → paste below</div>
+    <div class="key-row">
+      <input type="password" id="sd-key-input" placeholder="Paste SubDL key…" onkeydown="if(event.key==='Enter')doSaveSdKey()" />
+      <button onclick="doSaveSdKey()" style="background:#c0392b;border:none;color:#fff;font-size:11px;font-weight:600;padding:6px 13px;border-radius:6px;cursor:pointer">Save</button>
+    </div>
+    <div id="sd-key-msg" class="key-msg"></div>
+  </div>
+  <div id="sd-key-ok" class="key-ok">
+    <span style="color:rgba(48,209,88,.9)">✓ SubDL key active</span>
+    <button onclick="doChangeSdKey()" style="background:none;border:none;color:rgba(255,255,255,.4);font-size:11px;cursor:pointer;padding:0">Change</button>
+  </div>
+  <div class="lang-row">
+    <span class="lang-lbl">Language</span>
+    <input id="sd-lang" type="text" value="EN" placeholder="EN, FR…" class="lang-inp" />
+  </div>
+  <button id="sd-search-btn" class="sub-btn2" onclick="doSdSearch()" disabled>Search SubDL</button>
+
+  <!-- Manual search -->
+  <div id="sd-manual-row" style="margin-top:7px">
+    <div style="font-size:10px;color:rgba(255,255,255,.32);margin-bottom:4px">Or search by custom title:</div>
+    <div style="display:flex;gap:6px">
+      <input id="sd-manual-q" type="text" placeholder="Custom search…"
+             onkeydown="if(event.key==='Enter')doSdSearch(this.value)"
+             style="flex:1;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:6px;padding:6px 9px;color:#fff;font-size:11px;font-family:inherit;outline:none" />
+      <button id="sd-manual-btn" onclick="doSdSearch(document.getElementById('sd-manual-q').value)"
+              style="background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.15);color:#fff;font-size:11px;padding:6px 12px;border-radius:6px;cursor:pointer;flex-shrink:0">Search</button>
+    </div>
+  </div>
+
+  <div id="sd-results"><div class="msg" style="padding:6px 0">Set API Key above first.</div></div>
+
+  </details>
+  <hr class="div" />
+
+  <!-- Wyzie Subs -->
+  <details class="sub-sec" data-k="wz">
+    <summary class="sub-hd">Subtitles — Wyzie Subs</summary>
+  <div style="font-size:10px;color:rgba(255,255,255,.25);margin-bottom:8px">
+    OpenSubtitles · Podnapisi + more &nbsp;·&nbsp; Free key: <strong style="color:rgba(255,255,255,.4)">sub.wyzie.io/redeem</strong>
+  </div>
+  <div id="wz-key-box" class="key-box">
+    <div class="key-title">⚠ Wyzie API Key (free, instant)</div>
+    <div class="key-desc">sub.wyzie.io/redeem → click Generate → paste below</div>
+    <div class="key-row">
+      <input type="password" id="wz-key-input" placeholder="Paste Wyzie key…" onkeydown="if(event.key==='Enter')doSaveWzKey()" />
+      <button onclick="doSaveWzKey()" style="background:#c0392b;border:none;color:#fff;font-size:11px;font-weight:600;padding:6px 13px;border-radius:6px;cursor:pointer">Save</button>
+    </div>
+    <div id="wz-key-msg" class="key-msg"></div>
+  </div>
+  <div id="wz-key-ok" class="key-ok">
+    <span style="color:rgba(48,209,88,.9)">✓ Wyzie key active — unlimited</span>
+    <button onclick="doChangeWzKey()" style="background:none;border:none;color:rgba(255,255,255,.4);font-size:11px;cursor:pointer;padding:0">Change</button>
+  </div>
+  <div class="lang-row">
+    <span class="lang-lbl">Language</span>
+    <input id="wz-lang" type="text" value="en" placeholder="en, fr…" class="lang-inp" />
+  </div>
+  <button id="wz-search-btn" class="sub-btn2" onclick="doWzSearch()" disabled>Search Wyzie Subs</button>
+
+  <!-- Whole-show search: Wyzie has no text search, so this drops the season/episode -->
+  <div id="wz-broad-row" style="margin-top:6px;display:none">
+    <button id="wz-broad-btn" onclick="doWzSearch(true)"
+            style="width:100%;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);color:rgba(255,255,255,.6);font-size:11px;padding:6px;border-radius:6px;cursor:pointer">Search whole show (no episode filter)</button>
+  </div>
+
+  <div id="wz-results"><div class="msg" style="padding:6px 0">Enter Wyzie key above, then select an episode.</div></div>
+  <div id="wz-clear-row" style="display:none;margin-top:6px">
+    <button style="width:100%;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);color:rgba(255,255,255,.4);font-size:11px;padding:5px;border-radius:5px;cursor:pointer" onclick="doClearSub()">Disable loaded subtitle</button>
+  </div>
+  </details>
+
+  <hr class="div" />
+
+  <details class="sub-sec" data-k="sk">
+    <summary class="sub-hd">Skip Intro &amp; Credits</summary>
+    <div style="font-size:10px;color:rgba(255,255,255,.25);margin-bottom:8px">
+      Free &nbsp;·&nbsp; no account or key needed &nbsp;·&nbsp; click the button or press <strong style="color:rgba(255,255,255,.4)">&#8997;S</strong>
+    </div>
+    <div style="display:flex;align-items:center;justify-content:space-between;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.09);border-radius:7px;padding:8px 10px;margin-bottom:8px">
+      <div>
+        <div style="font-size:12px;font-weight:600;color:#fff">Show skip button</div>
+        <div style="font-size:10px;color:rgba(255,255,255,.35);margin-top:2px">Never seeks on its own</div>
+      </div>
+      <label style="position:relative;display:inline-block;width:44px;height:26px;flex-shrink:0;margin-left:10px;cursor:pointer">
+        <input type="checkbox" id="skip-toggle" style="opacity:0;width:0;height:0;position:absolute" onchange="doToggleSkip(this.checked)" />
+        <span id="skip-track" style="position:absolute;top:0;left:0;right:0;bottom:0;background:rgba(255,255,255,.2);border-radius:26px;transition:background .2s">
+          <span id="skip-thumb" style="position:absolute;height:20px;width:20px;left:3px;bottom:3px;background:#fff;border-radius:50%;transition:left .2s"></span>
+        </span>
+      </label>
+    </div>
+    <button id="skip-refresh" onclick="doRefreshSkip()"
+      style="width:100%;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.14);color:rgba(255,255,255,.75);font-size:11px;font-weight:600;padding:6px;border-radius:6px;cursor:pointer;font-family:inherit">Search again</button>
+    <div id="skip-status" style="font-size:11px;color:rgba(255,255,255,.4);line-height:1.45;margin-top:5px;display:none"></div>
+  </details>
+
+</div>
+
+<hr class="div" />
+
+<!-- Overlay appearance -->
+
+<div class="op-wrap">
+  <div class="op-row">
+    <div class="sl" style="margin:0;flex:0 0 62px;white-space:nowrap">Shade</div>
+    <input type="range" id="opacity-slider" min="0" max="100" value="72" oninput="doSetOpacity(this.value)" />
+    <span id="opacity-val">72%</span>
+  </div>
+  <div class="op-row" style="margin-top:7px">
+    <div class="sl" style="margin:0;flex:0 0 62px;white-space:nowrap">Position</div>
+    <input type="range" id="vpos-slider" min="0" max="100" value="50" oninput="doSetVPos(this.value)" />
+    <span id="vpos-val">Center</span>
+  </div>
+  <div class="op-row" style="margin-top:7px">
+    <div class="sl" style="margin:0;flex:0 0 62px;white-space:nowrap">Theme</div>
+    <div id="theme-pills" style="display:flex;gap:4px;flex:1">
+      <button class="thm" data-t="classic" onclick="doSetTheme('classic')">Classic</button>
+      <button class="thm" data-t="compact" onclick="doSetTheme('compact')">Compact</button>
+      <button class="thm" data-t="poster"  onclick="doSetTheme('poster')">Poster</button>
+    </div>
+  </div>
+  <div class="op-row" style="margin-top:7px">
+    <div class="sl" style="margin:0;flex:0 0 62px;white-space:nowrap">Delay</div>
+    <div style="flex:1"></div>
+    <input type="number" id="pause-delay-input" min="0.5" max="30" step="0.5" value="3"
+      onchange="doSetPauseDelay(this.value)"
+      style="width:52px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.16);border-radius:6px;padding:4px 6px;color:#fff;font-size:12px;font-family:inherit;outline:none;text-align:center" />
+    <span style="font-size:11px;color:rgba(255,255,255,.45)">sec</span>
+  </div>
+</div>
+
+<script>
+var TK = localStorage.getItem("epinfo_tmdb_key") || "";
+var IB = "https://image.tmdb.org/t/p/w92";
+
+var selShow      = null;
+var selSeason    = null;
+var descExpanded = false;
+
+// Episodes live in an array; onclick passes the index
+var episodeCache = [];
+var seasonPosterUrl = "";
+
+// Per-URL memory: each video URL keeps its own pick
+var currentVideoUrl = "";
+function loadUrlMap() {
+  try { return JSON.parse(localStorage.getItem("epinfo_url_map") || "{}"); }
+  catch(e) { return {}; }
+}
+function saveUrlMap(m) {
+  try { localStorage.setItem("epinfo_url_map", JSON.stringify(m)); } catch(e) {}
+}
+function saveCurrentUrlInfo(info) {
+  if (!currentVideoUrl) return;
+  var m = loadUrlMap();
+  m[currentVideoUrl] = info;
+  saveUrlMap(m);
+}
+function clearCurrentUrlFromMap() {
+  if (!currentVideoUrl) return;
+  var m = loadUrlMap();
+  if (m[currentVideoUrl]) {
+    delete m[currentVideoUrl];
+    saveUrlMap(m);
+  }
+}
+
+// Save the IMDB ids main.js resolved back into the selection
+function cacheResolvedImdbIds(resolved) {
+  if (!resolved || (!resolved.imdb && !resolved.parentImdb)) return;
+  var saved = null;
+  try { saved = JSON.parse(localStorage.getItem("epinfo_ep") || "null"); } catch(e) {}
+  if (!saved) return;
+  var changed = false;
+  if (resolved.imdb && !saved.imdbId) {
+    saved.imdbId = resolved.imdb;
+    changed = true;
+  }
+  if (resolved.parentImdb && !saved.parentImdbId) {
+    saved.parentImdbId = resolved.parentImdb;
+    changed = true;
+  }
+  if (changed) {
+    try { localStorage.setItem("epinfo_ep", JSON.stringify(saved)); } catch(e) {}
+    saveCurrentUrlInfo(saved);
+    if (typeof updateOsDotOrgLink === "function") updateOsDotOrgLink();
+  }
+}
+
+// main.js resolved the IMDB ids: cache them, update the .org link
+iina.onMessage("imdbResolved", function(d) {
+  if (!d) return;
+  cacheResolvedImdbIds({ imdb: d.imdb, parentImdb: d.parentImdb });
+});
+
+function resetPanel() {
+  document.getElementById("panel").innerHTML =
+    '<div class="msg">Search above to find a show or movie.</div>';
+}
+
+// Saved card
+function showSaved(info) {
+  // Any pick replaces a lookup match; showAutoMatch() adds the line back for its own
+  autoShown = false;
+  document.getElementById("s-auto").style.display = "none";
+  autoStatus("");
+  document.getElementById("s-show").textContent  = info.showTitle || "";
+  document.getElementById("s-title").textContent = info.epTitle   || "";
+
+  var m = [];
+  if (info.code)    m.push(info.code);
+  if (info.airDate) m.push(info.airDate);
+  if (info.rating)  m.push('<span class="rat">&#9733; ' + info.rating + '</span>');
+  document.getElementById("s-meta").innerHTML = m.join(" &nbsp;·&nbsp; ");
+
+  var desc    = info.overview || "";
+  var descEl  = document.getElementById("s-desc");
+  var moreBtn = document.getElementById("show-more");
+
+  descEl.textContent = desc;
+  descExpanded = false;
+  descEl.classList.add("collapsed");
+
+  moreBtn.style.display = "none";
+  moreBtn.textContent = "Show more ▾";
+  setTimeout(function() {
+    if (descEl.scrollHeight > descEl.clientHeight + 2) {
+      moreBtn.style.display = "block";
+    }
+  }, 50);
+
+  document.getElementById("saved").classList.add("on");
+
+  // Prefill the manual OpenSubtitles search
+  var defOsQ = info.isMovie
+    ? (info.epTitle || info.showTitle || "")
+    : ((info.showTitle || "") + (info.code ? " " + info.code : ""));
+  var mq = document.getElementById("os-manual-q");
+  if (mq) mq.value = defOsQ;
+
+  // Whole-show Wyzie search is for TV only
+  var wzBroad = document.getElementById("wz-broad-row");
+  if (wzBroad) wzBroad.style.display = info.isMovie ? "none" : "block";
+
+  // Update opensubtitles.org website link
+  if (typeof updateOsDotOrgLink === "function") updateOsDotOrgLink();
+}
+
+function toggleDesc() {
+  var descEl  = document.getElementById("s-desc");
+  var moreBtn = document.getElementById("show-more");
+  descExpanded = !descExpanded;
+  if (descExpanded) {
+    descEl.classList.remove("collapsed");
+    moreBtn.textContent = "Show less ▴";
+  } else {
+    descEl.classList.add("collapsed");
+    moreBtn.textContent = "Show more ▾";
+  }
+}
+
+function doClear() {
+  // Clearing a match means "not this one": don't guess it again
+  if (autoShown) { rememberAuto(currentVideoUrl, { rejected: true }); autoShown = false; }
+  // also forget this URL's saved pick
+  clearCurrentUrlFromMap();
+  try{localStorage.removeItem("epinfo_ep");}catch(e){}
+  document.getElementById("saved").classList.remove("on");
+  selShow      = null;
+  selSeason    = null;
+  descExpanded = false;
+  episodeCache = [];
+  iina.postMessage("clearEpisode", {});
+  resetPanel();
+  if (typeof resetWz === "function") { resetWz(); document.getElementById("wz-search-btn").disabled = true; }
+  if (typeof resetOs === "function") { resetOs(); var osBtn = document.getElementById("os-search-btn"); if (osBtn) osBtn.disabled = true; }
+  if (typeof resetSd === "function") { resetSd(); var sdBtn = document.getElementById("sd-search-btn"); if (sdBtn) sdBtn.disabled = true; }
+  // Hide opensubtitles.org website link
+  var orgRow = document.getElementById("os-dotorg-row");
+  if (orgRow) orgRow.style.display = "none";
+}
+
+// Search
+function setLoading(on) {
+  document.getElementById("go").disabled = on;
+  document.getElementById("q").disabled  = on;
+}
+
+async function doSearch() {
+  var q = (document.getElementById("q").value || "").trim();
+  if (!q) return;
+  pushSearch(q);
+  setLoading(true);
+  document.getElementById("panel").innerHTML =
+    '<div class="msg"><span class="sp"></span>Searching…</div>';
+  try {
+    var r    = await fetch("https://api.themoviedb.org/3/search/multi?api_key=" + TK +
+      "&query=" + encodeURIComponent(q) + "&include_adult=false");
+    var data = await r.json();
+    var list = (data.results||[])
+      .filter(function(x){ return x.media_type==="tv"||x.media_type==="movie"; })
+      .slice(0,8);
+
+    if (!list.length) {
+      document.getElementById("panel").innerHTML = '<div class="msg">No results found.</div>';
+      setLoading(false); return;
+    }
+
+    // Results live in an array; onclick passes the index
+    var searchCache = list;
+    var html = "";
+    list.forEach(function(item, i) {
+      var title = item.title || item.name || "Untitled";
+      var year  = (item.release_date||item.first_air_date||"").slice(0,4);
+      var img   = item.poster_path
+        ? '<img class="rposter" src="'+IB+item.poster_path+'" />'
+        : '<div class="rposter"></div>';
+      html += '<div class="rrow">' + img +
+        '<div class="ri"><div class="rn">'+htmlEsc(title)+'</div>' +
+        '<div class="rs">'+(item.media_type==="tv"?"TV Series":"Movie")+(year?" · "+year:"")+'</div></div>' +
+        '<button class="pb" onclick="pickItemByIndex('+i+')">Pick</button>' +
+      '</div>';
+    });
+    document.getElementById("panel").innerHTML = html;
+
+    // for pickItemByIndex
+    document.getElementById("panel")._searchCache = searchCache;
+  } catch(e) {
+    document.getElementById("panel").innerHTML = '<div class="msg">Search failed.</div>';
+  }
+  setLoading(false);
+}
+
+// Escape text going into innerHTML
+function htmlEsc(s) {
+  return String(s||"")
+    .replace(/&/g,"&amp;")
+    .replace(/</g,"&lt;")
+    .replace(/>/g,"&gt;")
+    .replace(/"/g,"&quot;")
+    .replace(/'/g,"&#39;");
+}
+
+// Pick
+function pickItemByIndex(i) {
+  var cache = document.getElementById("panel")._searchCache;
+  if (!cache || !cache[i]) return;
+  pickItem(cache[i]);
+}
+
+function pickItem(item) {
+  selShow   = item;
+  selSeason = null;
+  episodeCache = [];
+
+  if (item.media_type === "movie") {
+    document.getElementById("panel").innerHTML =
+      '<div class="msg"><span class="sp"></span>Loading…</div>';
+    fetch("https://api.themoviedb.org/3/movie/"+item.id+"?api_key="+TK)
+      .then(function(r){return r.json();})
+      .then(function(d){
+        var info = { showTitle:"Movie", epTitle:d.title,
+          code: d.release_date?d.release_date.slice(0,4):"",
+          airDate:d.release_date||"", isStream:false,
+          rating:d.vote_average?d.vote_average.toFixed(1):"",
+          overview:d.overview||"",
+          posterUrl:d.poster_path ? "https://image.tmdb.org/t/p/w500" + d.poster_path : "",
+          tmdbId: String(item.id), season: null, episode: null, isMovie: true };
+        saveSelection(info);
+      }).catch(function(){
+        document.getElementById("panel").innerHTML='<div class="msg">Failed to load.</div>';
       });
-      bindLocalAction("copy-playback-diagnostics", function() {
-        if (!stateReady || !state.playback || !state.playback.available) {
-          setText("diagnostics-feedback", "Start playback first, then copy diagnostics.");
-          setHidden("diagnostics-feedback", false);
-          return;
-        }
-        send("copy_playback_diagnostics");
+    return;
+  }
+
+  document.getElementById("panel").innerHTML =
+    '<div class="msg"><span class="sp"></span>Loading seasons…</div>';
+  fetch("https://api.themoviedb.org/3/tv/"+item.id+"?api_key="+TK)
+    .then(function(r){return r.json();})
+    .then(function(show){
+      selShow._name    = show.name;
+      selShow._seasons = (show.seasons||[]).filter(function(s){return s.season_number>0;});
+      renderSeasons();
+    }).catch(function(){
+      document.getElementById("panel").innerHTML='<div class="msg">Failed to load seasons.</div>';
+    });
+}
+
+function renderSeasons() {
+  if (!selShow||!selShow._seasons) return;
+  var pills = "";
+  selShow._seasons.forEach(function(s){
+    pills += '<button class="pill'+(selSeason===s.season_number?" on":"")+
+      '" onclick="pickSeason('+s.season_number+')">S'+
+      String(s.season_number).padStart(2,"0")+'</button>';
+  });
+  document.getElementById("panel").innerHTML =
+    '<div class="sec"><div class="sl">Season</div><div class="pills">'+pills+'</div></div>' +
+    '<div id="ep"></div>';
+  if (selSeason!==null) renderEps(selSeason);
+}
+
+function pickSeason(n){ selSeason=n; renderSeasons(); }
+
+function renderEps(sNum) {
+  var el = document.getElementById("ep");
+  if (!el) return;
+  el.innerHTML = '<div class="msg"><span class="sp"></span>Loading episodes…</div>';
+  fetch("https://api.themoviedb.org/3/tv/"+selShow.id+"/season/"+sNum+"?api_key="+TK)
+    .then(function(r){return r.json();})
+    .then(function(s){
+      // Store season poster for overlay
+      seasonPosterUrl = s.poster_path
+        ? "https://image.tmdb.org/t/p/w500" + s.poster_path
+        : (selShow && selShow.poster_path ? "https://image.tmdb.org/t/p/w500" + selShow.poster_path : "");
+      episodeCache = s.episodes || [];
+
+      var pills = "";
+      episodeCache.forEach(function(ep, i){
+        var label = "E" + String(ep.episode_number).padStart(2,"0");
+        pills += '<button class="pill" title="'+htmlEsc(ep.name||"")+
+          '" onclick="pickEp('+i+')">'+label+'</button>';
       });
-      bindLocalAction("sync-queue-retry", function() {
-        var q = state.syncQueue || {};
-        if (!stateReady || !q.canRetry || q.flushing) return;
-        q.flushing = true;
-        q.notice = "Retry requested…";
-        renderSyncQueue();
-        send("retry_pending_stops");
-      });
-      bindLocalAction("copy-code-button", function () {
-        if (!state.auth || !state.auth.deviceCode || copyCodeBusy) {
-          return;
-        }
-        copyCodeBusy = true;
-        render();
-        send("copy_auth_code");
-      });
-      var kindSelector = document.getElementById("correction-kind");
-      if (kindSelector) {
-        kindSelector.addEventListener("change", function() {
-          var kind = kindSelector.value === "episode" ? "episode" : "movie";
-          state.correction.kind = kind;
-          state.correction.results = [];
-          state.correction.error = "";
-          renderCorrection();
-          send("change_correction_kind", {kind:kind});
-        });
+      el.innerHTML =
+        '<div class="sec" style="margin-top:8px;padding-top:8px;border-top:1px solid rgba(255,255,255,.07)">' +
+        '<div class="sl">Episode</div><div class="pills">'+pills+'</div></div>';
+    }).catch(function(){ el.innerHTML='<div class="msg">Failed to load episodes.</div>'; });
+}
+
+function pickEp(idx) {
+  var ep = episodeCache[idx];
+  if (!ep) return;
+  var info = {
+    isStream:  false,
+    showTitle: selShow._name||selShow.name||"",
+    epTitle:   ep.name||("Episode "+ep.episode_number),
+    code:      "S"+String(selSeason).padStart(2,"0")+"E"+String(ep.episode_number).padStart(2,"0"),
+    airDate:   ep.air_date||"",
+    rating:    ep.vote_average?ep.vote_average.toFixed(1):"",
+    overview:  ep.overview||"",
+    posterUrl: seasonPosterUrl || (selShow && selShow.poster_path ? "https://image.tmdb.org/t/p/w500" + selShow.poster_path : ""),
+    tmdbId: String(selShow.id), season: selSeason, episode: ep.episode_number, isMovie: false
+  };
+  saveSelection(info);
+}
+
+function saveSelection(info) {
+  try{localStorage.setItem("epinfo_ep", JSON.stringify(info));}catch(e){}
+  saveCurrentUrlInfo(info); // remember per-URL
+  pushRecent(info); // and Recent Picks
+  showSaved(info);
+  iina.postMessage("episodeSelected", info);
+  document.getElementById("panel").innerHTML =
+    '<div class="ok" style="padding:8px 0">✓ Saved</div>';
+  selShow      = null;
+  selSeason    = null;
+  episodeCache = [];
+  if (WZK) document.getElementById("wz-search-btn").disabled = false;
+  if (typeof resetWz === "function") resetWz();
+  // enable OS search button if key is set
+  var osBtn = document.getElementById("os-search-btn");
+  if (osBtn && localStorage.getItem("epinfo_osub_key")) osBtn.disabled = false;
+  if (typeof resetOs === "function") resetOs();
+  // enable SubDL search button if key is set
+  var sdBtn = document.getElementById("sd-search-btn");
+  if (sdBtn && localStorage.getItem("epinfo_subdl_key")) sdBtn.disabled = false;
+  if (typeof resetSd === "function") resetSd();
+
+  // Resolve IMDB ids early for the opensubtitles.org link
+  if (TK && info.tmdbId && !info.imdbId && !info.parentImdbId) {
+    iina.postMessage("resolveImdbOnly", {
+      tmdbKey: TK,
+      tmdbId:  info.tmdbId,
+      isMovie: !!info.isMovie,
+      season:  info.season  || null,
+      episode: info.episode || null
+    });
+  }
+}
+
+// Overlay on/off
+(function() {
+  var enabled = localStorage.getItem("epinfo_overlay_enabled") !== "false"; // default ON
+  document.getElementById("overlay-toggle").checked = enabled;
+  updateToggleVisual(enabled);
+  // Tell main.js once its handlers exist
+  setTimeout(function() {
+    iina.postMessage("setOverlayEnabled", { enabled: enabled });
+  }, 600);
+})();
+
+function updateToggleVisual(enabled) {
+  var track = document.getElementById("toggle-track");
+  var thumb = document.getElementById("toggle-thumb");
+  if (track) track.style.background = enabled ? "rgba(48,209,88,.85)" : "rgba(255,255,255,.2)";
+  if (thumb) thumb.style.left = enabled ? "21px" : "3px";
+}
+
+function doToggleOverlay(enabled) {
+  localStorage.setItem("epinfo_overlay_enabled", enabled ? "true" : "false");
+  updateToggleVisual(enabled);
+  iina.postMessage("setOverlayEnabled", { enabled: enabled });
+}
+
+// Automatic Lookup (experimental)
+// Matches go in epinfo_auto_map, never in the user's own picks or Recent Picks
+var AUTO_MAP_CAP = 300;
+var autoShown = false;   // the saved card is showing a match, not a pick
+
+function autoLookupOn() {
+  try { return localStorage.getItem("epinfo_auto_lookup") === "true"; } catch(e) { return false; }
+}
+function paintAutoToggle(on) {
+  var box = document.getElementById("auto-toggle");
+  var tr  = document.getElementById("auto-track");
+  var th  = document.getElementById("auto-thumb");
+  if (box) box.checked = on;
+  if (tr) tr.style.background = on ? "rgba(48,209,88,.85)" : "rgba(255,255,255,.2)";
+  if (th) th.style.left = on ? "21px" : "3px";
+}
+paintAutoToggle(autoLookupOn());
+
+function loadAutoMap() {
+  try { return JSON.parse(localStorage.getItem("epinfo_auto_map") || "{}") || {}; }
+  catch(e) { return {}; }
+}
+function saveAutoMap(m) {
+  var keys = Object.keys(m);
+  if (keys.length > AUTO_MAP_CAP) {
+    keys.sort(function(a, b) { return (m[a].at || 0) - (m[b].at || 0); });
+    keys.slice(0, keys.length - AUTO_MAP_CAP).forEach(function(k) { delete m[k]; });
+  }
+  try { localStorage.setItem("epinfo_auto_map", JSON.stringify(m)); } catch(e) {}
+}
+function rememberAuto(url, entry) {
+  if (!url) return;
+  var m = loadAutoMap();
+  entry.at = Date.now();
+  m[url] = entry;
+  saveAutoMap(m);
+}
+
+// Status line under the switch; detail is the reason
+function autoStatus(text, detail) {
+  var el = document.getElementById("auto-status");
+  if (!el) return;
+  el.textContent = text || "";
+  if (text && detail) {
+    var d = document.createElement("div");
+    d.style.cssText = "font-size:10px;color:rgba(255,255,255,.3);margin-top:2px";
+    d.textContent = detail.charAt(0).toUpperCase() + detail.slice(1) + ".";
+    el.appendChild(d);
+  }
+  el.style.display = text ? "block" : "none";
+}
+
+function doToggleAutoLookup(on) {
+  try { localStorage.setItem("epinfo_auto_lookup", on ? "true" : "false"); } catch(e) {}
+  paintAutoToggle(on);
+  if (on) {
+    if (currentVideoUrl && !document.getElementById("saved").classList.contains("on")) startAutoLookup(currentVideoUrl);
+  } else {
+    autoStatus("");
+    // Off means off: a match on screen goes too.
+    if (autoShown) { autoShown = false; showUnidentified(); }
+  }
+}
+
+function startAutoLookup(url) {
+  var hit = loadAutoMap()[url];
+  if (hit && hit.rejected) { autoStatus("You chose to search for this one yourself."); return; }
+  if (hit && hit.info) { showAutoMatch(hit.info); return; }
+  if (!TK) { autoStatus("Automatic Lookup needs your TMDB key — add it below."); return; }
+  autoStatus("Looking it up…");
+  iina.postMessage("autoLookup", { url: url });
+}
+
+function showAutoMatch(info) {
+  restoreSelection(info);
+  autoShown = true;
+  document.getElementById("s-auto").style.display = "block";
+}
+
+iina.onMessage("autoLookupResult", function(d) {
+  if (!d || d.url !== currentVideoUrl || !autoLookupOn()) return;
+  // A pick made while the lookup ran wins.
+  if (document.getElementById("saved").classList.contains("on") && !autoShown) return;
+  if (d.info) {
+    rememberAuto(d.url, { info: d.info });
+    showAutoMatch(d.info);
+  } else {
+    autoStatus("Not sure what this is — search below.", d.reason);
+    var q = document.getElementById("q");
+    if (q && !q.value && d.query) q.value = d.query;
+  }
+});
+
+// "Not right? Search": forget the match and never guess this file again
+function doAutoWrong() {
+  var info = null;
+  try { info = JSON.parse(localStorage.getItem("epinfo_ep") || "null"); } catch(e) {}
+  rememberAuto(currentVideoUrl, { rejected: true });
+  autoShown = false;
+  showUnidentified();
+  autoStatus("Search below for the right one.");
+  var q = document.getElementById("q");
+  if (q) {
+    q.value = info ? ((info.isMovie ? info.epTitle : info.showTitle) || "") : "";
+    q.focus();
+  }
+}
+
+iina.onMessage("overlayStatus", function(d){
+  var el=document.getElementById("ov-st");
+  if(el) el.textContent = d.text||"";
+});
+// File changed: restore the pick for a URL we know, otherwise clear
+iina.onMessage("fileChanged", function(d){
+  currentVideoUrl = (d && d.url) || "";
+
+  // Reset search panel state regardless
+  document.getElementById("q").value = "";
+  selShow = null; selSeason = null; episodeCache = []; resetPanel();
+
+  var map   = loadUrlMap();
+  var saved = currentVideoUrl ? map[currentVideoUrl] : null;
+
+  if (saved) {
+    // URL is already identified — restore silently
+    restoreSelection(saved);
+  } else {
+    showUnidentified();
+    // Off unless the user switched it on; a pick of their own always wins.
+    if (autoLookupOn() && currentVideoUrl) startAutoLookup(currentVideoUrl);
+  }
+});
+
+// Restore a selection: a saved pick or a lookup match
+function restoreSelection(saved) {
+  try { localStorage.setItem("epinfo_ep", JSON.stringify(saved)); } catch(e) {}
+  showSaved(saved);
+  if (WZK) document.getElementById("wz-search-btn").disabled = false;
+  var osBtn = document.getElementById("os-search-btn");
+  if (osBtn && localStorage.getItem("epinfo_osub_key")) osBtn.disabled = false;
+  var sdBtn = document.getElementById("sd-search-btn");
+  if (sdBtn && localStorage.getItem("epinfo_subdl_key")) sdBtn.disabled = false;
+  iina.postMessage("episodeSelected", saved);
+  // Update the opensubtitles.org link if the ids are already cached
+  if (typeof updateOsDotOrgLink === "function") updateOsDotOrgLink();
+  // Resolve IMDB ids early for the .org link
+  if (TK && saved.tmdbId && !saved.imdbId && !saved.parentImdbId) {
+    iina.postMessage("resolveImdbOnly", {
+      tmdbKey: TK,
+      tmdbId:  saved.tmdbId,
+      isMovie: !!saved.isMovie,
+      season:  saved.season  || null,
+      episode: saved.episode || null
+    });
+  }
+}
+
+// Unknown URL: clear, but keep it in the map (unlike doClear)
+function showUnidentified() {
+  try { localStorage.removeItem("epinfo_ep"); } catch(e) {}
+  document.getElementById("saved").classList.remove("on");
+  document.getElementById("s-auto").style.display = "none";
+  iina.postMessage("clearEpisode", {});
+  if (typeof resetWz === "function") { resetWz(); document.getElementById("wz-search-btn").disabled = true; }
+  if (typeof resetOs === "function") { resetOs(); var osBtn2 = document.getElementById("os-search-btn"); if (osBtn2) osBtn2.disabled = true; }
+  if (typeof resetSd === "function") { resetSd(); var sdBtn2 = document.getElementById("sd-search-btn"); if (sdBtn2) sdBtn2.disabled = true; }
+  var orgRow = document.getElementById("os-dotorg-row");
+  if (orgRow) orgRow.style.display = "none";
+}
+
+// API key
+(function initApiKey() {
+  var key = localStorage.getItem("epinfo_tmdb_key") || "";
+  if (key) {
+    TK = key;
+    showApiOk();
+  } else {
+    showApiForm();
+  }
+})();
+
+function showApiOk() {
+  document.getElementById("api-section").style.display = "none";
+  var ok = document.getElementById("api-ok");
+  ok.style.display = "flex";
+  document.getElementById("go").disabled = false;
+  document.getElementById("q").disabled = false;
+  document.getElementById("q").placeholder = "Show or movie name…";
+}
+
+function showApiForm() {
+  document.getElementById("api-section").style.display = "block";
+  document.getElementById("api-ok").style.display = "none";
+  document.getElementById("go").disabled = true;
+  document.getElementById("q").disabled = true;
+  document.getElementById("q").placeholder = "Enter API key above first…";
+}
+
+function doSaveKey() {
+  var key = (document.getElementById("api-input").value || "").trim();
+  var msg = document.getElementById("api-msg");
+  if (!key) { msg.style.color="#ff453a"; msg.textContent="Please paste your key."; return; }
+  msg.style.color="rgba(255,255,255,0.4)"; msg.textContent="Verifying…";
+  fetch("https://api.themoviedb.org/3/configuration?api_key=" + encodeURIComponent(key))
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if (d.images) {
+        localStorage.setItem("epinfo_tmdb_key", key);
+        iina.postMessage("setTmdbKey", { key: key });
+        TK = key;
+        msg.style.color="#30d158"; msg.textContent="✓ Valid key saved!";
+        setTimeout(showApiOk, 700);
+      } else {
+        msg.style.color="#ff453a"; msg.textContent="✗ Invalid key — please check and retry.";
       }
-      bindLocalAction("correction-search-button", function () {
-        var input = document.getElementById("correction-query");
-        requestAction("search_correction", {
-          query: input ? input.value : ""
-        });
-      });
-      bindLocalAction("correction-reference-button", function () {
-        var input = document.getElementById("correction-reference");
-        requestAction("lookup_correction_reference", {
-          reference: input ? input.value : ""
-        });
-      });
-      bindLocalAction("correction-close-button", function () {
-        pendingAction = "";
-        send("close_correction");
-      });
-      bindLocalAction("signout-button", function () {
-        footerNotice = "";
-        confirmingSignout = true;
-        render();
-      });
-      bindLocalAction("signout-cancel-button", function () {
-        confirmingSignout = false;
-        render();
-      });
-      bindLocalAction("signout-confirm-button", function () {
-        confirmingSignout = false;
-        requestAction("signout");
-      });
+    })
+    .catch(function(){
+      localStorage.setItem("epinfo_tmdb_key", key);
+      iina.postMessage("setTmdbKey", { key: key });
+      TK = key;
+      msg.style.color="#ff9f0a"; msg.textContent="⚠ Saved (couldn’t verify — no network)";
+      setTimeout(showApiOk, 1200);
+    });
+}
 
-      var correctionInput = document.getElementById("correction-query");
-      if (correctionInput) {
-        correctionInput.addEventListener("keydown", function (event) {
-          if (event.key === "Enter") {
-            event.preventDefault();
-            requestAction("search_correction", {
-              query: correctionInput.value
-            });
-          }
-        });
-      }
+function doChangeKey() {
+  document.getElementById("api-input").value = TK;
+  document.getElementById("api-msg").textContent = "";
+  showApiForm();
+}
 
-      var correctionReferenceInput = document.getElementById("correction-reference");
-      if (correctionReferenceInput) {
-        correctionReferenceInput.addEventListener("keydown", function (event) {
-          if (event.key === "Enter") {
-            event.preventDefault();
-            requestAction("lookup_correction_reference", {
-              reference: correctionReferenceInput.value
-            });
-          }
-        });
-      }
+// Opacity slider
+(function(){
+  var s = localStorage.getItem("epinfo_overlay_opacity");
+  if (s !== null) {
+    var p = Math.round(parseFloat(s) * 100);
+    document.getElementById("opacity-slider").value = p;
+    document.getElementById("opacity-val").textContent = p + "%";
+  }
+  // Send the saved value once main.js is ready, or it resets on restart
+  setTimeout(function() {
+    var v = localStorage.getItem("epinfo_overlay_opacity");
+    if (v !== null) iina.postMessage("setOverlayOpacity", { value: parseFloat(v) });
+  }, 800);
+})();
+function doSetOpacity(val) {
+  var p = parseInt(val, 10);
+  document.getElementById("opacity-val").textContent = p + "%";
+  var n = p / 100;
+  try { localStorage.setItem("epinfo_overlay_opacity", n); } catch(e) {}
+  iina.postMessage("setOverlayOpacity", { value: n });
+}
 
-      if (window.iina && typeof iina.onMessage === "function") {
-        iina.onMessage("discard_unverified_result", function(reply) {
-          var report = reply || {};
-          discardBusyId = "";
-          if (report.ok) {
-            confirmDiscardId = "";
-            reviewFeedback = "Local unverified checkpoint removed. Trakt history is unchanged.";
-          } else {
-            reviewFeedback = report.message || "Unable to remove checkpoint; it was preserved.";
-          }
-          renderSyncQueue();
-        });
-        iina.onMessage("diagnostics_copy_status", function(reply) {
-          setText("diagnostics-feedback", reply && reply.message || "Copy finished.");
-          setHidden("diagnostics-feedback", false);
-        });
-        iina.onMessage("state", function (payload) {
-          var nextState = payload || state;
-          var nextAuth = nextState.auth || {};
-          var nextCorrection = nextState.correction || {};
-          var authCompleted = authRequestMode && !nextAuth.busy;
+// Vertical position slider
+function vposLabel(v) {
+  if (v <= 5)  return "Top";
+  if (v >= 95) return "Bottom";
+  if (v >= 48 && v <= 52) return "Center";
+  return v + "%";
+}
+(function(){
+  var s = localStorage.getItem("epinfo_overlay_vpos");
+  if (s !== null) {
+    var v = parseFloat(s);
+    document.getElementById("vpos-slider").value = v;
+    document.getElementById("vpos-val").textContent = vposLabel(v);
+  }
+  setTimeout(function() {
+    var v = localStorage.getItem("epinfo_overlay_vpos");
+    if (v !== null) iina.postMessage("setOverlayVerticalPos", { value: parseFloat(v) });
+  }, 800);
+})();
+function doSetVPos(val) {
+  var v = parseInt(val, 10);
+  document.getElementById("vpos-val").textContent = vposLabel(v);
+  try { localStorage.setItem("epinfo_overlay_vpos", v); } catch(e) {}
+  iina.postMessage("setOverlayVerticalPos", { value: v });
+}
 
-          state = nextState;
-          stateReady = true;
+// Overlay theme
+function paintThemePills(t) {
+  var pills = document.querySelectorAll("#theme-pills .thm");
+  for (var i = 0; i < pills.length; i++) {
+    pills[i].className = "thm" + (pills[i].getAttribute("data-t") === t ? " on" : "");
+  }
+}
+function doSetTheme(t) {
+  try { localStorage.setItem("epinfo_overlay_theme", t); } catch(e) {}
+  paintThemePills(t);
+  iina.postMessage("setOverlayTheme", { value: t });
+}
 
-          if (pendingAction === "signout" && !nextAuth.busy && !nextAuth.connected) {
-            pendingAction = "";
-          } else if (authCompleted) {
-            pendingAction = "";
-            if (nextAuth.connected) {
-              if (authRequestMode === "reauth") {
-                var remaining = formatRemaining(nextAuth.token && nextAuth.token.expiresInSeconds);
-                showFooterNotice(remaining ? ("Re-authenticated. Token valid for " + remaining + ".") : "Re-authenticated.");
-              } else {
-                showFooterNotice("Connected to Trakt.");
-              }
-            } else {
-              var failureDetail = nextAuth.detail || nextAuth.summary || "Unknown error.";
-              showFooterNotice((authRequestMode === "reauth" ? "Re-auth failed: " : "Connect failed: ") + failureDetail, 6200);
-            }
-            authRequestMode = "";
-          } else if (pendingAction && !nextAuth.busy && !nextCorrection.busy) {
-            pendingAction = "";
-          }
+// Skip intro toggle
+function paintSkipToggle(on) {
+  var box = document.getElementById("skip-toggle");
+  var tr  = document.getElementById("skip-track");
+  var th  = document.getElementById("skip-thumb");
+  if (box) box.checked = on;
+  if (tr) tr.style.background = on ? "rgba(48,209,88,.85)" : "rgba(255,255,255,.2)";
+  if (th) th.style.left = on ? "21px" : "3px";
+}
+var skipMsgTimer = null;
+function showSkipMsg(text) {
+  var el = document.getElementById("skip-status");
+  if (!el) return;
+  if (skipMsgTimer) { clearTimeout(skipMsgTimer); skipMsgTimer = null; }
+  if (!text) { el.style.display = "none"; el.textContent = ""; return; }
+  el.textContent = text;
+  el.style.display = "block";
+  // Clears itself after a few seconds
+  skipMsgTimer = setTimeout(function() {
+    el.style.display = "none";
+    el.textContent = "";
+  }, 6000);
+}
 
-          render();
-        });
-        iina.onMessage("copy_auth_result", function (payload) {
-          copyCodeBusy = false;
-          if (payload && payload.ok) {
-            showCopyCodeFeedback("Code copied.");
-          } else {
-            showCopyCodeFeedback((payload && payload.message) || "Copy failed. Copy manually.", 4200);
-          }
-        });
-      }
+function doRefreshSkip() {
+  var btn = document.getElementById("skip-refresh");
+  if (btn) { btn.disabled = true; btn.textContent = "Searching\u2026"; }
+  showSkipMsg("");
+  skipUserAsked = true;
+  iina.postMessage("refreshSkip", {});
+}
 
-      render();
-      setInterval(function () {
-        if (!state.scrobble || !state.scrobble.updatedAt) return;
-        renderScrobble();
-      }, 1000);
-      send("ready");
-    })();
-  </script>
+iina.onMessage("skipResult", function(d) {
+  var btn = document.getElementById("skip-refresh");
+  if (btn) { btn.disabled = false; btn.textContent = "Search again"; }
+  if (!d) return;
+  // Only report when the user asked
+  if (skipUserAsked) {
+    showSkipMsg(d.count ? d.label : "Nothing found for this episode.");
+    skipUserAsked = false;
+  }
+});
+var skipUserAsked = false;
+
+function doToggleSkip(on) {
+  try { localStorage.setItem("epinfo_skip_enabled", on ? "true" : "false"); } catch(e) {}
+  paintSkipToggle(on);
+  iina.postMessage("setSkipEnabled", { enabled: on });
+}
+
+// Recent searches: the last few queries, one click to rerun
+var SEARCHES_CAP = 5;
+
+function loadSearches() {
+  try { return JSON.parse(localStorage.getItem("epinfo_searches") || "[]"); }
+  catch(e) { return []; }
+}
+function pushSearch(q) {
+  q = String(q || "").trim();
+  if (!q) return;
+  var list = loadSearches().filter(function(x) {
+    return String(x).toLowerCase() !== q.toLowerCase();
+  });
+  list.unshift(q);
+  try { localStorage.setItem("epinfo_searches", JSON.stringify(list.slice(0, SEARCHES_CAP))); } catch(e) {}
+  renderSearches();
+}
+function runSearch(i) {
+  var q = loadSearches()[i];
+  if (!q) return;
+  var box = document.getElementById("q");
+  if (box) box.value = q;
+  doSearch();
+}
+function renderSearches() {
+  var sec  = document.getElementById("searches-sec");
+  var list = document.getElementById("searches-list");
+  if (!sec || !list) return;
+  var items = loadSearches();
+  if (!items.length) { sec.style.display = "none"; list.innerHTML = ""; return; }
+  sec.style.display = "block";
+  var html = "";
+  for (var i = 0; i < items.length; i++) {
+    html += '<button class="sq" onclick="runSearch(' + i + ')" title="Search again">' +
+            htmlEsc(items[i]) + '</button>';
+  }
+  list.innerHTML = html;
+}
+
+// Recent picks: [{ info, lastUsed, pinned }]; pinned ones don't count toward the cap
+var RECENTS_CAP = 5;
+
+function loadRecents() {
+  try { return JSON.parse(localStorage.getItem("epinfo_recents") || "[]"); }
+  catch(e) { return []; }
+}
+function saveRecents(list) {
+  try { localStorage.setItem("epinfo_recents", JSON.stringify(list)); } catch(e) {}
+}
+function recentKey(info) {
+  if (!info) return "";
+  return info.isMovie
+    ? "m" + info.tmdbId
+    : "t" + info.tmdbId + "-" + (info.season || 0) + "-" + (info.episode || 0);
+}
+function pushRecent(info) {
+  if (!info || !info.tmdbId) return;
+  var list = loadRecents();
+  var key  = recentKey(info);
+  var hit  = null;
+  list = list.filter(function(r) {
+    if (recentKey(r.info) === key) { hit = r; return false; }
+    return true;
+  });
+  list.unshift({ info: info, lastUsed: Date.now(), pinned: hit ? hit.pinned : false });
+
+  var kept = [], unpinned = 0;
+  for (var i = 0; i < list.length; i++) {
+    if (list[i].pinned) { kept.push(list[i]); continue; }
+    if (unpinned < RECENTS_CAP) { kept.push(list[i]); unpinned++; }
+  }
+  saveRecents(kept);
+  renderRecents();
+}
+function applyRecent(idx) {
+  var list = sortedRecents();
+  var r = list[idx];
+  if (!r) return;
+  r.lastUsed = Date.now();
+  var all = loadRecents();
+  for (var i = 0; i < all.length; i++) {
+    if (recentKey(all[i].info) === recentKey(r.info)) all[i].lastUsed = r.lastUsed;
+  }
+  saveRecents(all);
+  // Same path as a normal pick
+  try { localStorage.setItem("epinfo_ep", JSON.stringify(r.info)); } catch(e) {}
+  saveCurrentUrlInfo(r.info);
+  showSaved(r.info);
+  iina.postMessage("episodeSelected", r.info);
+  renderRecents();
+}
+function togglePin(idx, ev) {
+  if (ev) ev.stopPropagation();
+  var r = sortedRecents()[idx];
+  if (!r) return;
+  var all = loadRecents();
+  for (var i = 0; i < all.length; i++) {
+    if (recentKey(all[i].info) === recentKey(r.info)) all[i].pinned = !all[i].pinned;
+  }
+  saveRecents(all);
+  renderRecents();
+}
+function removeRecent(idx, ev) {
+  if (ev) ev.stopPropagation();
+  var r = sortedRecents()[idx];
+  if (!r) return;
+  saveRecents(loadRecents().filter(function(x) {
+    return recentKey(x.info) !== recentKey(r.info);
+  }));
+  renderRecents();
+}
+function clearRecents() {
+  saveRecents([]);
+  renderRecents();
+}
+// Sorted and capped, so an older, longer saved list doesn't show in full
+function sortedRecents() {
+  var sorted = loadRecents().sort(function(a, b) {
+    if (!!a.pinned !== !!b.pinned) return a.pinned ? -1 : 1;
+    return (b.lastUsed || 0) - (a.lastUsed || 0);
+  });
+  var out = [], unpinned = 0;
+  for (var i = 0; i < sorted.length; i++) {
+    if (sorted[i].pinned) { out.push(sorted[i]); continue; }
+    if (unpinned < RECENTS_CAP) { out.push(sorted[i]); unpinned++; }
+  }
+  return out;
+}
+
+// Drop entries past the cap from storage too
+function pruneRecents() {
+  var kept = sortedRecents();
+  if (kept.length !== loadRecents().length) saveRecents(kept);
+}
+function renderRecents() {
+  var sec  = document.getElementById("recents-sec");
+  var list = document.getElementById("recents-list");
+  if (!sec || !list) return;
+  var items = sortedRecents();
+  if (!items.length) { sec.style.display = "none"; list.innerHTML = ""; return; }
+  sec.style.display = "block";
+
+  var html = "";
+  for (var i = 0; i < items.length; i++) {
+    var info = items[i].info || {};
+    var sub  = info.isMovie
+      ? "Movie" + (info.airDate ? " · " + htmlEsc(String(info.airDate).slice(0, 4)) : "")
+      : (info.code ? htmlEsc(info.code) : "") + (info.epTitle ? " · " + htmlEsc(info.epTitle) : "");
+    var img  = info.posterUrl ? "background-image:url('" + htmlEsc(info.posterUrl) + "')" : "";
+    html += '<div class="rc" onclick="applyRecent(' + i + ')">' +
+              '<div class="rc-img" style="' + img + '"></div>' +
+              '<div class="rc-txt">' +
+                '<div class="rc-t">' + htmlEsc(info.showTitle || info.epTitle || "Untitled") + '</div>' +
+                '<div class="rc-s">' + sub + '</div>' +
+              '</div>' +
+              '<button class="rc-b' + (items[i].pinned ? ' pinned' : '') + '" title="Pin" ' +
+                'onclick="togglePin(' + i + ',event)">' + (items[i].pinned ? '\u2605' : '\u2606') + '</button>' +
+              '<button class="rc-b" title="Remove" onclick="removeRecent(' + i + ',event)">\u00D7</button>' +
+            '</div>';
+  }
+  list.innerHTML = html;
+}
+
+// Pause delay
+(function(){
+  var s = localStorage.getItem("epinfo_pause_delay");
+  if (s !== null) {
+    document.getElementById("pause-delay-input").value = parseFloat(s);
+  }
+  setTimeout(function() {
+    var v = localStorage.getItem("epinfo_pause_delay");
+    var n = v !== null ? parseFloat(v) : 3;
+    if (!isNaN(n)) iina.postMessage("setPauseDelay", { value: n });
+
+    // TMDB key, for main.js's IMDB lookups
+    iina.postMessage("setTmdbKey", { key: localStorage.getItem("epinfo_tmdb_key") || "" });
+
+    // Overlay theme
+    var th = localStorage.getItem("epinfo_overlay_theme") || "classic";
+    paintThemePills(th);
+    iina.postMessage("setOverlayTheme", { value: th });
+
+    // Skip intro — opt-in, so default off
+    var sk = localStorage.getItem("epinfo_skip_enabled") === "true";
+    paintSkipToggle(sk);
+    iina.postMessage("setSkipEnabled", { enabled: sk });
+
+    renderSearches();
+    pruneRecents();
+    renderRecents();
+
+    // Settings sent: main.js can resend fileChanged now
+    iina.postMessage("sidebarReady", {});
+    // Show the opensubtitles.org link if we can
+    if (typeof updateOsDotOrgLink === "function") updateOsDotOrgLink();
+  }, 800);
+})();
+function doSetPauseDelay(val) {
+  var n = parseFloat(val);
+  if (isNaN(n) || n < 0.5) n = 0.5;
+  if (n > 30) n = 30;
+  document.getElementById("pause-delay-input").value = n;
+  try { localStorage.setItem("epinfo_pause_delay", n); } catch(e) {}
+  iina.postMessage("setPauseDelay", { value: n });
+}
+
+// Overlay dismiss button
+iina.onMessage("overlayShowing", function(d) {
+  document.getElementById("ov-dismiss").style.display = d.visible ? "block" : "none";
+});
+
+// Wyzie Subs
+var WZK = localStorage.getItem("epinfo_wyzie_key") || "";
+var wzCache = [], wzLoadedIdx = null, wzPendingIdx = null;
+
+(function() {
+  if (WZK) { document.getElementById("wz-key-box").style.display = "none"; document.getElementById("wz-key-ok").style.display = "flex"; }
+
+  // Whole-show row is for TV shows; doWzSearch reports a missing key
+  var saved = null;
+  try { saved = JSON.parse(localStorage.getItem("epinfo_ep") || "null"); } catch(e) {}
+  var bbRow = document.getElementById("wz-broad-row");
+  if (bbRow && saved && !saved.isMovie) bbRow.style.display = "block";
+})();
+
+function doSaveWzKey() {
+  var key = (document.getElementById("wz-key-input").value || "").trim();
+  var msg = document.getElementById("wz-key-msg");
+  if (!key) { msg.style.color = "#ff453a"; msg.textContent = "Please paste your key."; return; }
+  localStorage.setItem("epinfo_wyzie_key", key); WZK = key;
+  msg.style.color = "#30d158"; msg.textContent = "✓ Saved!";
+  setTimeout(function() {
+    document.getElementById("wz-key-box").style.display = "none";
+    document.getElementById("wz-key-ok").style.display = "flex";
+    var saved = null;
+    try { saved = JSON.parse(localStorage.getItem("epinfo_ep") || "null"); } catch(e) {}
+    if (document.getElementById("wz-search-btn") && saved) {
+      document.getElementById("wz-search-btn").disabled = false;
+    }
+    var bbRow = document.getElementById("wz-broad-row");
+    if (bbRow && saved && !saved.isMovie) bbRow.style.display = "block";
+  }, 700);
+}
+function doChangeWzKey() {
+  WZK = ""; localStorage.removeItem("epinfo_wyzie_key");
+  document.getElementById("wz-key-input").value = "";
+  document.getElementById("wz-key-msg").textContent = "";
+  document.getElementById("wz-key-box").style.display = "block";
+  document.getElementById("wz-key-ok").style.display = "none";
+  document.getElementById("wz-search-btn").disabled = true;
+}
+function resetWz() {
+  wzCancelTimer();
+  wzCache = []; wzLoadedIdx = null; wzPendingIdx = null;
+  document.getElementById("wz-results").innerHTML = '<div class="msg" style="padding:6px 0">Select an episode, then search.</div>';
+  document.getElementById("wz-clear-row").style.display = "none";
+}
+// Wyzie search, with its own timeout here
+var wzTimerId = null;
+var WZ_TIMEOUT_MS = 30000;
+
+function wzCancelTimer() {
+  if (wzTimerId !== null) { clearTimeout(wzTimerId); wzTimerId = null; }
+}
+function wzEnableInputs() {
+  document.getElementById("wz-search-btn").disabled = false;
+  var bb = document.getElementById("wz-broad-btn");
+  if (bb) bb.disabled = false;
+}
+function wzDisableInputs() {
+  document.getElementById("wz-search-btn").disabled = true;
+  var bb = document.getElementById("wz-broad-btn");
+  if (bb) bb.disabled = true;
+}
+
+function doWzSearch(broadShow) {
+  wzCancelTimer();
+  var saved = null;
+  try { saved = JSON.parse(localStorage.getItem("epinfo_ep") || "null"); } catch(e) {}
+  if (!saved) { document.getElementById("wz-results").innerHTML = '<div class="msg" style="padding:6px 0">No episode selected.</div>'; return; }
+  if (!WZK)   { document.getElementById("wz-results").innerHTML = '<div class="msg" style="padding:6px 0;color:rgba(255,200,100,.8)">Enter your Wyzie key first.</div>'; return; }
+  if (!saved.tmdbId) { document.getElementById("wz-results").innerHTML = '<div class="msg" style="padding:6px 0;color:rgba(255,200,100,.8)">No TMDB ID — re-select episode.</div>'; return; }
+
+  wzDisableInputs();
+  document.getElementById("wz-results").innerHTML = '<div class="msg" style="padding:6px 0"><span class="sp"></span>'
+    + '<span id="wz-prog">' + (broadShow ? "Searching whole show…" : "Searching 10+ sources…") + '</span>'
+    + ' <button onclick="wzCancel()" style="margin-left:8px;background:none;border:none;color:rgba(255,150,150,.8);font-size:11px;cursor:pointer;text-decoration:underline;padding:0">Cancel</button></div>';
+
+  iina.postMessage("searchWyzie", {
+    tmdbKey:       TK,                              // for lazy IMDB resolve
+    tmdbId:        saved.tmdbId,
+    imdbId:        saved.imdbId || null,
+    parentImdbId:  saved.parentImdbId || null,
+    season:        saved.season  || null,
+    episode:       saved.episode || null,
+    isMovie:       !!saved.isMovie,
+    broadShow:     !!broadShow,
+    lang:          (document.getElementById("wz-lang").value || "en").trim() || "en",
+    key:           WZK
+  });
+
+  wzTimerId = setTimeout(function() {
+    wzTimerId = null;
+    wzEnableInputs();
+    document.getElementById("wz-results").innerHTML =
+      '<div class="msg" style="padding:6px 0;color:rgba(255,150,150,.85)">Request timed out after '
+      + Math.round(WZ_TIMEOUT_MS/1000) + 's. Wyzie may be slow or down.</div>'
+      + '<div style="font-size:11px;color:rgba(255,255,255,.4);margin-top:6px">Try OpenSubtitles above (it supports custom search), or retry.</div>';
+  }, WZ_TIMEOUT_MS);
+}
+
+function wzCancel() {
+  wzCancelTimer();
+  wzEnableInputs();
+  document.getElementById("wz-results").innerHTML =
+    '<div class="msg" style="padding:6px 0;color:rgba(255,255,255,.5)">Search cancelled.</div>';
+}
+
+iina.onMessage("wyzieSearchProgress", function(d) {
+  var el = document.getElementById("wz-prog");
+  if (el && d && d.text) el.textContent = d.text;
+});
+iina.onMessage("wyzieSearchResult", function(d) {
+  wzCancelTimer();
+  wzEnableInputs();
+  // Cache resolved IMDB IDs from main.js
+  cacheResolvedImdbIds({ imdb: d.resolvedImdb, parentImdb: d.resolvedParentImdb });
+  var triedSuffix = (d.triedSteps && d.triedSteps.length)
+    ? '<div style="font-size:10px;color:rgba(255,255,255,.3);margin-top:4px">Tried: ' + htmlEsc(d.triedSteps.join(" → ")) + '</div>'
+    : '';
+  if (d.error) {
+    document.getElementById("wz-results").innerHTML = '<div class="msg" style="padding:6px 0;color:rgba(255,100,100,.8)">Error: '
+      + htmlEsc(String(d.error)) + '</div>'
+      + triedSuffix
+      + '<div style="font-size:11px;color:rgba(255,255,255,.4);margin-top:6px">Wyzie can fail for very new or rare episodes. Try the whole-show button above, or use OpenSubtitles for custom text search.</div>';
+    return;
+  }
+  wzCache = d.results || [];
+  if (!wzCache.length) {
+    document.getElementById("wz-results").innerHTML = '<div class="msg" style="padding:6px 0">No results.</div>'
+      + triedSuffix
+      + '<div style="font-size:11px;color:rgba(255,255,255,.4);margin-top:6px">Try the whole-show button above, a different language, or use OpenSubtitles.</div>';
+    return;
+  }
+  renderWz();
+});
+function renderWz() {
+  var html = '<div class="sub-none-row"><span>No subtitle</span><button class="sub-none-btn' + (wzLoadedIdx === -1 ? " on" : "") + '" onclick="doWzNone()">Select</button></div>';
+  wzCache.forEach(function(item, i) {
+    var rel  = item.release || item.fileName || item.media || "Unknown";
+    var lang = item.display || (item.language || "?").toUpperCase();
+    var fmt  = (item.format || "srt").toUpperCase();
+    var src  = item.source || "";
+    var url  = item.url || "";
+    var dis  = url ? "" : " disabled";
+    html += '<div class="sub-row"><div class="sub-info"><div class="sub-name" title="' + htmlEsc(rel) + '">' + htmlEsc(rel) + '</div><div class="sub-meta">' + htmlEsc(lang) + " · " + fmt + (src ? " · " + htmlEsc(src) : "") + '</div></div>' +
+      '<button class="sub-load' + (wzLoadedIdx === i ? " loaded" : "") + '"' + dis + ' onclick="doWzLoad(' + i + ')">' + (wzLoadedIdx === i ? "✓ Loaded" : wzPendingIdx === i ? "…" : "Load") + '</button></div>';
+  });
+  document.getElementById("wz-results").innerHTML = html;
+}
+function doWzLoad(idx) {
+  var item = wzCache[idx]; if (!item || !item.url) return;
+  wzPendingIdx = idx; renderWz();
+  iina.postMessage("loadWyzieSub", { url: item.url, fileName: item.fileName || item.release || "" });
+}
+iina.onMessage("wyzieLoadResult", function(d) {
+  if (d.success) {
+    wzLoadedIdx = wzPendingIdx; wzPendingIdx = null; renderWz();
+    document.getElementById("wz-clear-row").style.display = "block";
+  } else {
+    wzPendingIdx = null; renderWz();
+    document.getElementById("wz-results").insertAdjacentHTML("afterbegin", '<div class="msg" style="padding:4px 0;color:rgba(255,100,100,.8)">Load failed: ' + htmlEsc(d.error || "unknown") + '</div>');
+  }
+});
+function doWzNone() { wzLoadedIdx = -1; wzPendingIdx = null; iina.postMessage("clearSub", {}); renderWz(); document.getElementById("wz-clear-row").style.display = "none"; }
+function doClearSub() { wzLoadedIdx = null; wzPendingIdx = null; iina.postMessage("clearSub", {}); document.getElementById("wz-clear-row").style.display = "none"; renderWz(); }
+
+// SubDL: free key from subdl.com/panel/api; main.js handles the ZIPs
+var SDK = localStorage.getItem("epinfo_subdl_key") || "";
+var sdCache = [], sdLoadedIdx = null, sdPendingIdx = null;
+var sdTimerId = null;
+var SD_TIMEOUT_MS = 30000;
+
+(function() {
+  if (SDK) {
+    document.getElementById("sd-key-box").style.display = "none";
+    document.getElementById("sd-key-ok").style.display = "flex";
+  }
+})();
+
+function doSaveSdKey() {
+  var key = (document.getElementById("sd-key-input").value || "").trim();
+  var msg = document.getElementById("sd-key-msg");
+  if (!key) { msg.style.color = "#ff453a"; msg.textContent = "Please paste your key."; return; }
+  localStorage.setItem("epinfo_subdl_key", key); SDK = key;
+  msg.style.color = "#30d158"; msg.textContent = "✓ Saved!";
+  setTimeout(function() {
+    document.getElementById("sd-key-box").style.display = "none";
+    document.getElementById("sd-key-ok").style.display = "flex";
+    if (document.getElementById("sd-search-btn") && localStorage.getItem("epinfo_ep")) {
+      document.getElementById("sd-search-btn").disabled = false;
+    }
+  }, 700);
+}
+function doChangeSdKey() {
+  document.getElementById("sd-key-box").style.display = "block";
+  document.getElementById("sd-key-ok").style.display = "none";
+  document.getElementById("sd-key-input").value = SDK;
+  document.getElementById("sd-key-msg").textContent = "";
+}
+
+function sdCancelTimer() {
+  if (sdTimerId !== null) { clearTimeout(sdTimerId); sdTimerId = null; }
+}
+function sdEnableMainBtn() { document.getElementById("sd-search-btn").disabled = false; }
+function sdDisableMainBtn() { document.getElementById("sd-search-btn").disabled = true; }
+
+function doSdSearch(manualQuery) {
+  sdCancelTimer();
+  var saved = null;
+  try { saved = JSON.parse(localStorage.getItem("epinfo_ep") || "null"); } catch(e) {}
+  manualQuery = (manualQuery && String(manualQuery).trim()) || null;
+
+  if (!SDK) {
+    document.getElementById("sd-results").innerHTML = '<div class="msg" style="padding:6px 0;color:rgba(255,200,100,.8)">Set the SubDL API Key above first.</div>';
+    return;
+  }
+  if (!manualQuery && !saved) {
+    document.getElementById("sd-results").innerHTML = '<div class="msg" style="padding:6px 0">Select an episode first, or use the custom search below.</div>';
+    return;
+  }
+
+  var year = null;
+  if (saved && saved.isMovie) {
+    var ad = String(saved.airDate || saved.code || "");
+    var ym = ad.match(/(\d{4})/);
+    if (ym) year = ym[1];
+  }
+
+  sdDisableMainBtn();
+  document.getElementById("sd-results").innerHTML = '<div class="msg" style="padding:6px 0"><span class="sp"></span>'
+    + '<span id="sd-prog">' + (manualQuery ? "Searching for &ldquo;" + htmlEsc(manualQuery) + "&rdquo;…" : "Searching…") + '</span>'
+    + ' <button onclick="sdCancel()" style="margin-left:8px;background:none;border:none;color:rgba(255,150,150,.8);font-size:11px;cursor:pointer;text-decoration:underline;padding:0">Cancel</button></div>';
+
+  iina.postMessage("searchSubdl", {
+    key:           SDK,
+    tmdbKey:       TK,
+    tmdbId:        saved ? saved.tmdbId       : null,
+    imdbId:        saved ? saved.imdbId       : null,
+    parentImdbId:  saved ? saved.parentImdbId : null,
+    query:         saved ? (saved.showTitle || saved.epTitle || "") : "",
+    showTitle:     saved ? (saved.showTitle || "") : "",
+    epTitle:       saved ? (saved.epTitle || "")   : "",
+    manualQuery:   manualQuery,
+    lang:          (document.getElementById("sd-lang").value || "EN").trim().toUpperCase() || "EN",
+    isMovie:       saved ? !!saved.isMovie : !!manualQuery,
+    season:        saved ? (saved.season  || null) : null,
+    episode:       saved ? (saved.episode || null) : null,
+    year:          year
+  });
+
+  sdTimerId = setTimeout(function() {
+    sdTimerId = null;
+    sdEnableMainBtn();
+    document.getElementById("sd-results").innerHTML =
+      '<div class="msg" style="padding:6px 0;color:rgba(255,150,150,.85)">Request timed out after '
+      + Math.round(SD_TIMEOUT_MS/1000) + 's. SubDL may be slow or down.</div>'
+      + '<div style="font-size:11px;color:rgba(255,255,255,.4);margin-top:6px">Try the custom search above or check OpenSubtitles.</div>';
+  }, SD_TIMEOUT_MS);
+}
+
+function sdCancel() {
+  sdCancelTimer();
+  sdEnableMainBtn();
+  document.getElementById("sd-results").innerHTML =
+    '<div class="msg" style="padding:6px 0;color:rgba(255,255,255,.5)">Search cancelled.</div>';
+}
+
+iina.onMessage("subdlSearchProgress", function(d) {
+  var el = document.getElementById("sd-prog");
+  if (el && d && d.text) el.textContent = d.text;
+});
+iina.onMessage("subdlSearchResult", function(d) {
+  sdCancelTimer();
+  sdEnableMainBtn();
+  cacheResolvedImdbIds({ imdb: d.resolvedImdb, parentImdb: d.resolvedParentImdb });
+  var triedSuffix = (d.triedSteps && d.triedSteps.length)
+    ? '<div style="font-size:10px;color:rgba(255,255,255,.3);margin-top:4px">Tried: ' + htmlEsc(d.triedSteps.join(" → ")) + '</div>'
+    : '';
+  if (d.error) {
+    document.getElementById("sd-results").innerHTML = '<div class="msg" style="padding:6px 0;color:rgba(255,100,100,.8)">Error: '
+      + htmlEsc(String(d.error)) + '</div>'
+      + triedSuffix
+      + '<div style="font-size:11px;color:rgba(255,255,255,.4);margin-top:6px">Try the custom search above or a different language.</div>';
+    return;
+  }
+
+  var allResults = d.results || [];
+
+  // SubDL often ignores the season/episode filter: prefer exact matches, then season packs, then everything
+  var saved = null;
+  try { saved = JSON.parse(localStorage.getItem("epinfo_ep") || "null"); } catch(e) {}
+  var displayed = allResults;
+  var filterNote = "";
+  if (saved && !saved.isMovie && saved.season && saved.episode) {
+    var s = parseInt(saved.season), e = parseInt(saved.episode);
+    var exact = allResults.filter(function(item) {
+      return parseInt(item.season) === s && parseInt(item.episode) === e;
+    });
+    var seasonPacks = allResults.filter(function(item) {
+      return parseInt(item.season) === s && (!item.episode || parseInt(item.episode) === 0);
+    });
+    if (exact.length) {
+      displayed = exact;
+      filterNote = "Filtered to S" + s + "E" + e + " · " + exact.length + " of " + allResults.length;
+    } else if (seasonPacks.length) {
+      displayed = seasonPacks;
+      filterNote = "No episode-specific subs · showing " + seasonPacks.length + " season pack(s)";
+    } else {
+      // Keep everything but warn
+      filterNote = "No exact match · showing all " + allResults.length + " results (uploader didn't tag S/E)";
+    }
+  }
+  sdCache = displayed;
+  sdLoadedIdx = null;
+  sdPendingIdx = null;
+
+  if (!sdCache.length) {
+    document.getElementById("sd-results").innerHTML = '<div class="msg" style="padding:6px 0">No results found.</div>'
+      + triedSuffix
+      + '<div style="font-size:11px;color:rgba(255,255,255,.4);margin-top:6px">Try the custom search above or a different language.</div>';
+    return;
+  }
+  renderSd();
+  if (filterNote) {
+    var box = document.getElementById("sd-results");
+    var note = document.createElement("div");
+    note.style.cssText = "font-size:10px;color:rgba(255,255,255,.4);margin-top:6px;text-align:center";
+    note.textContent = filterNote;
+    box.appendChild(note);
+  }
+});
+
+function renderSd() {
+  var html = '<div class="sub-none-row"><span>No subtitle</span><button class="sub-none-btn' + (sdLoadedIdx === -1 ? " on" : "") + '" onclick="doSdNone()">Select</button></div>';
+  sdCache.forEach(function(item, i) {
+    var name = item.release_name || item.name || "Unknown";
+    // Trim "SUBDL.com::" prefix that often appears in `name`
+    name = String(name).replace(/^SUBDL\.com::/i, "").replace(/\.zip$/i, "");
+    var lang = (item.lang || item.language || "?");
+    var langU = lang.length <= 3 ? lang.toUpperCase() : (lang.charAt(0).toUpperCase() + lang.slice(1));
+    var author = item.author || "";
+    var sea = item.season, epi = item.episode;
+    var meta = langU + " · SRT" + (author ? " · " + author : "");
+    if (sea || epi) {
+      // 0/null means full-season pack
+      meta += (sea && epi) ? " · S" + sea + "E" + epi : " · Full season";
+    }
+    var dis = item.url ? "" : " disabled";
+    html += '<div class="sub-row"><div class="sub-info"><div class="sub-name" title="' + htmlEsc(name) + '">' + htmlEsc(name) + '</div><div class="sub-meta">' + htmlEsc(meta) + '</div></div>' +
+      '<button class="sub-load' + (sdLoadedIdx === i ? " loaded" : "") + '"' + dis + ' onclick="doSdLoad(' + i + ')">' + (sdLoadedIdx === i ? "✓ Loaded" : sdPendingIdx === i ? "…" : "Load") + '</button></div>';
+  });
+  document.getElementById("sd-results").innerHTML = html;
+}
+
+function doSdLoad(i) {
+  var item = sdCache[i];
+  if (!item || !item.url) return;
+  sdPendingIdx = i;
+  renderSd();
+  iina.postMessage("loadSubdlSub", { url: item.url, idx: i });
+}
+iina.onMessage("subdlLoadResult", function(d) {
+  if (d.success) {
+    sdLoadedIdx = sdPendingIdx;
+    sdPendingIdx = null;
+    renderSd();
+  } else {
+    sdPendingIdx = null;
+    renderSd();
+    var err = d.error || "Failed to load subtitle";
+    var box = document.getElementById("sd-results");
+    var note = document.createElement("div");
+    note.style.cssText = "padding:6px 0;color:rgba(255,100,100,.8);font-size:11px";
+    note.textContent = "Load failed: " + err;
+    box.insertBefore(note, box.firstChild);
+  }
+});
+function doSdNone() { sdLoadedIdx = -1; sdPendingIdx = null; iina.postMessage("clearSub", {}); renderSd(); }
+function resetSd() {
+  sdCancelTimer();
+  sdCache = []; sdLoadedIdx = null; sdPendingIdx = null;
+  document.getElementById("sd-results").innerHTML = '<div class="msg" style="padding:6px 0">Set API Key above first.</div>';
+}
+
+// OpenSubtitles.com
+var OSK = localStorage.getItem("epinfo_osub_key")   || "";
+var OST = localStorage.getItem("epinfo_osub_token") || "";
+var osCache = [], osLoadedIdx = null, osPendingIdx = null;
+
+(function() {
+  if (OSK) { document.getElementById("os-key-box").style.display = "none"; document.getElementById("os-key-ok").style.display = "flex"; }
+  else { document.getElementById("os-login-btn").disabled = true; document.getElementById("os-login-btn").style.opacity = "0.35"; document.getElementById("os-key-required-note").style.display = "block"; }
+  // Hide the login form only when logged in
+  if (OST) {
+    var u = JSON.parse(localStorage.getItem("epinfo_osub_user") || "{}");
+    if (u.username) {
+      document.getElementById("os-login-form").style.display = "none";
+      document.getElementById("os-logged").style.display = "flex";
+      document.getElementById("os-uname").textContent = u.username;
+    }
+  }
+  if (OSK && document.getElementById("wz-search-btn")) document.getElementById("os-search-btn").disabled = false;
+})();
+
+function doSaveOsKey() {
+  var key = (document.getElementById("os-key-input").value || "").trim();
+  var msg = document.getElementById("os-key-msg");
+  if (!key) { msg.style.color = "#ff453a"; msg.textContent = "Paste key first."; return; }
+  localStorage.setItem("epinfo_osub_key", key); OSK = key;
+  msg.style.color = "#30d158"; msg.textContent = "✓ Saved!";
+  setTimeout(function() {
+    document.getElementById("os-key-box").style.display = "none";
+    document.getElementById("os-key-ok").style.display = "flex";
+    document.getElementById("os-search-btn").disabled = false;
+    // Key is set: enable login
+    var loginBtn = document.getElementById("os-login-btn");
+    loginBtn.disabled = false; loginBtn.style.opacity = "1";
+    document.getElementById("os-key-required-note").style.display = "none";
+  }, 700);
+}
+function doChangeOsKey() {
+  OSK = ""; OST = "";
+  localStorage.removeItem("epinfo_osub_key"); localStorage.removeItem("epinfo_osub_token"); localStorage.removeItem("epinfo_osub_user");
+  document.getElementById("os-key-input").value = ""; document.getElementById("os-key-msg").textContent = "";
+  document.getElementById("os-key-box").style.display = "block"; document.getElementById("os-key-ok").style.display = "none";
+  // Only hide the logged-in banner
+  document.getElementById("os-logged").style.display = "none";
+  document.getElementById("os-login-form").style.display = "block";
+  document.getElementById("os-search-btn").disabled = true;
+  // No key — disable login button and show note
+  var loginBtn = document.getElementById("os-login-btn");
+  loginBtn.disabled = true; loginBtn.style.opacity = "0.35";
+  document.getElementById("os-key-required-note").style.display = "block";
+}
+function doOsLogin() {
+  var user = (document.getElementById("os-user").value || "").trim();
+  var pass = (document.getElementById("os-pass").value || "").trim();
+  var msg  = document.getElementById("os-login-msg");
+  var btn  = document.getElementById("os-login-btn");
+  if (!user || !pass) { msg.style.color = "#ff453a"; msg.textContent = "Enter username and password."; return; }
+  msg.style.color = "rgba(255,255,255,.4)"; msg.textContent = "Signing in…"; btn.disabled = true;
+  iina.postMessage("osLogin", { key: OSK, username: user, password: pass });
+}
+iina.onMessage("osLoginResult", function(d) {
+  document.getElementById("os-login-btn").disabled = false;
+  var msg = document.getElementById("os-login-msg");
+  if (d.success) {
+    OST = d.token; localStorage.setItem("epinfo_osub_token", OST); localStorage.setItem("epinfo_osub_user", JSON.stringify({ username: d.username }));
+    msg.style.color = "#30d158"; msg.textContent = "✓ Signed in!";
+    setTimeout(function() { document.getElementById("os-login-form").style.display = "none"; document.getElementById("os-logged").style.display = "flex"; document.getElementById("os-uname").textContent = d.username; }, 700);
+  } else { msg.style.color = "#ff453a"; msg.textContent = "✗ " + (d.error || "Failed"); }
+});
+function doOsLogout() {
+  OST = ""; localStorage.removeItem("epinfo_osub_token"); localStorage.removeItem("epinfo_osub_user");
+  document.getElementById("os-logged").style.display = "none"; document.getElementById("os-login-form").style.display = "block";
+  document.getElementById("os-login-msg").textContent = "";
+}
+function resetOs() {
+  osCancelTimer();
+  osCache = []; osLoadedIdx = null; osPendingIdx = null;
+  document.getElementById("os-results").innerHTML = '<div class="msg" style="padding:6px 0">Set API Key above first.</div>';
+}
+// OpenSubtitles search, with its own deadline here
+var osTimerId = null;
+var OS_TIMEOUT_MS = 30000;
+
+function osCancelTimer() {
+  if (osTimerId !== null) { clearTimeout(osTimerId); osTimerId = null; }
+}
+// Only the main search button is disabled; the custom search stays usable
+function osEnableMainBtn() { document.getElementById("os-search-btn").disabled = false; }
+function osDisableMainBtn() { document.getElementById("os-search-btn").disabled = true; }
+
+function doOsSearch(manualQuery) {
+  osCancelTimer();
+  var saved = null;
+  try { saved = JSON.parse(localStorage.getItem("epinfo_ep") || "null"); } catch(e) {}
+
+  manualQuery = (manualQuery && String(manualQuery).trim()) || null;
+
+  // Manual search needs only an OS API key. Auto-search needs a saved episode.
+  if (!OSK) {
+    document.getElementById("os-results").innerHTML = '<div class="msg" style="padding:6px 0;color:rgba(255,200,100,.8)">Set the OpenSubtitles API Key above first.</div>';
+    return;
+  }
+  if (!manualQuery && !saved) {
+    document.getElementById("os-results").innerHTML = '<div class="msg" style="padding:6px 0">Select an episode first, or use the custom search below.</div>';
+    return;
+  }
+
+  var match = (saved && saved.code) ? saved.code.match(/S(\d+)E(\d+)/i) : null;
+  // Movies: the year from airDate helps OpenSubtitles match
+  var year = null;
+  if (saved && saved.isMovie) {
+    var ad = String(saved.airDate || saved.code || "");
+    var ym = ad.match(/(\d{4})/);
+    if (ym) year = ym[1];
+  }
+
+  osDisableMainBtn();
+  document.getElementById("os-results").innerHTML = '<div class="msg" style="padding:6px 0"><span class="sp"></span>'
+    + '<span id="os-prog">' + (manualQuery ? "Searching for &ldquo;" + htmlEsc(manualQuery) + "&rdquo;…" : "Searching…") + '</span>'
+    + ' <button onclick="osCancel()" style="margin-left:8px;background:none;border:none;color:rgba(255,150,150,.8);font-size:11px;cursor:pointer;text-decoration:underline;padding:0">Cancel</button></div>';
+
+  iina.postMessage("searchSubs", {
+    key:           OSK,
+    token:         OST,
+    tmdbKey:       TK,                                       // for lazy IMDB resolve
+    tmdbId:        saved ? saved.tmdbId       : null,
+    imdbId:        saved ? saved.imdbId       : null,
+    parentImdbId:  saved ? saved.parentImdbId : null,
+    query:         saved ? (saved.showTitle || saved.epTitle || "") : "",
+    manualQuery:   manualQuery,
+    lang:          (document.getElementById("os-lang").value || "en").trim() || "en",
+    isMovie:       saved ? !!saved.isMovie : !!manualQuery,
+    season:        match ? parseInt(match[1]) : null,
+    episode:       match ? parseInt(match[2]) : null,
+    year:          year
+  });
+
+  // Hard deadline, whatever main.js is doing
+  osTimerId = setTimeout(function() {
+    osTimerId = null;
+    osEnableMainBtn();
+    document.getElementById("os-results").innerHTML =
+      '<div class="msg" style="padding:6px 0;color:rgba(255,150,150,.85)">Request timed out after '
+      + Math.round(OS_TIMEOUT_MS/1000) + 's. The OpenSubtitles API may be slow or down.</div>'
+      + '<div style="font-size:11px;color:rgba(255,255,255,.4);margin-top:6px">Try the custom search above, a different language, or wait and retry.</div>';
+  }, OS_TIMEOUT_MS);
+}
+
+function osCancel() {
+  osCancelTimer();
+  osEnableMainBtn();
+  document.getElementById("os-results").innerHTML =
+    '<div class="msg" style="padding:6px 0;color:rgba(255,255,255,.5)">Search cancelled.</div>';
+}
+
+iina.onMessage("subSearchProgress", function(d) {
+  var el = document.getElementById("os-prog");
+  if (el && d && d.text) el.textContent = d.text;
+});
+iina.onMessage("subSearchResult", function(d) {
+  osCancelTimer();
+  osEnableMainBtn();
+  cacheResolvedImdbIds({ imdb: d.resolvedImdb, parentImdb: d.resolvedParentImdb });
+  var triedSuffix = (d.triedSteps && d.triedSteps.length)
+    ? '<div style="font-size:10px;color:rgba(255,255,255,.3);margin-top:4px">Tried: ' + htmlEsc(d.triedSteps.join(" → ")) + '</div>'
+    : '';
+  if (d.error) {
+    document.getElementById("os-results").innerHTML = '<div class="msg" style="padding:6px 0;color:rgba(255,100,100,.8)">Error: '
+      + htmlEsc(String(d.error)) + '</div>'
+      + triedSuffix
+      + '<div style="font-size:11px;color:rgba(255,255,255,.4);margin-top:6px">Try the custom search above or a different language. The "View on opensubtitles.org →" link below often has subs the API hasn\'t indexed yet.</div>';
+    return;
+  }
+  osCache = d.results || [];
+  if (!osCache.length) {
+    document.getElementById("os-results").innerHTML = '<div class="msg" style="padding:6px 0">No results found.</div>'
+      + triedSuffix
+      + '<div style="font-size:11px;color:rgba(255,255,255,.4);margin-top:6px">Try the custom search above or a different language. The "View on opensubtitles.org →" link below often has subs the API hasn\'t indexed yet.</div>';
+    return;
+  }
+  renderOs();
+});
+
+// opensubtitles.org link: its database is often ahead of the .com API
+function updateOsDotOrgLink() {
+  var saved = null;
+  try { saved = JSON.parse(localStorage.getItem("epinfo_ep") || "null"); } catch(e) {}
+  var row  = document.getElementById("os-dotorg-row");
+  var link = document.getElementById("os-dotorg-link");
+  if (!row || !link) return;
+  if (!saved) { row.style.display = "none"; return; }
+  // Prefer episode-level IMDB id (most precise); fall back to show/movie level
+  var rawId = saved.imdbId || saved.parentImdbId || "";
+  var id    = String(rawId).replace(/^tt/i, "").replace(/^0+/, "");
+  if (!id) { row.style.display = "none"; return; }
+  var url = "https://www.opensubtitles.org/en/search/sublanguageid-all/imdbid-" + encodeURIComponent(id);
+  link.setAttribute("data-url", url);
+  row.style.display = "block";
+}
+
+// Open the .org link in the browser through main.js (IINA ignores target=_blank)
+function openOsDotOrg() {
+  var link = document.getElementById("os-dotorg-link");
+  var url  = link ? link.getAttribute("data-url") : "";
+  if (url) iina.postMessage("openExternalUrl", { url: url });
+}
+function renderOs() {
+  var html = '<div class="sub-none-row"><span>No subtitle</span><button class="sub-none-btn' + (osLoadedIdx === -1 ? " on" : "") + '" onclick="doOsNone()">Select</button></div>';
+  osCache.forEach(function(item, i) {
+    var a = item.attributes || {}, files = a.files || [], fid = files.length ? files[0].file_id : null;
+    var rel = a.release || (a.feature_details && a.feature_details.title) || "Unknown";
+    var lang = (a.language || "?").toUpperCase(), fmt = (a.format || "srt").toUpperCase();
+    var upl = a.uploader && a.uploader.name ? a.uploader.name : "";
+    var dis = !fid ? " disabled" : "";
+    html += '<div class="sub-row"><div class="sub-info"><div class="sub-name" title="' + htmlEsc(rel) + '">' + htmlEsc(rel) + '</div><div class="sub-meta">' + lang + " · " + fmt + (upl ? " · " + htmlEsc(upl) : "") + '</div></div><button class="sub-load' + (osLoadedIdx === i ? " loaded" : "") + '"' + dis + ' onclick="doOsLoad(' + i + ')">' + (osLoadedIdx === i ? "✓ Loaded" : osPendingIdx === i ? "…" : "Load") + '</button></div>';
+  });
+  document.getElementById("os-results").innerHTML = html;
+}
+function doOsLoad(idx) {
+  var item = osCache[idx]; if (!item) return;
+  var a = item.attributes || {}, files = a.files || [];
+  if (!files.length || !files[0].file_id) return;
+  osPendingIdx = idx; renderOs();
+  iina.postMessage("downloadSub", { key: OSK, token: OST, file_id: files[0].file_id });
+}
+iina.onMessage("subDownloadResult", function(d) {
+  if (d.success) {
+    osLoadedIdx = osPendingIdx; osPendingIdx = null; renderOs();
+    if (typeof d.remaining === "number") {
+      var r = document.createElement("div"); r.style.cssText = "font-size:10px;color:rgba(255,255,255,.3);text-align:right;margin-top:4px"; r.textContent = d.remaining + " downloads left today"; document.getElementById("os-results").appendChild(r);
+    }
+  } else { osPendingIdx = null; renderOs(); document.getElementById("os-results").insertAdjacentHTML("afterbegin", '<div class="msg" style="padding:4px 0;color:rgba(255,100,100,.8)">Failed: ' + htmlEsc(d.error || "unknown") + '</div>'); }
+});
+function doOsNone() { osLoadedIdx = -1; osPendingIdx = null; iina.postMessage("clearSub", {}); renderOs(); }
+
+</script>
+<script>
+// Collapsible subtitle sources — remember each one's state across launches.
+(function () {
+  document.querySelectorAll("details.sub-sec").forEach(function (d) {
+    var key = "epinfo_open_" + d.getAttribute("data-k");
+    var saved = localStorage.getItem(key);
+    if (saved !== null) d.open = saved === "1";
+    d.addEventListener("toggle", function () {
+      try { localStorage.setItem(key, d.open ? "1" : "0"); } catch (e) {}
+    });
+  });
+})();
+</script>
 </body>
-
 </html>

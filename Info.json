@@ -1,47 +1,38 @@
 {
-  "name": "Trakt Scrobbler Plus",
-  "identifier": "io.github.olivergiangvu.iinatraktscrobblerplus",
-  "version": "0.2.5",
+  "name": "Episode Info",
+  "identifier": "com.Zain-Imam.episodeinfo",
+  "version": "1.3.3",
+  "ghRepo": "Zain-Imam/iina-episode-info",
+  "ghVersion": 8,
   "author": {
-    "name": "Oliver Giang Vu (fork of Fahim)",
-    "url": "https://github.com/olivergiangvu"
+    "name": "Zain Imam",
+    "url": "https://github.com/Zain-Imam"
   },
-  "ghRepo": "olivergiangvu/iina-trakt-scrobbler-plus",
-  "ghVersion": 20,
   "entry": "main.js",
-  "description": "IINA Trakt scrobbler with stream URL and IMDb-aware resolution.",
-  "sidebarTab": {
-    "name": "Trakt+"
-  },
+  "description": "Episode/movie info overlay on pause. Subtitle search, recent picks, and skip intro.",
   "permissions": [
     "show-osd",
+    "video-overlay",
     "network-request",
     "file-system"
   ],
   "allowedDomains": [
-    "api.trakt.tv",
-    "trakt.tv"
+    "api.themoviedb.org",
+    "image.tmdb.org",
+    "sub.wyzie.ru",
+    "sub.wyzie.io",
+    "api.opensubtitles.com",
+    "api.subdl.com",
+    "dl.subdl.com",
+    "api.introdb.app",
+    "api.theintrodb.org",
+    "api.skipdb.tv",
+    "arm.haglund.dev",
+    "api.aniskip.com",
+    "127.0.0.1",
+    "localhost"
   ],
-  "preferencesPage": "preferences.html",
-  "preferenceDefaults": {
-    "trakt_client_id": "",
-    "trakt_client_secret": "",
-    "scrobble_enabled": true,
-    "status_osd": true,
-    "debug_osd": false,
-    "skip_interval": 5,
-    "preview_threshold": 80,
-    "preview_duration": 60,
-    "fast_pause_threshold": 1,
-    "fast_pause_duration": 5,
-    "auth_state": "disconnected",
-    "auth_summary": "Not connected to Trakt",
-    "auth_detail": "Use Connect to start device authorization.",
-    "auth_busy": false,
-    "auth_connected": false,
-    "auth_credential_mode": "",
-    "auth_updated_at": "",
-    "auth_action_kind": "",
-    "auth_action_nonce": ""
+  "sidebarTab": {
+    "name": "Episode Info"
   }
 }
