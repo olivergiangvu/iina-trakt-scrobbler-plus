@@ -1930,7 +1930,10 @@ async function getTraktIds(mediaInfo) {
 	var cached = bucket[key];
 	var cachedId = readCachedTraktId(cached);
 
-	if (cached === 0 || cached === -1 || cachedId === -1) {
+	// A verified explicit Trakt ID must override an old negative title cache:
+	// the previous filename or localized title may have been unresolvable.
+	var explicitId=Number(mediaInfo.manualTraktId||0);
+	if ((cached === 0 || cached === -1 || cachedId === -1) && !(explicitId>0)) {
 		return null;
 	}
 	if (type === "episode") {
