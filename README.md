@@ -208,6 +208,16 @@ No HomeDocker or Trakt Bridge changes are required.
 
 **Historical beta notes above are retained as development records. v0.2.4 is now stable.**
 
+## v0.2.5-beta.7 — Batched diagnostics (Mac canary)
+
+**Status: test-only; stable remains v0.2.4.** Beta.6 was field-verified for Comet Better Call Saul S03E03 recognition, watched scrobble and AIOStreams watched sync. This beta.7 changes **only the plugin diagnostic-file writer**; identity resolution, resume protection, Trakt API logic and IINA startup arguments are unchanged.
+
+- `@data/debug.log` now batches writes to avoid re-reading and rewriting up to 200 KB for every event. Pending messages flush every 10 seconds, at 8 KB, and at IINA window close/mpv shutdown. An unsuccessful write keeps its pending diagnostics for retry.
+- The persistent log retains the newest 200,000 characters. Console logging still happens immediately; progress checkpoints remain independently persisted in the existing stop journal.
+- Tests cover rollover, batching, write failure, teardown flush and existing media identity/resume regressions.
+- A separate upstream playback issue was traced on IINA 1.5.0 to an unsupported AC3 SPDIF path through AVFoundation. With **SPDIF output codecs disabled in IINA Settings → Audio**, the affected Comet stream began playing normally. This fix is an **IINA preference**, not a plugin patch. Keep AIOStreams custom URL unchanged: `iina://weblink?url={encodedUrl}&mpv_start={position}`.
+- **Before promotion:** verify beta.7 on macOS for a new episode, resume from the middle, watched threshold, ⌘Q finalization, recovery after restart, and debug-log size/performance. Do not merge or publish Stable merely because CI passes.
+
 ## v0.2.5-beta.1 — Fresh Explicit-ID Recognition (canary)
 
 **Goal:** recognize a *new*, previously unseen TV series/movie on the first
