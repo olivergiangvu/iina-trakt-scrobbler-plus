@@ -1969,6 +1969,8 @@ async function scrobble(verb, mediaInfo, progress) {
 	var initialProgress = Number(progress || 0);
 	var initialVerb = normalizeScrobbleVerb(verb, initialProgress);
 	if (shouldSkipEarlyScrobble(initialVerb, initialProgress)) {
+		log("Skipping Trakt " + initialVerb + " below 1% progress for " +
+			mediaIdentityLabel(mediaInfo) + " at " + initialProgress.toFixed(2) + "%");
 		return { ok: false, skip: true, reason: earlyScrobbleReason(initialVerb) };
 	}
 	if (!hasCredentials()) {
