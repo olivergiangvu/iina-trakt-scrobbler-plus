@@ -31,6 +31,8 @@ assert(bad.conflict);
 const main=fs.readFileSync(path.join(__dirname,"../main.js"),"utf8");
 assert(main.includes('autoEnrichmentFailed'));assert(main.includes('autoLookupConflict'));
 const side=fs.readFileSync(path.join(__dirname,"../sidebar.html"),"utf8");
+assert(side.includes('iina.onMessage("autoLookupConflict"'));
+assert(side.includes("Provisional identity (not TMDB-verified)"));
 const over=fs.readFileSync(path.join(__dirname,"../overlay.html"),"utf8");
 for(const [label,html] of [["sidebar",side],["overlay",over]]){
  assert(html.includes("@media (prefers-color-scheme: light)"),label+" light mode");

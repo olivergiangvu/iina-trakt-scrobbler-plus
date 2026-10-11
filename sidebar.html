@@ -992,7 +992,16 @@ function startAutoLookup(url) {
 function showAutoMatch(info) {
   restoreSelection(info);
   autoShown = true;
-  document.getElementById("s-auto").style.display = "block";
+  var marker = document.getElementById("s-auto");
+  marker.style.display = "block";
+  var stage = document.getElementById("epplus-match-state");
+  if (!stage) {
+    stage = document.createElement("span"); stage.id = "epplus-match-state";
+    stage.style.marginLeft = "4px";
+    marker.appendChild(stage);
+  }
+  stage.textContent = info.metadataPending ? "· Provisional identity (not TMDB-verified)" : "· TMDB verified";
+  stage.style.color = info.metadataPending ? "#a76b20" : "#1b9555";
   autoStatus(info.metadataPending ? "Recognized via playback ID · TMDB details pending" : "Matched and verified via TMDB");
 }
 
@@ -1008,6 +1017,16 @@ iina.onMessage("autoLookupResult", function(d) {
     var q = document.getElementById("q");
     if (q && !q.value && d.query) q.value = d.query;
   }
+});
+
+// A conflicting TMDB resolution invalidates a provisional guess; never leave it on screen.
+iina.onMessage("autoLookupConflict", function(d) {
+  if (!d || d.url !== currentVideoUrl || !autoLookupOn() || !autoShown) return;
+  var map = loadAutoMap();
+  delete map[d.url]; saveAutoMap(map);
+  autoShown = false;
+  showUnidentified();
+  autoStatus("Identity mismatch — manual selection required.", d.reason || "IMDb and title disagree");
 });
 
 iina.onMessage("autoEnrichmentFailed", function(d) {
