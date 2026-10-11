@@ -44,6 +44,8 @@ jobs:
         run: node tests/false-positive-matching.js
       - name: Verified replay and Needs Review UI contracts
         run: node tests/replay-integrity-ui.js
+      - name: IINA Remove interaction and acknowledgment regression
+        run: node tests/review-remove-interaction.js
       - name: Parser smoke tests
         run: node tests/parser-smoke.js
       - name: Trakt resolution tests
