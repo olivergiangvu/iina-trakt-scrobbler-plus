@@ -8,7 +8,7 @@ function create(options) {
   var WRITE_GAP = o.writeGapMs || 1350;
   var nextWriteAt = 0, queuedWrites = 0, lastRequestAt = 0, lastSuccessAt = 0;
   var cooldownUntil = 0, rateFailures = 0, offlineUntil = 0;
-  var lastFailure = "", lastStatus = 0, writeLane = Promise.resolve();
+  var lastFailure = "", lastFailureAt = 0, lastStatus = 0, writeLane = Promise.resolve();
   try {
     var saved = file && file.exists(STORAGE) ? JSON.parse(file.read(STORAGE)) : {};
     if (Number.isFinite(saved.until) && saved.until > now() && saved.until < now() + 16 * 60 * 1000) {
@@ -28,7 +28,8 @@ function create(options) {
     return {
       mode: mode, retryInSeconds: secondsUntil(mode === "rate_limited" ? cooldownUntil : offlineUntil),
       retryAt: mode === "rate_limited" ? new Date(cooldownUntil).toISOString() : "",
-      queuedWrites: queuedWrites, lastFailure: lastFailure, lastHttpStatus: lastStatus,
+      queuedWrites: queuedWrites, lastFailure: lastFailure, lastFailureAt: lastFailureAt
+        ? new Date(lastFailureAt).toISOString() : "", lastHttpStatus: lastStatus,
       lastRequestAt: lastRequestAt ? new Date(lastRequestAt).toISOString() : "",
       lastSuccessAt: lastSuccessAt ? new Date(lastSuccessAt).toISOString() : ""
     };
@@ -66,6 +67,7 @@ function create(options) {
     cooldownUntil = Math.max(cooldownUntil, now() + Math.max(exponential, suggested));
     offlineUntil = 0;
     lastFailure = reason;
+    lastFailureAt = now();
     lastStatus = Number(response.statusCode || 0);
     persist();
     var err = blockedError();
@@ -91,6 +93,7 @@ function create(options) {
     catch (error) {
       if (error && (error.code === "TRAKT_COOLDOWN" || error.code === "TRAKT_OFFLINE")) throw error;
       lastFailure = "network";
+      lastFailureAt = now();
       offlineUntil = Math.max(offlineUntil, now() + 15000);
       throw error;
     }
@@ -100,6 +103,7 @@ function create(options) {
     if (lastStatus >= 200 && lastStatus < 400) success();
     else if (lastStatus >= 500) {
       lastFailure = "server_error";
+      lastFailureAt = now();
       offlineUntil = now() + 15000;
     }
     return response;

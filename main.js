@@ -5,8 +5,12 @@ var streamSource = require("./stream-source.js");
 var playbackIdentity = require("./playback-identity.js");
 var monitor = require("./monitor.js");
 var stopJournalModule = require("./stop-journal.js");
+var syncHistoryModule = require("./sync-history.js");
+var playbackDiagnostics = require("./playback-diagnostics.js");
+var mediaFusion = require("./mediafusion-identity.js");
+var correctionMedia = require("./correction-media.js");
 var trakt = require("./trakt.js");
-var PLUGIN_VERSION = "0.2.3";
+var PLUGIN_VERSION = "0.2.4";
 var DEBUG_LOG_PATH = "@data/debug.log";
 var MAX_DEBUG_LOG_CHARS = 200000;
 var POLL_INTERVAL_MS = 2000;
@@ -32,6 +36,11 @@ var stopReplayTimer = null;
 var lastScrobbleStatus = createScrobbleStatus();
 var correctionState = createCorrectionState();
 var stopJournal = stopJournalModule.create(file);
+var syncHistory = syncHistoryModule.create(file);
+var mediaFusionShowCache = mediaFusion.create(file);
+var activeStopSyncId = "";
+var syncQueueNotice = "";
+var confirmedPlayback = {key:"",proof:null};
 
 function createPlaybackState() {
   return {
@@ -68,6 +77,7 @@ function createCorrectionState() {
     error: "",
     mediaLabel: "",
     mediaKey: "",
+    kind: "movie",
     season: "",
     episode: "",
     results: []
@@ -328,6 +338,7 @@ function cloneCorrectionState(state) {
     error: String(source.error || ""),
     mediaLabel: String(source.mediaLabel || ""),
     mediaKey: String(source.mediaKey || ""),
+    kind: source.kind === "episode" ? "episode" : "movie",
     season: String(source.season !== undefined && source.season !== null ? source.season : ""),
     episode: String(source.episode !== undefined && source.episode !== null ? source.episode : ""),
     results: Array.isArray(source.results)
@@ -403,7 +414,73 @@ function buildSidebarPlayback() {
     duration: snapshot ? snapshot.duration : 0,
     preview: !!playbackState.preview,
     fastPause: !!playbackState.fastPause,
+    matchProvenance: determineMatchProvenance(),
     identifiedAt: currentMedia ? currentMedia.identifiedAt : ""
+  };
+}
+
+function determineMatchProvenance() {
+  if (!currentMedia || !currentMedia.mediaInfo) return {code:"unknown",label:"Unidentified"};
+  var info=currentMedia.mediaInfo;
+  var source=String(currentMedia.parsed && currentMedia.parsed.parserSource || "");
+  if (info.unresolvedShow) return {code:"needs-manual",label:"Needs Manual Match"};
+  if (source==="mediafusion-confirmed-pack") return {code:"confirmed-pack",label:"Confirmed Pack Cache"};
+  if (currentMedia.manuallyCorrected) return {code:"manual",label:"Manual Confirmed"};
+  if (/^tt\d{6,10}$/i.test(String(info.imdb||""))) return {code:"imdb",label:"Direct IMDb ID"};
+  if (confirmedPlayback.key===monitor.mediaKey(info)) return {code:"trakt-confirmed",label:"Trakt Verified"};
+  if (/^(?:mpv-|filename|stream-)/i.test(source)) return {code:"filename",label:"Filename / Metadata (unverified)"};
+  return {code:"unverified",label:"Unverified Metadata"};
+}
+function trustedReplayProof(info) {
+  if (!info || info.unresolvedShow) return null;
+  var id=Number(info.manualTraktId||0);
+  if (Number.isInteger(id)&&id>0) return {kind:"manual",traktId:id};
+  if (/^tt\d{6,10}$/i.test(String(info.imdb||""))) return {kind:"imdb",imdb:info.imdb};
+  if (confirmedPlayback.key===monitor.mediaKey(info)&&confirmedPlayback.proof)
+    return confirmedPlayback.proof;
+  return null;
+}
+
+function isSyncReplayPlaybackActive() {
+  return !!(currentMedia && playbackState.prevSnapshot &&
+    playbackState.prevSnapshot.state !== monitor.State.Stopped);
+}
+
+// Sidebar gets only bounded metadata from the final-stop journal.
+function buildSyncQueueStatus() {
+  var api = trakt.getApiStatus ? trakt.getApiStatus() : {mode:"online"};
+  var isActive = isSyncReplayPlaybackActive();
+  var pending = stopJournal.pending().map(function(entry) {
+    return {
+      id: entry.id,
+      label: mediaLabel(entry.mediaInfo),
+      progress: Number(entry.progress || 0),
+      queuedAt: new Date(entry.createdAt).toISOString(),
+      syncing: entry.id === activeStopSyncId
+    };
+  });
+  var needsReview=stopJournal.review().map(function(entry) {
+    return {id:entry.id,label:mediaLabel(entry.mediaInfo),progress:entry.progress,
+      queuedAt:new Date(entry.createdAt).toISOString(),
+      reason:entry.reviewReason || (entry.mediaInfo && (entry.mediaInfo.unresolvedShow ||
+        /^unknown series$/i.test(String(entry.mediaInfo.showTitle||"")))
+        ? "Missing verified series" : "Legacy checkpoint: match unverified")};
+  });
+  return {
+    pending: pending,
+    needsReview: needsReview,
+    recentlySynced: syncHistory.recent(),
+    flushing: !!stopReplayActive,
+    activeSyncId: activeStopSyncId,
+    notice: syncQueueNotice,
+    canRetry: !!pending.length && api.mode === "online" &&
+      !stopReplayActive && !activeStopSyncId && !isActive &&
+      isScrobblingEnabled() && trakt.getAuthStatus().connected,
+    blockedReason: isActive ? "Pause/stop the current playback first."
+      : api.mode !== "online" ? "Respecting Trakt cooldown."
+      : stopReplayActive || activeStopSyncId ? "Another sync is running."
+      : !isScrobblingEnabled() ? "Enable scrobbling first."
+      : !trakt.getAuthStatus().connected ? "Sign in to Trakt first." : ""
   };
 }
 
@@ -458,6 +535,7 @@ async function buildSidebarPayload(forceProfileRefresh) {
     network: Object.assign({}, (trakt.getApiStatus ? trakt.getApiStatus() : {mode:"online"}), {
       pendingFinalizations: stopJournal.pending().length
     }),
+    syncQueue: buildSyncQueueStatus(),
     generatedAt: new Date().toISOString()
   };
 }
@@ -536,6 +614,88 @@ function bindSidebarMessaging() {
     queueSidebarRefresh(true);
   });
 
+  sidebar.onMessage("copy_playback_diagnostics", function() {
+    (async function() {
+      try {
+        var text = JSON.stringify(JSON.parse(playbackDiagnostics.build(
+          getCurrentSource(),
+          currentMedia && currentMedia.parsed,
+          currentMedia && currentMedia.traktTargetLabel,
+          PLUGIN_VERSION
+        )));
+        // AppleScript clipboard helper, same IINA-sanctioned interface used by auth.
+        var escaped = text.replace(/\\/g, "\\\\").replace(/"/g, '\\"')
+          .replace(/\r/g, " ").replace(/\n/g, "\\n");
+        var result = await utils.exec("/usr/bin/osascript", [
+          "-e", 'set the clipboard to "' + escaped + '"'
+        ]);
+        var ok = result && result.status === 0;
+        sidebar.postMessage("diagnostics_copy_status", {
+          ok: !!ok,
+          message: ok ? "Safe diagnostics copied. Paste them into ChatGPT." :
+            "Copy failed. Try again."
+        });
+      } catch (error) {
+        log("Safe diagnostics clipboard unavailable: " + errStr(error));
+        sidebar.postMessage("diagnostics_copy_status", {ok:false, message:"Clipboard unavailable."});
+      }
+    })();
+  });
+
+  sidebar.onMessage("discard_unverified_stop", function(payload) {
+    var id=payload && typeof payload.id==="string" ? payload.id : "";
+    var response={ok:false,id:id,message:"Checkpoint was preserved."};
+    try {
+      // Only local unverified records are eligible. Never mutate Trakt history
+      // or allow this handler to remove a proof-backed pending stop.
+      if (!id) {
+        response.message="Missing checkpoint identifier.";
+      } else if (!stopJournal.review().some(function(x){return x.id===id;})) {
+        response.message="Item no longer needs review, or was already removed.";
+      } else if (stopJournal.discardReview(id)) {
+        response.ok=true;
+        response.message="Unverified LOCAL checkpoint removed.";
+        syncQueueNotice=response.message;
+        log("Removed one unverified stop by confirmed user action");
+      } else {
+        response.message="Failed to save local queue; checkpoint is unchanged.";
+      }
+    } catch (error) {
+      response.message="Removal failed; checkpoint was preserved.";
+      log("Local checkpoint removal failed: "+errStr(error));
+    }
+    try { sidebar.postMessage("discard_unverified_result",response); }
+    catch (error) { log("Unable to notify sidebar about removal: "+errStr(error)); }
+    queueSidebarRefresh(false);
+  });
+
+  sidebar.onMessage("retry_pending_stops", function() {
+    // Manual retry does not bypass server cooldown or interrupt playback.
+    var q = buildSyncQueueStatus();
+    if (!q.canRetry) {
+      syncQueueNotice = q.blockedReason || (q.pending.length ? "Retry is not available." : "Queue is already clear.");
+      queueSidebarRefresh(false);
+      return;
+    }
+    syncQueueNotice = "Retry requested. Sending saved stops in order.";
+    queueSidebarRefresh(false);
+    Promise.resolve().then(async function() {
+      await replaySavedFinalizations();
+      var remaining = stopJournal.pending().length;
+      var api = trakt.getApiStatus ? trakt.getApiStatus() : {mode:"online"};
+      syncQueueNotice = remaining
+        ? (api.mode === "online"
+          ? remaining + " stop update(s) still pending; automatic recovery remains enabled."
+          : "Trakt unavailable; retry will resume after cooldown.")
+        : "All pending final stops confirmed.";
+      queueSidebarRefresh(false);
+    }).catch(function(error) {
+      syncQueueNotice = "Retry failed; saved stops remain queued.";
+      log("Manual retry failed: " + errStr(error));
+      queueSidebarRefresh(false);
+    });
+  });
+
   sidebar.onMessage("copy_auth_code", function() {
     Promise.resolve().then(async function() {
       var result = { ok: false, message: "No active code." };
@@ -569,6 +729,26 @@ function bindSidebarMessaging() {
         error: errStr(error)
       });
       queueSidebarRefresh(false);
+    });
+  });
+
+  sidebar.onMessage("change_correction_kind", function(payload) {
+    var kind = payload && payload.kind === "episode" ? "episode" : "movie";
+    authActionChain = authActionChain.then(function() {
+      if (!currentMedia || !currentMedia.mediaInfo || !correctionState.active) return;
+      var hint = currentMedia.episodeRoute || mediaFusion.fromSource(currentMedia.source);
+      var pos = correctionMedia.episodePosition(currentMedia.mediaInfo, hint);
+      correctionState = Object.assign(cloneCorrectionState(correctionState), {
+        kind: kind,
+        busy: false,
+        results: [],
+        error: "",
+        season: kind === "episode" ? pos.season : "",
+        episode: kind === "episode" ? pos.episode : ""
+      });
+      queueSidebarRefresh(false);
+    }).catch(function(error) {
+      log("Manual media kind change failed: " + errStr(error));
     });
   });
 
@@ -721,6 +901,9 @@ async function openCorrectionFlow(query) {
     return;
   }
 
+  var episodeRoute = currentMedia.episodeRoute || mediaFusion.fromSource(currentMedia.source);
+  var initialKind = correctionMedia.preferredKind(currentMedia.mediaInfo, episodeRoute);
+  var position = correctionMedia.episodePosition(currentMedia.mediaInfo, episodeRoute);
   var resolvedQuery = String(query || defaultCorrectionQuery(currentMedia.mediaInfo)).trim();
   correctionState = {
     active: true,
@@ -730,8 +913,9 @@ async function openCorrectionFlow(query) {
     error: "",
     mediaLabel: correctionMediaLabel(),
     mediaKey: currentMediaKey(),
-    season: currentMedia.mediaInfo.type === "episode" ? String(currentMedia.mediaInfo.season) : "",
-    episode: currentMedia.mediaInfo.type === "episode" ? String(currentMedia.mediaInfo.episode) : "",
+    kind: initialKind,
+    season: initialKind === "episode" ? position.season : "",
+    episode: initialKind === "episode" ? position.episode : "",
     results: []
   };
   queueSidebarRefresh(false);
@@ -773,7 +957,9 @@ async function searchCorrectionFlow(query) {
   queueSidebarRefresh(false);
 
   try {
-    var results = await trakt.searchCorrectionCandidates(currentMedia.mediaInfo, resolvedQuery, 8);
+    var mediaForSearch = correctionMedia.searchMedia(currentMedia.mediaInfo,
+      correctionState.kind, currentMedia.episodeRoute);
+    var results = await trakt.searchCorrectionCandidates(mediaForSearch, resolvedQuery, 8);
     if (mediaKey !== currentMediaKey()) {
       return;
     }
@@ -841,7 +1027,9 @@ async function lookupCorrectionReference(reference) {
   queueSidebarRefresh(false);
 
   try {
-    var result = await trakt.lookupCorrectionReference(currentMedia.mediaInfo, resolvedReference);
+    var mediaForLookup = correctionMedia.searchMedia(currentMedia.mediaInfo,
+      correctionState.kind, currentMedia.episodeRoute);
+    var result = await trakt.lookupCorrectionReference(mediaForLookup, resolvedReference);
     if (mediaKey !== currentMediaKey()) {
       return;
     }
@@ -888,23 +1076,7 @@ async function applyCorrectionChoice(traktId, season, episode) {
     return;
   }
 
-  var mediaInfo = cloneMediaInfo(currentMedia.mediaInfo);
-  if (mediaInfo.type === "episode") {
-    var chosenSeason = Number(season);
-    var chosenEpisode = Number(episode);
-    if (season === "" || episode === "" || !Number.isInteger(chosenSeason) ||
-        !Number.isInteger(chosenEpisode) || chosenSeason < 0 || chosenSeason > 100 ||
-        chosenEpisode < 1 || chosenEpisode > 9999) {
-      correctionState = Object.assign(cloneCorrectionState(correctionState), {
-        active: true, busy: false, error: "Enter a valid Season (0–100) and Episode (1–9999)."
-      });
-      queueSidebarRefresh(false);
-      return;
-    }
-    mediaInfo.season = chosenSeason;
-    mediaInfo.episode = chosenEpisode;
-    mediaInfo.episodeTitle = "";
-  }
+  var originalMediaInfo = cloneMediaInfo(currentMedia.mediaInfo);
   var mediaKey = currentMediaKey();
   var chosenId = Number(traktId || 0);
   if (!chosenId) {
@@ -922,11 +1094,10 @@ async function applyCorrectionChoice(traktId, season, episode) {
     var chosenResult = (correctionState.results || []).find(function(result) {
       return Number(result.trakt || 0) === chosenId;
     }) || null;
-    // Cache and playback use the same canonical title after manual selection.
-    if (chosenResult && chosenResult.title) {
-      mediaInfo.title = chosenResult.title;
-      if (mediaInfo.type === "episode") mediaInfo.showTitle = chosenResult.title;
-    }
+    // Manual mode is authoritative even if the parser mistakenly guessed Movie.
+    // Require the selected candidate's kind to agree with the current search mode.
+    var mediaInfo = correctionMedia.selectMedia(originalMediaInfo,
+      correctionState.kind, chosenResult, season, episode);
     await trakt.applyMatchOverride(mediaInfo, chosenId);
     if (mediaKey !== currentMediaKey()) {
       return;
@@ -934,7 +1105,15 @@ async function applyCorrectionChoice(traktId, season, episode) {
 
     if (currentMedia) {
       currentMedia.mediaInfo = mediaInfo;
+      currentMedia.manuallyCorrected = true;
       currentMedia.traktTargetLabel = correctionResultLabel(chosenResult, mediaInfo);
+      // An explicit show selection can safely apply to the same torrent/season
+      // but never to a different torrent or season without new verification.
+      if (currentMedia.episodeRoute && mediaInfo.type === "episode" &&
+          chosenResult && chosenResult.title &&
+          mediaInfo.season === currentMedia.episodeRoute.season) {
+        mediaFusionShowCache.remember(currentMedia.episodeRoute, chosenId, chosenResult.title);
+      }
     }
     log("Applied manual Trakt match " + chosenId + " for " + mediaLabel(mediaInfo));
     resetCorrectionState();
@@ -1038,7 +1217,9 @@ function mediaInfoFromParsed(parsed) {
       year: parsed.year || null,
       season: parsed.season,
       episode: parsed.episode,
-      episodeTitle: parsed.episodeTitle || ""
+      episodeTitle: parsed.episodeTitle || "",
+      unresolvedShow: !!parsed.unresolvedShow,
+      manualTraktId: Number(parsed.manualTraktId || 0)
     };
   }
 
@@ -1107,6 +1288,8 @@ function cloneMediaInfo(mediaInfo) {
     season: mediaInfo.season,
     episode: mediaInfo.episode,
     episodeTitle: mediaInfo.episodeTitle,
+    unresolvedShow: !!mediaInfo.unresolvedShow,
+    manualTraktId: Number(mediaInfo.manualTraktId || 0),
     imdb: mediaInfo.imdb || ""
   };
 }
@@ -1120,7 +1303,8 @@ function currentMediaKey() {
 function defaultCorrectionQuery(mediaInfo) {
   if (!mediaInfo) return "";
   if (mediaInfo.type === "episode") {
-    return String(mediaInfo.showTitle || mediaInfo.title || "").trim();
+    return mediaInfo.unresolvedShow ? "" :
+      String(mediaInfo.showTitle || mediaInfo.title || "").trim();
   }
   return String(mediaInfo.title || "").trim();
 }
@@ -1197,6 +1381,16 @@ function identifyCurrentMedia() {
   var source = getCurrentSource();
   var picked = playbackIdentity.identify(source, parser, streamSource);
   var parsed = picked.parsed;
+  var episodeRoute = picked.episodeRoute || null;
+  if (parsed && parsed.unresolvedShow && episodeRoute) {
+    var packMatch = mediaFusionShowCache.find(episodeRoute);
+    if (packMatch) {
+      parsed.showTitle = packMatch.title;
+      parsed.unresolvedShow = false;
+      parsed.manualTraktId = packMatch.trakt;
+      parsed.parserSource = "mediafusion-confirmed-pack";
+    }
+  }
   logGuessitFailureOnce();
   var mediaInfo = mediaInfoFromParsed(parsed);
   if (mediaInfo && picked.imdb) {
@@ -1207,7 +1401,9 @@ function identifyCurrentMedia() {
   currentMedia = parsed ? {
     source: source,
     parsed: parsed,
+    episodeRoute: episodeRoute,
     mediaInfo: mediaInfo,
+    manuallyCorrected: false,
     traktTargetLabel: "",
     identifiedAt: new Date().toISOString()
   } : null;
@@ -1229,8 +1425,11 @@ function identifyCurrentMedia() {
     status: isScrobblingEnabled() ? "ready" : "disabled",
     verb: "",
     mediaLabel: currentMedia && currentMedia.mediaInfo ? mediaLabel(currentMedia.mediaInfo) : parsedLabel(parsed),
-    detail: isScrobblingEnabled() ? "Watching for playback changes." : "Scrobbling is turned off.",
-    reason: isScrobblingEnabled() ? "" : "disabled"
+    detail: mediaInfo && mediaInfo.unresolvedShow
+      ? "MediaFusion S/E verified; select the show using Correct Match."
+      : isScrobblingEnabled() ? "Watching for playback changes." : "Scrobbling is turned off.",
+    reason: mediaInfo && mediaInfo.unresolvedShow ? "missing-trakt-match" :
+      isScrobblingEnabled() ? "" : "disabled"
   });
   log("Parsed " + parsedLabel(parsed) + " via " + (parsed.parserSource || "unknown"));
   debugOsd("Parsed " + parsedLabel(parsed));
@@ -1389,10 +1588,15 @@ function queueScrobble(verb, snapshot, options) {
   }
 
   var payload = cloneSnapshot(snapshot);
-  if (!payload || !payload.mediaInfo) {
+  if (!payload || !payload.mediaInfo) return;
+  if (payload.mediaInfo.unresolvedShow ||
+      (payload.mediaInfo.type==="episode" &&
+       /^unknown series$/i.test(String(payload.mediaInfo.showTitle||"")))) {
+    setScrobbleStatus({status:"unmatched",verb:verb,mediaLabel:scrobbleTargetLabel(payload),
+      detail:"Select and verify the series using Correct Match before scrobbling.",
+      reason:"missing-trakt-match",progress:payload.progress});
     return;
   }
-
   var effectiveVerb = (trakt && typeof trakt.normalizeScrobbleVerb === "function")
     ? trakt.normalizeScrobbleVerb(verb, payload.progress)
     : verb;
@@ -1412,10 +1616,10 @@ function queueScrobble(verb, snapshot, options) {
   // An acknowledged Trakt stop removes it. Do not include stream URLs or OAuth data.
   var journalId = options && options.journalId ? String(options.journalId) : "";
   if (effectiveVerb === "stop" && !journalId) {
-    var savedFinalization = stopJournal.record(payload);
+    var savedFinalization = stopJournal.record(payload, trustedReplayProof(payload.mediaInfo));
     journalId = savedFinalization ? savedFinalization.id : "";
     if (savedFinalization) log("Saved Trakt stop checkpoint (progress=" + payload.progress.toFixed(2) + "%)");
-    else log("Unable to persist Trakt stop checkpoint; attempting direct send");
+    else log("No verified identity for durable stop; attempting direct Trakt validation without unsafe retry");
   }
   setScrobbleStatus({
     status: "queued",
@@ -1435,6 +1639,7 @@ function queueScrobble(verb, snapshot, options) {
   }
   log("Scrobble " + effectiveVerb + " queued for " + scrobbleTargetLabel(payload) + " at " + payload.progress.toFixed(2) + "%");
   playbackState.scrobbleChain = playbackState.scrobbleChain.then(async function() {
+    if (journalId) activeStopSyncId = journalId;
     setScrobbleStatus({
       status: "sending",
       verb: effectiveVerb,
@@ -1448,7 +1653,14 @@ function queueScrobble(verb, snapshot, options) {
       var result = await trakt.scrobble(effectiveVerb, payload.mediaInfo, payload.progress);
       if (result && result.ok) {
         if (journalId) {
+          var completed = stopJournal.find(journalId);
           stopJournal.acknowledge(journalId);
+          if (completed) syncHistory.record(completed, "ok");
+        }
+        var confirmedId=Number(result.resolvedTraktId||0);
+        if (Number.isInteger(confirmedId)&&confirmedId>0) {
+          confirmedPlayback={key:monitor.mediaKey(payload.mediaInfo),
+            proof:{kind:"trakt-confirmed",traktId:confirmedId}};
         }
         var traktAction = successfulScrobbleAction(effectiveVerb, result);
         var traktProgress = successfulScrobbleProgress(payload.progress, result);
@@ -1486,6 +1698,9 @@ function queueScrobble(verb, snapshot, options) {
       }
 
       if (result && result.skip) {
+        if (journalId && result.reason === "missing-trakt-match") {
+          stopJournal.markReview(journalId, "Trakt match could not be verified");
+        }
         if (result.reason === "missing-client-credentials" && !missingCredentialsNoticeShown) {
           importantOsd("Configure Trakt app credentials for this build");
           missingCredentialsNoticeShown = true;
@@ -1510,7 +1725,11 @@ function queueScrobble(verb, snapshot, options) {
 
       if (result && result.duplicate) {
         // Trakt 409 already recorded an identical scrobble; do not replay it.
-        if (journalId) stopJournal.acknowledge(journalId);
+        if (journalId) {
+          var duplicate = stopJournal.find(journalId);
+          stopJournal.acknowledge(journalId);
+          if (duplicate) syncHistory.record(duplicate, "duplicate");
+        }
         setScrobbleStatus({
           status: "duplicate",
           verb: effectiveVerb,
@@ -1524,6 +1743,7 @@ function queueScrobble(verb, snapshot, options) {
       }
 
       if (result && result.notFound) {
+        if (journalId) stopJournal.markReview(journalId, "Trakt rejected the resolved media ID");
         setScrobbleStatus({
           status: "unmatched",
           verb: effectiveVerb,
@@ -1563,6 +1783,7 @@ function queueScrobble(verb, snapshot, options) {
         missingCredentialsNoticeShown = true;
       }
     } finally {
+      if (journalId && activeStopSyncId === journalId) activeStopSyncId = "";
       persistAuthStatus();
       queueSidebarRefresh(false);
     }
@@ -1596,13 +1817,17 @@ async function replaySavedFinalizations() {
       if (currentMedia && playbackState.prevSnapshot &&
           playbackState.prevSnapshot.state !== monitor.State.Stopped) break;
       var entry = pending[i];
+      var replayInfo=cloneMediaInfo(entry.mediaInfo);
+      if (entry.replayProof && (entry.replayProof.kind==="manual" ||
+          entry.replayProof.kind==="trakt-confirmed"))
+        replayInfo.manualTraktId=Number(entry.replayProof.traktId||0);
       queueScrobble("stop", {
         state: monitor.State.Stopped,
         progress: entry.progress,
         duration: 0,
         position: 0,
         updatedAt: entry.createdAt / 1000,
-        mediaInfo: entry.mediaInfo,
+        mediaInfo: replayInfo,
         traktTargetLabel: ""
       }, { journalId: entry.id });
       await playbackState.scrobbleChain;

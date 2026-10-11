@@ -763,7 +763,7 @@ async function run() {
     const logs = [];
     store[CACHE_PATH] = JSON.stringify({
       movie: {
-        "big fat liar|2002": 123
+        "big fat liar|2002": { trakt: 123, titleVerified: true }
       },
       show: {}
     });
@@ -795,7 +795,7 @@ async function run() {
     const logs = [];
     store[CACHE_PATH] = JSON.stringify({
       movie: {
-        "big fat liar|2002": 123
+        "big fat liar|2002": { trakt: 123, titleVerified: true }
       },
       show: {}
     });
@@ -845,7 +845,7 @@ async function run() {
     const logs = [];
     store[CACHE_PATH] = JSON.stringify({
       movie: {
-        "big fat liar|2002": 123
+        "big fat liar|2002": { trakt: 123, titleVerified: true }
       },
       show: {}
     });

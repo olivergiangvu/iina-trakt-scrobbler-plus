@@ -38,27 +38,23 @@ jobs:
           NODE
 
       - name: Syntax validation
+        shell: bash
         run: |
-          node --check main.js
-          node --check trakt.js
-          node --check stream-source.js
-          node --check playback-identity.js
-          node --check stop-journal.js
-          node --check trakt-api-gate.js
-          node --check monitor.js
-          node --check tests/stream-source.js
+          set -euo pipefail
+          for module in main.js trakt.js stream-source.js playback-identity.js \
+              mediafusion-identity.js correction-media.js playback-diagnostics.js \
+              stop-journal.js sync-history.js trakt-api-gate.js monitor.js; do
+            node --check "$module"
+          done
 
-      - name: Test URL/stream metadata, parser, and Trakt resolution
+      - name: Full regression suite
+        shell: bash
         run: |
-          node tests/stream-source.js
-          node tests/playback-identity.js
-          node tests/stop-journal.js
-          node tests/trakt-api-gate.js
-          node tests/trakt-network-integration.js
-          node tests/trakt-oauth-singleflight.js
-          node tests/parser-smoke.js
-          node tests/trakt-resolution.js
-          node tests/monitor-state.js
+          set -euo pipefail
+          for t in tests/*.js; do
+            echo "RUN $t"
+            node "$t"
+          done
 
       - name: Stage and pack IINA plugin
         id: package
@@ -77,6 +73,11 @@ jobs:
           unzip -Z1 "$OUTPUT" | grep -qx 'playback-identity.js'
           unzip -Z1 "$OUTPUT" | grep -qx 'stop-journal.js'
           unzip -Z1 "$OUTPUT" | grep -qx 'trakt-api-gate.js'
+          unzip -Z1 "$OUTPUT" | grep -qx 'mediafusion-identity.js'
+          unzip -Z1 "$OUTPUT" | grep -qx 'correction-media.js'
+          unzip -Z1 "$OUTPUT" | grep -qx 'playback-diagnostics.js'
+          unzip -Z1 "$OUTPUT" | grep -qx 'sync-history.js'
+          unzip -Z1 "$OUTPUT" | grep -qx 'sidebar.html'
           unzip -Z1 "$OUTPUT" | grep -qx 'parser.iina.js'
           echo "path=$OUTPUT" >> "$GITHUB_OUTPUT"
 
@@ -100,7 +101,14 @@ jobs:
             RELEASE_ARGS=(--latest)
           fi
           cat > release-notes.md <<'NOTES'
-          ## Trakt Scrobbler Plus — API resilience and sync status
+          ## Trakt Scrobbler Plus v0.2.4 — Stable
+          - Validated on IINA/macOS: direct and cached MediaFusion matching, TV manual correction,
+            S/E validation, Trakt scrobble, ⌘Q stop and resume through the existing bridge.
+          - Match Provenance and Copy Diagnostics without leaking stream URLs or auth secrets.
+          - Sync Queue shows verified Pending/Syncing, Recently Synced and Needs Review
+            for legacy unverified checkpoints. Explicit two-step local Remove confirmation.
+          - Trakt API request pacing, backoff and offline recovery preserved from v0.2.3.
+          - All source tests and archive package contents validated by CI.
           - Pace and serialize Trakt write requests; recognize HTTP 429 and Cloudflare 1015 with persisted bounded cooldown.
           - Collapse sidebar refresh requests, preserve cached history/profile when offline and recover saved stop checkpoints without reboot.
           - Retry interrupted Trakt stop updates after the next IINA launch, retaining resume progress or watched status.
@@ -111,9 +119,9 @@ jobs:
           - Source and code credits: i3p9/iina-trakt-scrobbler (GPL-3.0), inspired by Zain-Imam/iina-episode-info (MIT).
 
           **Install/update on Mac:** IINA → Settings → Plugins → Install from GitHub → `olivergiangvu/iina-trakt-scrobbler-plus`.
-          The v0.2.3 stable line was promoted from v0.2.3-beta.1 after field verification of resume, IINA ⌘Q stop, and network recovery. Playback and Trakt API code is unchanged aside from the displayed version.
+          v0.2.4 is promoted from user-tested v0.2.4-beta.6. Playback and Trakt API logic remain unchanged from beta.6. HomeDocker Trakt Bridge is not modified.
           Keep the original Trakt plugin's scrobbling disabled to prevent duplicate playback events.
-          TMDB API-based lookup and persistent per-URL override storage are planned separately.
+          Fresh TMDB/IMDb-first series recognition without prior IDs remains a future development.
           NOTES
           # Keep pre-releases visible as canaries without silently replacing
           # the latest stable distribution used by IINA.

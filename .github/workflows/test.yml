@@ -28,6 +28,24 @@ jobs:
         run: node tests/trakt-network-integration.js
       - name: OAuth single-flight refresh tests
         run: node tests/trakt-oauth-singleflight.js
+      - name: Sync history journal tests
+        run: node tests/sync-history.js
+      - name: Sidebar Sync Queue UI contract
+        run: node tests/sidebar-sync-queue.js
+      - name: Manual cross-type correction model
+        run: node tests/correction-media.js
+      - name: Manual type switch sidebar contract
+        run: node tests/manual-correction-ui.js
+      - name: MediaFusion episode route and manual pack cache regression
+        run: node tests/mediafusion-identity.js
+      - name: Playback identity diagnostic redaction tests
+        run: node tests/playback-diagnostics.js
+      - name: False-positive title resolution regression tests
+        run: node tests/false-positive-matching.js
+      - name: Verified replay and Needs Review UI contracts
+        run: node tests/replay-integrity-ui.js
+      - name: IINA Remove interaction and acknowledgment regression
+        run: node tests/review-remove-interaction.js
       - name: Parser smoke tests
         run: node tests/parser-smoke.js
       - name: Trakt resolution tests

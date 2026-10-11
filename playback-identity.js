@@ -1,5 +1,7 @@
 // Playback identity selection for IINA + mpv streams.
 // Prefer readable player metadata over opaque stream URL path tokens.
+var mediaFusion = require("./mediafusion-identity.js");
+
 function isOpaque(value) {
   var text = String(value || "").trim();
   if (!text) return true;
@@ -15,6 +17,7 @@ function identify(source, parser, streamSource) {
   var hints = source || {};
   var urls = [hints.path, hints.url, hints.title, hints.mediaTitle].filter(Boolean);
   var stream = { name: "", imdb: "", nameSource: "" };
+  var episodeRoute = mediaFusion.fromSource(hints);
 
   urls.forEach(function(value) {
     var entry = streamSource.extract(value, "");
@@ -46,8 +49,11 @@ function identify(source, parser, streamSource) {
     if (!parsed) continue;
     if (parsed.kind === "episode" && parsed.season >= 0 && parsed.episode > 0 &&
         !isOpaque(parsed.showTitle)) {
+      // A disagreeing filename and provider route must not be silently scrobbled.
+      if (episodeRoute && (parsed.season !== episodeRoute.season ||
+          parsed.episode !== episodeRoute.episode)) continue;
       parsed.parserSource = label;
-      return { parsed: parsed, imdb: stream.imdb, source: label };
+      return { parsed: parsed, imdb: stream.imdb, source: label, episodeRoute: episodeRoute };
     }
     if (!movie && parsed.kind === "movie" && !isOpaque(parsed.title) &&
         // Avoid treating generic one-word playback labels as movie IDs.
@@ -55,6 +61,22 @@ function identify(source, parser, streamSource) {
       parsed.parserSource = label;
       movie = { parsed: parsed, imdb: stream.imdb, source: label };
     }
+  }
+  if (episodeRoute) {
+    // An isolated localized title, e.g. "Strom ozvěny", is the *episode title*
+    // for S02E08 and never reliable evidence of the show name.
+    var rawEpisodeTitle = String(hints.metadataTitle || hints.mediaTitle || hints.title || "").trim();
+    if (isOpaque(rawEpisodeTitle) || /\bS\d{1,3}E\d{1,4}\b/i.test(rawEpisodeTitle)) rawEpisodeTitle = "";
+    var episodeTitle = rawEpisodeTitle || (movie && movie.parsed && movie.parsed.title
+      ? movie.parsed.title : "");
+    var parsedEpisode = {
+      kind: "episode", showTitle: "Unknown Series",
+      season: episodeRoute.season, episode: episodeRoute.episode,
+      episodeTitle: episodeTitle, unresolvedShow: !stream.imdb,
+      parserSource: "mediafusion-episode-route"
+    };
+    return {parsed:parsedEpisode, imdb:stream.imdb, source:"mediafusion-episode-route",
+      episodeRoute:episodeRoute};
   }
   return movie || { parsed: null, imdb: stream.imdb, source: "unidentified" };
 }

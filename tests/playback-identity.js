@@ -34,4 +34,33 @@ assert.equal(fallback.source, "stream-torrent_name");
 
 const invalid = plugin.identify({url: "https://stream.example/" + bad,title:bad}, parser, stream);
 assert.equal(invalid.parsed, null, "opaque path must not be auto-scrobbled");
+const packHash="f6738693f7d3d0aed66035633895c6a10751e867";
+const packUrl="https://mediafusion.elfhosted.com/streaming_provider/D-private/playback/torbox/"+packHash+"/2/8";
+const episodeOnly=plugin.identify({
+  url:packUrl,path:packUrl,title:"Strom ozvěny",filename:"8",
+  metadataTitle:"Strom ozvěny",mediaTitle:"Strom ozvěny"
+},parser,stream);
+assert.equal(episodeOnly.parsed.kind,"episode");
+assert.equal(episodeOnly.parsed.season,2);
+assert.equal(episodeOnly.parsed.episode,8);
+assert.equal(episodeOnly.parsed.episodeTitle,"Strom ozvěny");
+assert.equal(episodeOnly.parsed.unresolvedShow,true);
+assert.equal(episodeOnly.source,"mediafusion-episode-route");
+assert.ok(episodeOnly.episodeRoute.fingerprint);
+assert.equal(episodeOnly.imdb,"");
+const proper=plugin.identify({
+  url:packUrl,path:packUrl,title:"The Legend of Vox Machina S02E08",
+  filename:"The.Legend.of.Vox.Machina.S02E08.mkv"
+},parser,stream);
+assert.equal(proper.parsed.kind,"episode");
+assert.equal(proper.parsed.unresolvedShow,undefined);
+const conflicted=plugin.identify({
+  url:packUrl,path:packUrl,title:"Fake.Show.S03E01",
+  filename:"Fake.Show.S03E01.mkv"
+},parser,stream);
+assert.equal(conflicted.parsed.kind,"episode");
+assert.equal(conflicted.parsed.unresolvedShow,true);
+assert.equal(conflicted.parsed.season,2);
+assert.equal(conflicted.parsed.episode,8);
+
 console.log("playback identity tests passed");
