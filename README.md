@@ -176,3 +176,22 @@ before sending progress. Invalid proofs move to Needs Review.
 open with IINA on Mac, restart. The latest stable v0.2.3 and the independent
 HomeDocker Trakt Bridge are not changed. Test normal pause/stop, quit/resume,
 confirmed-pack source label and Needs Review. Do not promote until user confirms.
+
+### v0.2.4-beta.6 — IINA sidebar Review Remove interaction fix
+
+A macOS field test confirmed Match source, 0 pending / 2 Needs Review,
+Recently Synced and correct The Legend of Vox Machina S02E08.
+But the two dynamically-rendered Remove buttons appeared inert in IINA.
+Unlike static sidebar buttons they listened only to `click`, which IINA's
+sidebar WKWebView does not reliably deliver after a pointer interaction.
+
+The review buttons now handle `pointerdown`, `click` fallback and keyboard
+activation, with same-gesture de-duplication. First press reveals a clear
+confirmation and Cancel option; second press removes only that local legacy
+unverified checkpoint. The backend always acknowledges success or failure
+and refreshes the sidebar; removal is permitted while video is playing and
+cannot delete a verified stop. Item titles/reasons wrap to remain readable.
+
+Validated by new interaction regression test and the full CI suite.
+Release is a manual-install **prerelease**; v0.2.3 remains latest stable.
+No HomeDocker or Trakt Bridge changes are required.
