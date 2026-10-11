@@ -9,6 +9,7 @@ mkdir -p "$BUILD_DIR"
 
 cp "$ROOT_DIR/Info.json" "$BUILD_DIR/Info.json"
 cp "$ROOT_DIR/main.js" "$BUILD_DIR/main.js"
+cp "$ROOT_DIR/debug-log-buffer.js" "$BUILD_DIR/debug-log-buffer.js"
 cp "$ROOT_DIR/stream-source.js" "$BUILD_DIR/stream-source.js"
 cp "$ROOT_DIR/playback-identity.js" "$BUILD_DIR/playback-identity.js"
 cp "$ROOT_DIR/fresh-identity.js" "$BUILD_DIR/fresh-identity.js"
