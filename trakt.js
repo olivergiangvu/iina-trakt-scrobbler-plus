@@ -1874,6 +1874,19 @@ async function getTraktIds(mediaInfo) {
 	if (type === "episode") {
 		return resolveEpisodeIds(mediaInfo, bucket, key);
 	}
+	// A previously confirmed stop carries its verified Trakt ID even when
+	// local search caches were reset. Re-check it before POST, never blind-send.
+	var replayId=Number(mediaInfo.manualTraktId||0);
+	if (Number.isInteger(replayId) && replayId>0) {
+		if (cachedId===replayId && cached && typeof cached==="object" &&
+			(cached.manual || cached.titleVerified || cached.imdbVerified))
+			return {trakt:replayId};
+		var replayMovie=await fetchMovieByReference(replayId);
+		if (!replayMovie || !titleIdentityMatches(title,replayMovie.title)) return null;
+		bucket[key]={trakt:replayId,titleVerified:true};
+		saveSearchCache();
+		return {trakt:replayId};
+	}
 	if (cachedId > 0) {
 		if (cached && typeof cached === "object" &&
 			(cached.manual === true || cached.titleVerified === true || cached.imdbVerified === true)) {
