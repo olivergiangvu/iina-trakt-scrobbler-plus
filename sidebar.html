@@ -1188,7 +1188,7 @@
           return "Synced to Trakt";
         }
         if (scrobble.status === "duplicate") return "Already up to date";
-        if (scrobble.status === "unmatched") return "Title not matched";
+        if (scrobble.status === "unmatched") return scrobble.reason === "missing-trakt-match" ? "Manual Match Required" : "Title not matched";
         if (scrobble.status === "skipped") {
           if (scrobble.reason === "auth-required") return "Connect Trakt";
           if (scrobble.reason === "missing-client-credentials") return "Missing credentials";
@@ -1207,7 +1207,7 @@
         if (scrobble.status === "queued" || scrobble.status === "sending") return "";
         if (scrobble.status === "succeeded") return "";
         if (scrobble.status === "duplicate") return "";
-        if (scrobble.status === "unmatched") return "Try a cleaner file name.";
+        if (scrobble.status === "unmatched") return scrobble.detail || "Use Correct Match to verify the Trakt identity.";
         if (scrobble.status === "skipped") {
           if (scrobble.reason === "auth-required") return "Connect from the top.";
           if (scrobble.reason === "missing-client-credentials") return "This build needs Trakt app credentials.";
