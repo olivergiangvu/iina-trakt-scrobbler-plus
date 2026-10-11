@@ -26,8 +26,8 @@ jobs:
           const info = require('./Info.json');
           assert.equal(info.identifier, 'io.github.olivergiangvu.iinatraktscrobblerplus');
           assert.equal(info.ghRepo, 'olivergiangvu/iina-trakt-scrobbler-plus');
-          assert.equal(info.version, '0.2.4-beta.1');
-          assert.equal(info.ghVersion, 6);
+          assert.equal(info.version, '0.2.4-beta.2');
+          assert.equal(info.ghVersion, 7);
           NODE
 
       - name: Syntax and complete test suite
@@ -49,14 +49,14 @@ jobs:
         run: |
           set -euo pipefail
           STAGE="$(./scripts/stage-plugin.sh)"
-          ASSET="$GITHUB_WORKSPACE/Trakt-Scrobbler-Plus-v0.2.4-beta.1.iinaplgz"
+          ASSET="$GITHUB_WORKSPACE/Trakt-Scrobbler-Plus-v0.2.4-beta.2.iinaplgz"
           (
             cd "$STAGE"
             zip -q -r "$ASSET" .
           )
           unzip -t "$ASSET" > /dev/null
           for path in Info.json main.js sidebar.html stop-journal.js \
-                      sync-history.js trakt-api-gate.js playback-identity.js parser.iina.js; do
+                      sync-history.js trakt-api-gate.js playback-identity.js playback-diagnostics.js parser.iina.js; do
             unzip -Z1 "$ASSET" | grep -qx "$path"
           done
           echo "ASSET=$ASSET" >> "$GITHUB_ENV"
@@ -67,15 +67,15 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          TAG="v0.2.4-beta.1"
+          TAG="v0.2.4-beta.2"
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "$TAG already exists; no destructive asset overwrite"
             exit 0
           fi
           cat > notes.md <<'NOTES'
-          # Trakt Scrobbler Plus v0.2.4-beta.1 — Sync Queue Canary
+          # Trakt Scrobbler Plus v0.2.4-beta.2 — Sync Queue Canary
 
-          - Pending / Syncing / Recently Synced final-stop dashboard.
+          - Pending / Syncing / Recently Synced final-stop dashboard.\n          - Reject incorrect high-scoring Trakt title matches (e.g., Strom ozvěny vs Gegen den Strom).\n          - Redacted Copy Diagnostics button for MediaFusion / TorBox stream URLs.
           - Safe **Retry Now** button: respects Trakt cooldown, network connectivity,
             authentication, playback state and active sync guard.
           - Local last-confirmed-stop audit with a 12-item / 7-day cap;
