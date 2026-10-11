@@ -821,6 +821,7 @@
       <div class="section-body">
         <p id="media-name" class="media-name">No active media</p>
         <p id="media-meta" class="media-meta">Load a movie or episode.</p>
+        <p id="match-provenance" class="sync-meta" hidden></p>
         <div class="progress-wrap">
           <div class="progress-bar">
             <div id="progress-fill" class="progress-fill"></div>
@@ -865,6 +866,8 @@
         <p id="sync-queue-blocked" class="sync-note" hidden></p>
         <div id="sync-queue-pending-header" class="sync-group-label" hidden>Pending / Syncing</div>
         <div id="sync-queue-pending" class="sync-list"></div>
+        <div id="sync-queue-review-header" class="sync-group-label" hidden>Needs Review — not sent automatically</div>
+        <div id="sync-queue-review" class="sync-list"></div>
         <div id="sync-queue-synced-header" class="sync-group-label" hidden>Recently Synced</div>
         <div id="sync-queue-synced" class="sync-list"></div>
         <p id="sync-queue-last-sync" class="sync-note" hidden></p>
@@ -1008,7 +1011,7 @@
           lastFailure: ""
         },
         syncQueue: {
-          pending: [], recentlySynced: [], flushing: false,
+          pending: [], needsReview: [], recentlySynced: [], flushing: false,
           canRetry: false, blockedReason: "", notice: ""
         },
         scrobble: {
@@ -1049,6 +1052,7 @@
       var copyCodeFeedbackTimer = 0;
       var lastActionAt = 0;
       var lastActionKind = "";
+      var confirmDiscardId = "";
 
       function send(name, payload) {
         if (!window.iina || typeof iina.postMessage !== "function") return;
@@ -1513,6 +1517,9 @@
           mediaMeta.hidden = true;
         }
 
+        var p=playback.matchProvenance||{};
+        setText("match-provenance",p.label ? "Match source: "+p.label : "");
+        setHidden("match-provenance",!playback.available||!p.label);
         fill.style.width = progress + "%";
         setText("progress-left", formatProgress(progress));
         setText("progress-right", formatDuration(playback.position) + " / " + formatDuration(playback.duration));
@@ -1562,14 +1569,16 @@
       function renderSyncQueue() {
         var q = state.syncQueue || {};
         var pending = Array.isArray(q.pending) ? q.pending : [];
+        var review = Array.isArray(q.needsReview) ? q.needsReview : [];
         var recent = Array.isArray(q.recentlySynced) ? q.recentlySynced : [];
         var section = document.getElementById("sync-queue-section");
         var retry = document.getElementById("sync-queue-retry");
         var waiting = document.getElementById("sync-queue-pending");
+        var reviewList = document.getElementById("sync-queue-review");
         var synced = document.getElementById("sync-queue-synced");
-        if (!section || !retry || !waiting || !synced) return;
+        if (!section || !retry || !waiting || !synced || !reviewList) return;
 
-        section.hidden = !pending.length && !recent.length;
+        section.hidden = !pending.length && !review.length && !recent.length;
         if (section.hidden) return;
         retry.disabled = !stateReady || !q.canRetry || q.flushing;
         retry.hidden = !pending.length;
@@ -1577,15 +1586,18 @@
 
         var active = pending.filter(function(item) { return !!item.syncing; }).length;
         setText("sync-queue-summary", pending.length +
-          " pending stop(s)" + (active ? " · " + active + " syncing" : ""));
+          " pending · " + review.length + " needs review" +
+          (active ? " · " + active + " syncing" : ""));
         setText("sync-queue-notice", q.notice || "");
         setHidden("sync-queue-notice", !q.notice);
         setText("sync-queue-blocked", pending.length && q.blockedReason ? q.blockedReason : "");
         setHidden("sync-queue-blocked", !pending.length || !q.blockedReason);
 
         setHidden("sync-queue-pending-header", !pending.length);
+        setHidden("sync-queue-review-header", !review.length);
         setHidden("sync-queue-synced-header", !recent.length);
         waiting.textContent = "";
+        reviewList.textContent = "";
         synced.textContent = "";
 
         function addItem(root, label, sub) {
@@ -1607,6 +1619,30 @@
           var status = item.syncing ? "Syncing" : "Pending";
           addItem(waiting, item.label || "Media", status + " · " +
             formatProgress(item.progress) + " · " + formatUpdatedAt(item.queuedAt));
+        });
+        review.forEach(function(item) {
+          var row=document.createElement("div");
+          row.className="sync-line";
+          var details=document.createElement("span");
+          details.className="sync-label";
+          details.textContent=(item.label||"Unverified media")+" — "+(item.reason||"No match proof");
+          details.title=details.textContent;
+          var button=document.createElement("button");
+          button.type="button";
+          button.className="secondary";
+          button.textContent=confirmDiscardId===item.id?"Confirm remove":"Remove";
+          button.title="Remove this unverified local checkpoint. This does not delete Trakt history.";
+          button.addEventListener("click",function(ev){
+            ev.preventDefault();
+            if(confirmDiscardId!==item.id){confirmDiscardId=item.id;renderSyncQueue();return;}
+            confirmDiscardId="";
+            send("discard_unverified_stop",{id:item.id});
+            button.disabled=true;
+            button.textContent="Removing…";
+          });
+          row.appendChild(details);
+          row.appendChild(button);
+          reviewList.appendChild(row);
         });
         recent.slice(0, 5).forEach(function(item) {
           var note = item.status === "confirmed_duplicate" ? "Already recorded" : "Confirmed";
