@@ -8,9 +8,10 @@ var stopJournalModule = require("./stop-journal.js");
 var syncHistoryModule = require("./sync-history.js");
 var playbackDiagnostics = require("./playback-diagnostics.js");
 var mediaFusion = require("./mediafusion-identity.js");
+var freshIdentity = require("./fresh-identity.js");
 var correctionMedia = require("./correction-media.js");
 var trakt = require("./trakt.js");
-var PLUGIN_VERSION = "0.2.4";
+var PLUGIN_VERSION = "0.2.5-beta.1";
 var DEBUG_LOG_PATH = "@data/debug.log";
 var MAX_DEBUG_LOG_CHARS = 200000;
 var POLL_INTERVAL_MS = 2000;
@@ -425,6 +426,15 @@ function determineMatchProvenance() {
   var source=String(currentMedia.parsed && currentMedia.parsed.parserSource || "");
   if (info.unresolvedShow) return {code:"needs-manual",label:"Needs Manual Match"};
   if (source==="mediafusion-confirmed-pack") return {code:"confirmed-pack",label:"Confirmed Pack Cache"};
+  if (currentMedia.freshState==="resolving") return {code:"fresh-pending",label:"Verifying External ID…"};
+  if (currentMedia.freshState==="verified") {
+    return {code:"fresh-verified",label:
+      currentMedia.freshIdKind==="verified-dual-id"?"Fresh IMDb + TMDB (verified)":
+      currentMedia.freshIdKind==="verified-tmdb"?"Fresh TMDB ID (verified)":
+      "Fresh IMDb ID (verified)"};
+  }
+  if (currentMedia.freshState==="rejected" || currentMedia.freshState==="conflict")
+    return {code:"fresh-rejected",label:"External ID needs review"};
   if (currentMedia.manuallyCorrected) return {code:"manual",label:"Manual Confirmed"};
   if (/^tt\d{6,10}$/i.test(String(info.imdb||""))) return {code:"imdb",label:"Direct IMDb ID"};
   if (confirmedPlayback.key===monitor.mediaKey(info)) return {code:"trakt-confirmed",label:"Trakt Verified"};
@@ -434,7 +444,10 @@ function determineMatchProvenance() {
 function trustedReplayProof(info) {
   if (!info || info.unresolvedShow) return null;
   var id=Number(info.manualTraktId||0);
-  if (Number.isInteger(id)&&id>0) return {kind:"manual",traktId:id};
+  if (Number.isInteger(id)&&id>0) return {
+    kind:currentMedia&&currentMedia.freshState==="verified"&&
+      currentMedia.mediaInfo===info?"trakt-confirmed":"manual",traktId:id
+  };
   if (/^tt\d{6,10}$/i.test(String(info.imdb||""))) return {kind:"imdb",imdb:info.imdb};
   if (confirmedPlayback.key===monitor.mediaKey(info)&&confirmedPlayback.proof)
     return confirmedPlayback.proof;
@@ -1290,7 +1303,8 @@ function cloneMediaInfo(mediaInfo) {
     episodeTitle: mediaInfo.episodeTitle,
     unresolvedShow: !!mediaInfo.unresolvedShow,
     manualTraktId: Number(mediaInfo.manualTraktId || 0),
-    imdb: mediaInfo.imdb || ""
+    imdb: mediaInfo.imdb || "",
+    tmdb: Number(mediaInfo.tmdb||0)
   };
 }
 
@@ -1377,12 +1391,70 @@ function playbackConfig() {
   };
 }
 
+// Hydrate only from explicit, independently verified external IDs.
+// Never match by the localized episode title alone. Reject stale async replies
+// when playback changes to another stream during the Trakt network request.
+async function verifyFreshPlayback(target,external) {
+  try {
+    var resolved=await trakt.resolveFreshIdentity(external);
+    if (!currentMedia || currentMedia!==target || target.freshState!=="resolving")return;
+    if (!resolved) {
+      target.freshState="rejected";
+      setScrobbleStatus({status:"unmatched",mediaLabel:mediaLabel(target.mediaInfo),
+        detail:"External ID could not be independently verified on Trakt. Use Correct Match.",
+        reason:"missing-trakt-match"});
+      queueSidebarRefresh(false);
+      return;
+    }
+    var info=target.mediaInfo,parsed=target.parsed;
+    if (resolved.kind==="episode") {
+      info.type="episode";
+      info.title=resolved.title;info.showTitle=resolved.title;
+      info.season=resolved.season;info.episode=resolved.episode;
+      info.unresolvedShow=false;
+      parsed.kind="episode";parsed.showTitle=resolved.title;
+      parsed.season=resolved.season;parsed.episode=resolved.episode;
+      parsed.unresolvedShow=false;
+      if(!info.episodeTitle)info.episodeTitle=resolved.episodeTitle||"";
+    } else {
+      info.type="movie";info.title=resolved.title;info.year=resolved.year;
+      info.unresolvedShow=false;
+      parsed.kind="movie";parsed.title=resolved.title;
+      parsed.year=resolved.year;
+    }
+    info.manualTraktId=resolved.trakt;
+    if (resolved.imdb && /^tt\\d{6,10}$/i.test(resolved.imdb))info.imdb=resolved.imdb;
+    info.tmdb=resolved.tmdb||0;
+    target.freshIdKind=resolved.source;
+    target.freshState="verified";
+    parsed.parserSource=resolved.source;
+    target.traktTargetLabel=resolved.kind==="episode" ?
+      resolved.title+" S"+pad2(resolved.season)+"E"+pad2(resolved.episode)+
+      (resolved.episodeTitle?" - "+resolved.episodeTitle:"") : resolved.title;
+    setScrobbleStatus({status:"ready",mediaLabel:mediaLabel(info),
+      detail:"External ID independently verified. Live scrobbling enabled.",
+      reason:""});
+    resetPlaybackTracking();
+    queueSidebarRefresh(false);
+    resyncCurrentPlayback("Fresh external ID independently resolved on Trakt");
+  } catch (error) {
+    if (!currentMedia || currentMedia!==target)return;
+    target.freshState="rejected";
+    log("Fresh media verification failed: "+errStr(error));
+    setScrobbleStatus({status:"unmatched",mediaLabel:mediaLabel(target.mediaInfo),
+      detail:"Trakt lookup unavailable; no unverified scrobble sent. Retry by reopening playback.",
+      reason:"missing-trakt-match"});
+    queueSidebarRefresh(false);
+  }
+}
+
 function identifyCurrentMedia() {
   var source = getCurrentSource();
   var picked = playbackIdentity.identify(source, parser, streamSource);
   var parsed = picked.parsed;
   var episodeRoute = picked.episodeRoute || null;
-  if (parsed && parsed.unresolvedShow && episodeRoute) {
+  var external=freshIdentity.inspect(source,episodeRoute);
+  if (parsed && parsed.unresolvedShow && episodeRoute && !(external && external.conflict)) {
     var packMatch = mediaFusionShowCache.find(episodeRoute);
     if (packMatch) {
       parsed.showTitle = packMatch.title;
@@ -1390,6 +1462,34 @@ function identifyCurrentMedia() {
       parsed.manualTraktId = packMatch.trakt;
       parsed.parserSource = "mediafusion-confirmed-pack";
     }
+  }
+  // On a fresh external ID, the parser's localized metadata is not proof
+  // of a series. Hold playback until Trakt resolves and verifies the episode.
+  var freshPending=false;
+  var freshConflict=!!(external&&external.conflict);
+  if (parsed && external && !external.conflict && external.kind==="episode" &&
+      Number.isInteger(external.season)&&Number.isInteger(external.episode) &&
+      parsed.parserSource!=="mediafusion-confirmed-pack") {
+    if (parsed.kind==="episode" &&
+        (parsed.season!==external.season||parsed.episode!==external.episode)) {
+      freshConflict=true;
+    } else {
+      var episodeTitle=parsed.kind==="episode"?parsed.episodeTitle :
+        String(source.metadataTitle||source.mediaTitle||source.title||"");
+      parsed={kind:"episode",showTitle:"Unknown Series",
+        season:external.season,episode:external.episode,
+        episodeTitle:episodeTitle,unresolvedShow:true,
+        parserSource:"explicit-playback-id-pending"};
+      freshPending=true;
+    }
+  } else if(parsed && external && !external.conflict && external.kind==="movie" &&
+      parsed.kind==="movie") {
+    freshPending=true;
+    parsed.parserSource="explicit-playback-id-pending";
+  }
+  if(freshConflict && parsed) {
+    if(parsed.kind==="episode")parsed.unresolvedShow=true;
+    parsed.parserSource="conflicting-external-id";
   }
   logGuessitFailureOnce();
   var mediaInfo = mediaInfoFromParsed(parsed);
@@ -1403,6 +1503,8 @@ function identifyCurrentMedia() {
     parsed: parsed,
     episodeRoute: episodeRoute,
     mediaInfo: mediaInfo,
+    freshState:freshConflict?"conflict":freshPending?"resolving":"",
+    freshIdKind:"",
     manuallyCorrected: false,
     traktTargetLabel: "",
     identifiedAt: new Date().toISOString()
@@ -1431,6 +1533,16 @@ function identifyCurrentMedia() {
     reason: mediaInfo && mediaInfo.unresolvedShow ? "missing-trakt-match" :
       isScrobblingEnabled() ? "" : "disabled"
   });
+  if (currentMedia && freshPending && !freshConflict) {
+    setScrobbleStatus({status:"ready",mediaLabel:mediaLabel(mediaInfo),
+      detail:"Verifying embedded IMDb/TMDB ID before live scrobbling.",
+      reason:"missing-trakt-match"});
+    verifyFreshPlayback(currentMedia,external);
+  } else if (currentMedia && freshConflict) {
+    setScrobbleStatus({status:"unmatched",mediaLabel:mediaLabel(mediaInfo),
+      detail:"Conflicting external IDs or episode positions; use Correct Match.",
+      reason:"missing-trakt-match"});
+  }
   log("Parsed " + parsedLabel(parsed) + " via " + (parsed.parserSource || "unknown"));
   debugOsd("Parsed " + parsedLabel(parsed));
 }
@@ -1589,6 +1701,14 @@ function queueScrobble(verb, snapshot, options) {
 
   var payload = cloneSnapshot(snapshot);
   if (!payload || !payload.mediaInfo) return;
+  if (!(options && options.journalId) && currentMedia &&
+      ["resolving","rejected","conflict"].includes(currentMedia.freshState)) {
+    setScrobbleStatus({status:"unmatched",verb:verb,
+      mediaLabel:scrobbleTargetLabel(payload),
+      detail:"External ID must be verified before scrobbling.",
+      reason:"missing-trakt-match",progress:payload.progress});
+    return;
+  }
   if (payload.mediaInfo.unresolvedShow ||
       (payload.mediaInfo.type==="episode" &&
        /^unknown series$/i.test(String(payload.mediaInfo.showTitle||"")))) {
