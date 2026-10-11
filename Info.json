@@ -1,13 +1,13 @@
 {
   "name": "Trakt Scrobbler Plus",
   "identifier": "io.github.olivergiangvu.iinatraktscrobblerplus",
-  "version": "0.2.5-beta.1",
+  "version": "0.2.5-beta.2",
   "author": {
     "name": "Oliver Giang Vu (fork of Fahim)",
     "url": "https://github.com/olivergiangvu"
   },
   "ghRepo": "olivergiangvu/iina-trakt-scrobbler-plus",
-  "ghVersion": 13,
+  "ghVersion": 14,
   "entry": "main.js",
   "description": "IINA Trakt scrobbler with stream URL and IMDb-aware resolution.",
   "sidebarTab": {
