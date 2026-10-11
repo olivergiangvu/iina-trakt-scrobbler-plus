@@ -1964,6 +1964,13 @@ async function prepareScrobblePayload(mediaInfo) {
 }
 
 async function scrobble(verb, mediaInfo, progress) {
+	// Never perform Trakt metadata lookups for an event that is already
+	// ineligible to scrobble (e.g. a stop below 1%).
+	var initialProgress = Number(progress || 0);
+	var initialVerb = normalizeScrobbleVerb(verb, initialProgress);
+	if (shouldSkipEarlyScrobble(initialVerb, initialProgress)) {
+		return { ok: false, skip: true, reason: earlyScrobbleReason(initialVerb) };
+	}
 	if (!hasCredentials()) {
 		return {
 			ok: false,
