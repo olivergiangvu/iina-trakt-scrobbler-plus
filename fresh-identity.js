@@ -98,4 +98,45 @@ function inspect(source, route) {
     source:"explicit-playback-id"
   };
 }
-module.exports={inspect:inspect,parseOne:parseOne};
+// An explicit series ID describes the SHOW, not necessarily the episode.
+// When S/E is absent, an independently parsed readable file name can supply
+// those coordinates. We still verify the IMDb/TMDB ID + exact episode on
+// Trakt and insist that Trakt's show title matches the parsed show title.
+// Never infer S/E from opaque path tokens or episode-only localized labels.
+function coordinateEpisode(external,parsed) {
+  if(!external || external.conflict || external.kind!=="episode")
+    return {external:external,conflict:!!(external&&external.conflict),expectedShowTitle:""};
+  var s=external.season,e=external.episode;
+  if(Number.isInteger(s)&&Number.isInteger(e))
+    return {external:external,conflict:false,expectedShowTitle:""};
+  var parsedValid=parsed&&parsed.kind==="episode"&&!parsed.unresolvedShow&&
+    Number.isInteger(parsed.season)&&parsed.season>=0&&parsed.season<=100&&
+    Number.isInteger(parsed.episode)&&parsed.episode>=1&&parsed.episode<=9999&&
+    typeof parsed.showTitle==="string"&&!!parsed.showTitle.trim()&&
+    !/^unknown series$/i.test(parsed.showTitle.trim());
+  if(!parsedValid)
+    return {external:external,conflict:true,expectedShowTitle:"",reason:"no-trustworthy-episode-position"};
+  if((s!==null&&s!==parsed.season)||(e!==null&&e!==parsed.episode))
+    return {external:external,conflict:true,expectedShowTitle:"",reason:"episode-position-conflict"};
+  return {
+    external:Object.assign({},external,{
+      season:parsed.season,episode:parsed.episode,
+      // Internal verification evidence only. Not an identity on its own.
+      expectedShowTitle:parsed.showTitle.trim()
+    }),
+    conflict:false,expectedShowTitle:parsed.showTitle.trim()
+  };
+}
+function titlesAgree(left,right) {
+  function norm(value) {
+    var s=String(value||"").toLowerCase();
+    if(typeof s.normalize==="function")
+      s=s.normalize("NFKD").replace(/[\u0300-\u036f]/g,"");
+    return s.replace(/&/g," and ").replace(/['’]/g,"")
+      .replace(/[^a-z0-9]+/g," ").replace(/\s+/g," ").trim();
+  }
+  var a=norm(left),b=norm(right);
+  return !!a&&a===b;
+}
+module.exports={inspect:inspect,parseOne:parseOne,
+  coordinateEpisode:coordinateEpisode,titlesAgree:titlesAgree};
