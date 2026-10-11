@@ -14,4 +14,6 @@ for(const secret of ["SecretToken","f6738693","SECRET","auth_token=SECRET"]){
 }
 assert.equal(obj.player.title,"Strom ozvěny");
 assert.equal(obj.traktTarget,"Gegen den Strom – Abgetaucht in Venezuela");
+assert.deepEqual(obj.mediaFusionRoute,{kind:"episode",season:2,episode:8,
+  provider:"torbox",seriesIdentityAvailable:true});
 console.log("redacted playback diagnostics tests passed");
