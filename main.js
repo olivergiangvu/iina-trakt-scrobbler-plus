@@ -1546,6 +1546,10 @@ function identifyCurrentMedia() {
       parsed.parserSource = "mediafusion-confirmed-pack";
     }
   }
+  // Some providers expose a trusted series ID without episode numbers.
+  // Only borrow missing S/E from parsed playback metadata; independent Trakt
+  // resolution, title equivalence and exact episode verification remain required.
+  external=freshIdentity.completeEpisodePosition(external,parsed);
   // On a fresh external ID, the parser's localized metadata is not proof
   // of a series. Hold playback until Trakt resolves and verifies the episode.
   var freshPending=false;
