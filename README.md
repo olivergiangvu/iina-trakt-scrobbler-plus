@@ -2,7 +2,7 @@
 
 An enhanced fork of [i3p9/iina-trakt-scrobbler](https://github.com/i3p9/iina-trakt-scrobbler) with initial support for **Remux / AIOStreams streaming URLs**.
 
-**Current stable release: v0.2.3.** Promoted without playback or Trakt API behavior changes after v0.2.3-beta.1 passed field validation for resume, ⌘Q finalization and network recovery. The linked HomeDocker Trakt Bridge remains separately managed.
+**Current stable release: v0.2.4.** Promoted directly from the verified v0.2.4-beta.6 canary after real IINA field tests of manual Movie/TV correction, MediaFusion S/E recognition, confirmed-pack lookup, Match Provenance, Sync Queue Review/Remove, live scrobbling, ⌘Q and end-to-end resume sync through the existing HomeDocker Trakt Bridge. Playback and Trakt API logic are unchanged from beta.6; only release metadata, CI packaging and documentation are updated. The separate Trakt Bridge remains independently managed.
 
 ## Install directly from IINA (recommended)
 
@@ -30,13 +30,23 @@ Alternative: download the `.iinaplgz` file from [GitHub Releases](https://github
 - Keeps the original file-based Guessit parser, scrobble monitoring, sidebar and history.
 - Uses its own IINA plugin identifier and token Keychain service.
 
-**Not yet included:** TMDB API-based matching for localized titles without a usable IMDb ID, and persistent per-stream manual override memory. These will require separate development.
+**Not yet included:** Fresh IMDb/TMDB-first recognition when both player metadata and URL lack a trustworthy show ID. MediaFusion manual-confirmed pack cache is supported, but this is not an upstream series identity resolver.
 
 ## Supported test example
 
 `The.Legend.of.Vox.Machina.S02E04.WEBDL...&media_id=tt11247158&media_type=series`
 
 The plugin should identify the correct S02E04/S02E06 from player metadata rather than guessing S01E25/S02E90 from encoded tokens. Playback identification, resume and quit finalization have passed live IINA checks; when localized titles lack an IMDb ID, use Manual Correction.
+
+
+## v0.2.4 Stable — validated feature summary
+
+- Structured MediaFusion provider routes identify season/episode even for localized episode-only titles; never accept a show identity from the route alone.
+- Manual Correct Match allows switching **Movie / TV Series**, editing Season/Episode and verifying the selected Trakt target.
+- Confirmed MediaFusion torrent-season identity can be reused without copying stream credentials.
+- Sync Queue includes pending confirmed stops, **Needs Review** for legacy unverified records, recent confirmations, safe two-step local cleanup, and Match Provenance.
+- Rate-limit-aware retry, durable proven checkpoints and redacted Copy Diagnostics.
+- Mac field validation PASS: live scrobbling, manual match, cached recognition, Review Remove UI and ⌘Q resume delivered through Trakt Bridge to downstream clients.
 
 ## Releases and auto-update
 
@@ -172,7 +182,7 @@ Confirmed Pack Cache, Trakt Verified or Unverified / Needs Manual Match.
 On a proof-backed retry, Trakt show S/E or movie identity is validated
 before sending progress. Invalid proofs move to Needs Review.
 
-**Beta install:** download the v0.2.4-beta.5 .iinaplgz prerelease asset,
+**Earlier beta install:** download the v0.2.4-beta.5 .iinaplgz prerelease asset,
 open with IINA on Mac, restart. The latest stable v0.2.3 and the independent
 HomeDocker Trakt Bridge are not changed. Test normal pause/stop, quit/resume,
 confirmed-pack source label and Needs Review. Do not promote until user confirms.
@@ -195,3 +205,5 @@ cannot delete a verified stop. Item titles/reasons wrap to remain readable.
 Validated by new interaction regression test and the full CI suite.
 Release is a manual-install **prerelease**; v0.2.3 remains latest stable.
 No HomeDocker or Trakt Bridge changes are required.
+
+**Historical beta notes above are retained as development records. v0.2.4 is now stable.**
