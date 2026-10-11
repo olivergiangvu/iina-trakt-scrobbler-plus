@@ -1,3 +1,4 @@
+var mediaFusion = require("./mediafusion-identity.js");
 // Shareable IINA playback diagnostics. Never include stream URLs, path tokens,
 // auth headers, query values (except IDs), or bearer credentials.
 function compact(value, max) {
@@ -64,6 +65,11 @@ function build(source, parsed, target, version) {
       source: compact(p.parserSource, 48)
     },
     traktTarget: compact(target || ""),
+    mediaFusionRoute: (function(){
+      var route = mediaFusion.fromSource(s);
+      return route ? {kind:"episode",season:route.season,episode:route.episode,
+        provider:route.provider,seriesIdentityAvailable:!p.unresolvedShow} : null;
+    })(),
     urlShapes: urls
   };
   return JSON.stringify(data, null, 2);
