@@ -1,10 +1,19 @@
 var mediaFusion = require("./mediafusion-identity.js");
 var freshIdentity = require("./fresh-identity.js");
+var streamSource = require("./stream-source.js");
 // Shareable IINA playback diagnostics. Never include stream URLs, path tokens,
 // auth headers, query values (except IDs), or bearer credentials.
 function compact(value, max) {
   var v = String(value || "").replace(/[\x00-\x1f\x7f]/g, " ").trim();
   if (/^(https?|magnet):/i.test(v)) return "[URL redacted]";
+  // An IINA "filename" can be a DMM ID + ?h=<torrent-hash>&file=<name>.
+  // Redact the full query, including infohash, while preserving safe filename.
+  if (/[?&](?:h|hash|infohash|token|file|filename|torrent_name)=/i.test(v)) {
+    var name = streamSource.extract(v, "").name;
+    if (name && !/[?&](?:h|hash|infohash|token|access_token|api_key)=/i.test(name))
+      return ("[stream query redacted] " + name).slice(0, max || 220);
+    return "[stream query redacted]";
+  }
   if (/(?:access_token|refresh_token|bearer\s|api[_-]?key|authorization=)/i.test(v)) return "[sensitive value redacted]";
   return v.slice(0, max || 220);
 }
