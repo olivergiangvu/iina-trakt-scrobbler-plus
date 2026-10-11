@@ -1,0 +1,31 @@
+const assert=require("node:assert/strict");
+const fs=require("node:fs");
+const vm=require("node:vm");
+const path=require("node:path");
+const main=fs.readFileSync(path.resolve(__dirname,"../main.js"),"utf8");
+const sidebar=fs.readFileSync(path.resolve(__dirname,"../sidebar.html"),"utf8");
+const trakt=fs.readFileSync(path.resolve(__dirname,"../trakt.js"),"utf8");
+for(const [name,code] of [["main.js",main],["trakt.js",trakt]]){
+  new vm.Script(code,{filename:name});
+}
+const body=sidebar.match(/<script>([\s\S]*?)<\/script>/);
+assert.ok(body);new vm.Script(body[1],{filename:"sidebar.html"});
+assert.match(main,/function beginResumeCheck\(target\)/);
+assert.match(main,/await trakt\.getResumeCheckpoint\(inspectedInfo\)/);
+assert.match(main,/currentMedia!==target \|\| target\.resumeGate!==gate/);
+assert.match(main,/currentGate\?currentGate\.decision\(Number\(payload\.progress\)\):null/);
+assert.match(main,/reason:requiresMatch\?"missing-trakt-match":"resume-guard"/,
+  "unverified series must surface manual match, while resume preflight remains gated");
+assert.match(main,/stopJournal\.markReview\(entry\.id,"Saved Trakt resume is ahead/);
+assert.match(main,/function restoreRemoteResume\(\)/);
+assert.match(main,/core\.seekTo\(target\)/);
+assert.match(main,/sidebar\.onMessage\("restore_remote_resume"/);
+assert.match(main,/beginResumeCheck\(currentMedia\)/);
+assert.match(main,/beginResumeCheck\(target\)/);
+assert.match(sidebar,/id="resume-protection"/);
+assert.match(sidebar,/id="restore-remote-resume"/);
+assert.match(sidebar,/resume\.canRestore/);
+assert.match(sidebar,/send\("restore_remote_resume"\)/);
+assert.match(trakt,/async function getResumeCheckpoint\(mediaInfo\)/);
+assert.ok(!main.includes('core.seekTo(0)'),"do not auto reset playback to 0");
+console.log("read-before-write guard and explicit seek UI contracts PASS");

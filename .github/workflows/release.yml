@@ -21,7 +21,7 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Validate release metadata
+      - name: Validate release metadata and versioned notes
         id: version
         shell: bash
         run: |
@@ -33,15 +33,27 @@ jobs:
           assert.equal(info.identifier, 'io.github.olivergiangvu.iinatraktscrobblerplus');
           assert.ok(Number.isInteger(info.ghVersion) && info.ghVersion >= 1);
           assert.match(info.version, /^\d+\.\d+\.\d+(?:-beta\.\d+)?$/);
+          const notes = 'docs/releases/v' + info.version + '.md';
+          assert.ok(fs.existsSync(notes), 'Missing release notes for ' + info.version);
+          const content = fs.readFileSync(notes, 'utf8');
+          assert.ok(content.length >= 200, 'Release notes must be substantive');
+          assert.ok(content.includes('v' + info.version), 'Release notes version mismatch');
+          assert.ok(!content.includes('v0.2.4 — Stable\n- Validated'), 'Stale v0.2.4 release notes');
+          assert.ok(info.version !== '0.2.5' || info.ghVersion === 20,
+            'v0.2.5 must have ghVersion 20 to update beta.7');
+          assert.ok(fs.readFileSync('main.js', 'utf8').includes(
+            'var PLUGIN_VERSION = "' + info.version + '";'), 'main.js version mismatch');
           fs.appendFileSync(process.env.GITHUB_OUTPUT, 'version=' + info.version + '\n');
           fs.appendFileSync(process.env.GITHUB_OUTPUT, 'tag=v' + info.version + '\n');
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, 'notes=' + notes + '\n');
           NODE
 
       - name: Syntax validation
         shell: bash
         run: |
           set -euo pipefail
-          for module in main.js trakt.js stream-source.js playback-identity.js \
+          for module in main.js trakt.js debug-log-buffer.js stream-source.js \
+              playback-identity.js fresh-identity.js resume-protection.js \
               mediafusion-identity.js correction-media.js playback-diagnostics.js \
               stop-journal.js sync-history.js trakt-api-gate.js monitor.js; do
             node --check "$module"
@@ -68,17 +80,17 @@ jobs:
             zip -q -r "$OUTPUT" .
           )
           unzip -t "$OUTPUT" >/dev/null
-          unzip -Z1 "$OUTPUT" | grep -qx 'Info.json'
-          unzip -Z1 "$OUTPUT" | grep -qx 'stream-source.js'
-          unzip -Z1 "$OUTPUT" | grep -qx 'playback-identity.js'
-          unzip -Z1 "$OUTPUT" | grep -qx 'stop-journal.js'
-          unzip -Z1 "$OUTPUT" | grep -qx 'trakt-api-gate.js'
-          unzip -Z1 "$OUTPUT" | grep -qx 'mediafusion-identity.js'
-          unzip -Z1 "$OUTPUT" | grep -qx 'correction-media.js'
-          unzip -Z1 "$OUTPUT" | grep -qx 'playback-diagnostics.js'
-          unzip -Z1 "$OUTPUT" | grep -qx 'sync-history.js'
-          unzip -Z1 "$OUTPUT" | grep -qx 'sidebar.html'
-          unzip -Z1 "$OUTPUT" | grep -qx 'parser.iina.js'
+          for module in Info.json main.js trakt.js debug-log-buffer.js \
+              stream-source.js playback-identity.js fresh-identity.js \
+              resume-protection.js stop-journal.js trakt-api-gate.js \
+              mediafusion-identity.js correction-media.js \
+              playback-diagnostics.js sync-history.js monitor.js \
+              sidebar.html preferences.html parser.iina.js; do
+            unzip -Z1 "$OUTPUT" | grep -Fxq "$module"
+          done
+          ARCHIVE_VERSION="$(unzip -p "$OUTPUT" Info.json | node -e \
+            'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(JSON.parse(s).version))')"
+          test "$ARCHIVE_VERSION" = "${{ steps.version.outputs.version }}"
           echo "path=$OUTPUT" >> "$GITHUB_OUTPUT"
 
       - name: Publish GitHub Release
@@ -86,11 +98,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.version.outputs.tag }}
           ASSET: ${{ steps.package.outputs.path }}
+          RELEASE_NOTES: ${{ steps.version.outputs.notes }}
         shell: bash
         run: |
           set -euo pipefail
+          test -s "$RELEASE_NOTES"
           if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "Release $TAG already exists; increment Info.json version and ghVersion for the next release."
+            echo "Release $TAG already exists; to ship changes bump both version and ghVersion."
             exit 0
           fi
           if [[ "$TAG" == *-* ]]; then
@@ -100,33 +114,8 @@ jobs:
             RELEASE_CHANNEL="Stable"
             RELEASE_ARGS=(--latest)
           fi
-          cat > release-notes.md <<'NOTES'
-          ## Trakt Scrobbler Plus v0.2.4 — Stable
-          - Validated on IINA/macOS: direct and cached MediaFusion matching, TV manual correction,
-            S/E validation, Trakt scrobble, ⌘Q stop and resume through the existing bridge.
-          - Match Provenance and Copy Diagnostics without leaking stream URLs or auth secrets.
-          - Sync Queue shows verified Pending/Syncing, Recently Synced and Needs Review
-            for legacy unverified checkpoints. Explicit two-step local Remove confirmation.
-          - Trakt API request pacing, backoff and offline recovery preserved from v0.2.3.
-          - All source tests and archive package contents validated by CI.
-          - Pace and serialize Trakt write requests; recognize HTTP 429 and Cloudflare 1015 with persisted bounded cooldown.
-          - Collapse sidebar refresh requests, preserve cached history/profile when offline and recover saved stop checkpoints without reboot.
-          - Retry interrupted Trakt stop updates after the next IINA launch, retaining resume progress or watched status.
-          - Retain mpv filename and multilingual episode recognition fixes.
-          - Fix Manual Search / Trakt slug lookup; choose season and episode before applying a verified match.
-          - IMDb-first Trakt lookup with episode verification, while keeping existing guessit file parsing as fallback.
-          - Independent IINA plugin ID and authentication storage from upstream.
-          - Source and code credits: i3p9/iina-trakt-scrobbler (GPL-3.0), inspired by Zain-Imam/iina-episode-info (MIT).
-
-          **Install/update on Mac:** IINA → Settings → Plugins → Install from GitHub → `olivergiangvu/iina-trakt-scrobbler-plus`.
-          v0.2.4 is promoted from user-tested v0.2.4-beta.6. Playback and Trakt API logic remain unchanged from beta.6. HomeDocker Trakt Bridge is not modified.
-          Keep the original Trakt plugin's scrobbling disabled to prevent duplicate playback events.
-          Fresh TMDB/IMDb-first series recognition without prior IDs remains a future development.
-          NOTES
-          # Keep pre-releases visible as canaries without silently replacing
-          # the latest stable distribution used by IINA.
           gh release create "$TAG" "$ASSET" \
             --target "$GITHUB_SHA" \
             --title "$TAG — $RELEASE_CHANNEL" \
-            --notes-file release-notes.md \
+            --notes-file "$RELEASE_NOTES" \
             "${RELEASE_ARGS[@]}"

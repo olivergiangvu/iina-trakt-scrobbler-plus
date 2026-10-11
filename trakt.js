@@ -1851,6 +1851,109 @@ async function applyMatchOverride(mediaInfo, candidate) {
 	return { trakt: traktId };
 }
 
+// Fresh explicit external-ID resolution. No title-only guesses, no stream URL
+// requests. The Trakt lookup must identify one media record and, for TV, the
+// exact season/episode must exist before allowing any scrobble.
+async function lookupTmdbByType(tmdb, kind) {
+  var type=kind==="episode"?"show":"movie";
+  var response=await authedRequest("GET","/search/tmdb/"+Number(tmdb),{
+    query:{type:type,limit:5,page:1}
+  });
+  if(response.statusCode>=400)
+    throw new Error("Trakt TMDB lookup failed with status "+response.statusCode);
+  var matches=(Array.isArray(response.body)?response.body:[]).filter(function(x){
+    var item=x&&x[type];
+    return x&&x.type===type&&item&&item.ids&&
+      Number(item.ids.tmdb)===Number(tmdb) && Number(item.ids.trakt)>0;
+  });
+  if(matches.length!==1) return null; // Zero or multiple: fail closed.
+  return matches[0][type];
+}
+async function resolveFreshIdentity(external) {
+  var identity=external||{};
+  if(identity.conflict || !["episode","movie"].includes(identity.kind))return null;
+  var imdb=String(identity.imdb||"").toLowerCase();
+  var tmdb=Number(identity.tmdb||0);
+  if(!/^tt\d{6,10}$/.test(imdb))imdb="";
+  if(!Number.isInteger(tmdb)||tmdb<=0||tmdb>999999999)tmdb=0;
+  if(!imdb&&!tmdb)return null;
+  if(identity.kind==="episode" &&
+    (!Number.isInteger(identity.season)||identity.season<0||identity.season>100||
+     !Number.isInteger(identity.episode)||identity.episode<1||identity.episode>9999))
+    return null;
+
+  var byImdb=null,byTmdb=null,kind=identity.kind;
+  if(imdb) byImdb=kind==="episode"
+    ? await fetchShowByReference(imdb) : await fetchMovieByReference(imdb);
+  if(tmdb) byTmdb=await lookupTmdbByType(tmdb,kind);
+  // When both IDs are given, require both independently resolve to SAME media.
+  if((imdb&&!byImdb)||(tmdb&&!byTmdb))return null;
+  if(byImdb && byTmdb &&
+    Number(byImdb.ids&&byImdb.ids.trakt)!==Number(byTmdb.ids&&byTmdb.ids.trakt))
+    return null;
+  var item=byImdb||byTmdb;
+  if(!item||!item.ids||!Number(item.ids.trakt)||!String(item.title||"").trim())
+    return null;
+  if(imdb&&item.ids.imdb&&String(item.ids.imdb).toLowerCase()!==imdb)return null;
+  if(tmdb&&item.ids.tmdb&&Number(item.ids.tmdb)!==tmdb)return null;
+  // When S/E came from a filename rather than the provider's structured
+  // position, independently verify the filename show title matches the show
+  // returned by its IMDb/TMDB ID. Otherwise manual confirmation is required.
+  if(kind==="episode"&&identity.positionSource==="parsed-episode"&&
+     !titleIdentityMatches(identity.expectedShowTitle,item.title))return null;
+  var result={kind:kind,trakt:Number(item.ids.trakt),
+    title:String(item.title),year:Number(item.year)||null,
+    imdb:imdb||String(item.ids.imdb||""),tmdb:tmdb||Number(item.ids.tmdb||0),
+    source:imdb&&tmdb?"verified-dual-id":imdb?"verified-imdb":"verified-tmdb"};
+  if(kind==="episode") {
+    var checked=await verifyEpisodeCandidate(result.trakt,{
+      showTitle:result.title,season:identity.season,episode:identity.episode,
+      episodeTitle:""
+    });
+    if(!checked)return null;
+    result.season=identity.season;
+    result.episode=identity.episode;
+    result.episodeTitle=String(checked.episode.title||"");
+  }
+  return result;
+}
+
+// READ-ONLY preflight. A missing checkpoint is distinct from network failure.
+// Result is tied to exact Trakt movie ID or show ID + season/episode, never
+// to an episode title or the filename. No remote sync modifications.
+async function getResumeCheckpoint(mediaInfo) {
+  if (!mediaInfo || !["movie","episode"].includes(mediaInfo.type)) {
+    return {status:"unavailable",reason:"missing-media"};
+  }
+  var ids=await getTraktIds(mediaInfo);
+  var traktId=Number(ids&&ids.trakt||0);
+  if(!Number.isInteger(traktId)||traktId<=0)
+    return {status:"unavailable",reason:"unverified-id"};
+  var isEpisode=mediaInfo.type==="episode";
+  var response=await authedRequest("GET",
+    isEpisode?"/sync/playback/episodes":"/sync/playback/movies");
+  if(response.statusCode!==200||!Array.isArray(response.body))
+    return {status:"unavailable",reason:"Trakt resume GET "+response.statusCode};
+  var matches=response.body.filter(function(entry){
+    if(!entry||typeof entry!=="object")return false;
+    if(isEpisode){
+      var showId=Number(entry.show&&entry.show.ids&&entry.show.ids.trakt||0);
+      var ep=entry.episode||{};
+      return showId===traktId &&
+        Number(ep.season)===Number(mediaInfo.season) &&
+        Number(ep.number)===Number(mediaInfo.episode);
+    }
+    return Number(entry.movie&&entry.movie.ids&&entry.movie.ids.trakt||0)===traktId;
+  });
+  if(!matches.length)return {status:"ok",progress:null,traktId:traktId};
+  var progress=matches.map(function(x){return Number(x.progress);});
+  if(progress.some(function(x){return !Number.isFinite(x)||x<0||x>100;}))
+    return {status:"unavailable",reason:"invalid-resume-progress"};
+  // Take greatest remaining playback checkpoint to prevent regressions when
+  // Trakt contains multiple entries for the same show+episode.
+  return {status:"ok",progress:Math.max.apply(Math,progress),traktId:traktId};
+}
+
 async function getTraktIds(mediaInfo) {
 	var type = mediaInfo && mediaInfo.type;
 	if (type !== "movie" && type !== "episode") {
@@ -1868,7 +1971,10 @@ async function getTraktIds(mediaInfo) {
 	var cached = bucket[key];
 	var cachedId = readCachedTraktId(cached);
 
-	if (cached === 0 || cached === -1 || cachedId === -1) {
+	// A verified explicit Trakt ID must override an old negative title cache:
+	// the previous filename or localized title may have been unresolvable.
+	var explicitId=Number(mediaInfo.manualTraktId||0);
+	if ((cached === 0 || cached === -1 || cachedId === -1) && !(explicitId>0)) {
 		return null;
 	}
 	if (type === "episode") {
@@ -2162,6 +2268,8 @@ module.exports = {
 	usingEmbeddedCredentials: usingEmbeddedCredentials,
 	ensureAccessToken: ensureAccessToken,
 	getTraktIds: getTraktIds,
+	getResumeCheckpoint: getResumeCheckpoint,
+	resolveFreshIdentity: resolveFreshIdentity,
 	normalizeScrobbleVerb: normalizeScrobbleVerb,
 	prepareScrobblePayload: prepareScrobblePayload,
 	lookupCorrectionReference: lookupCorrectionReference,

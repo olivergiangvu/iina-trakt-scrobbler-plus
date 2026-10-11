@@ -1,0 +1,70 @@
+name: Validate IINA plugin pull request
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validate JS syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          for module in main.js trakt.js debug-log-buffer.js stream-source.js playback-identity.js \
+              fresh-identity.js resume-protection.js mediafusion-identity.js \
+              correction-media.js playback-diagnostics.js stop-journal.js \
+              sync-history.js trakt-api-gate.js monitor.js; do
+            node --check "$module"
+          done
+      - name: Run all regression tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          for test in tests/*.js; do
+            echo "RUN $test"
+            node "$test"
+          done
+      - name: Validate IINA package contents
+        shell: bash
+        run: |
+          set -euo pipefail
+          STAGE="$(./scripts/stage-plugin.sh)"
+          test -s "$STAGE/main.js"
+          test -s "$STAGE/debug-log-buffer.js"
+          test -s "$STAGE/resume-protection.js"
+          test -s "$STAGE/sidebar.html"
+          test -s "$STAGE/Info.json"
+          node -e "const x=require('./Info.json');if(!x.version||!Number.isInteger(x.ghVersion))process.exit(1)"
+      - name: Package installable test canary
+        shell: bash
+        run: |
+          set -euo pipefail
+          STAGE="$(./scripts/stage-plugin.sh)"
+          VERSION="$(node -p "require('./Info.json').version")"
+          OUTPUT="$GITHUB_WORKSPACE/Trakt-Scrobbler-Plus-v${VERSION}.iinaplgz"
+          (
+            cd "$STAGE"
+            zip -q -r "$OUTPUT" .
+          )
+          unzip -t "$OUTPUT" >/dev/null
+          unzip -Z1 "$OUTPUT" | grep -qx 'Info.json'
+          unzip -Z1 "$OUTPUT" | grep -qx 'main.js'
+          unzip -Z1 "$OUTPUT" | grep -qx 'debug-log-buffer.js'
+          unzip -Z1 "$OUTPUT" | grep -qx 'resume-protection.js'
+      - name: Upload Mac test package
+        uses: actions/upload-artifact@v4
+        with:
+          name: IINA-Trakt-Plus-beta-canary
+          path: Trakt-Scrobbler-Plus-v*.iinaplgz
+          if-no-files-found: error
+          retention-days: 14
