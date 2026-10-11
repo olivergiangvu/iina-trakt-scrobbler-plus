@@ -12,7 +12,7 @@ for(const id of ["match-provenance","sync-queue-review",
  assert.ok(html.includes('id="'+id+'"'),"missing "+id);
 }
 assert.match(html,/p\.label\s*\?\s*"Match source: "\s*\+\s*p\.label/);
-assert.match(html,/matchProvenance:\s*determineMatchProvenance/);
+assert.match(main,/matchProvenance:\s*determineMatchProvenance/);
 assert.match(main,/mediafusion-confirmed-pack/);
 assert.match(main,/Confirmed Pack Cache/);
 assert.match(main,/Manual Confirmed/);
