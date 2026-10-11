@@ -1533,6 +1533,8 @@ async function resolveEpisodeIds(mediaInfo, bucket, key) {
 	}
 	var explicit = Number(mediaInfo.manualTraktId || 0);
 	if (Number.isInteger(explicit) && explicit > 0) {
+		if (isVerifiedEpisodeCacheEntry(bucket[key]) &&
+			readCachedTraktId(bucket[key]) === explicit) return {trakt:explicit};
 		var checked = await verifyEpisodeCandidate(explicit, mediaInfo);
 		if (!checked) return null;
 		bucket[key] = createVerifiedEpisodeCacheEntry(explicit);
