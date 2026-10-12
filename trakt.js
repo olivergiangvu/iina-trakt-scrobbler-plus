@@ -1526,6 +1526,47 @@ function normalizeEpisodeCorrectionRecord(show, mediaInfo, verified) {
 	};
 }
 
+// AIOStreams' #aios_title is structured playback context, NOT a trusted
+// external ID. Reject fuzzy matches and NEVER fall back to the first TV show
+// merely because it also has SxxExx (the former "Magical Index" false positive).
+async function resolveAiosEpisodeIds(mediaInfo, bucket, key) {
+  var title = String(mediaInfo.showTitle || mediaInfo.title || "").trim();
+  var season = Number(mediaInfo.season), episode = Number(mediaInfo.episode);
+  if (!title || !Number.isInteger(season) || season < 0 || season > 100 ||
+      !Number.isInteger(episode) || episode < 1 || episode > 9999) return null;
+  var normalizedTitle = normalizeTitle(title);
+  var cached = bucket[key];
+  if (cached && cached.aiosExact === true && cached.verified === true &&
+      cached.titleKey === normalizedTitle && Number(cached.trakt) > 0)
+    return {trakt:Number(cached.trakt)};
+  var year = mediaInfo.year || "";
+  var results = await search(title, "show", year || undefined, 20);
+  if ((!results || !results.length) && year)
+    results = await search(title, "show", undefined, 20);
+  // Unique canonical show title is mandatory. Duplicate exact-title series
+  // without a trusted ID/year are ambiguous and require Manual Match.
+  var exactById = Object.create(null);
+  (results || []).forEach(function(record) {
+    var show = record && record.show;
+    var id = Number(show && show.ids && show.ids.trakt || 0);
+    if (!id || Number(record.score || 0) < SEARCH_SCORE_THRESHOLD ||
+        !titleIdentityMatches(title, show.title)) return;
+    if (year && show.year && Number(show.year) !== Number(year)) return;
+    exactById[id] = id;
+  });
+  var ids = Object.keys(exactById).map(Number);
+  if (ids.length !== 1) {
+    log("AIOStreams title lookup rejected: exact canonical show count=" +
+      ids.length + " for " + episodeIdentityLabel(mediaInfo));
+    return null;
+  }
+  var verified = await verifyEpisodeCandidate(ids[0], mediaInfo);
+  if (!verified) return null;
+  bucket[key] = {trakt:ids[0],verified:true,aiosExact:true,titleKey:normalizedTitle};
+  saveSearchCache();
+  return {trakt:ids[0]};
+}
+
 async function resolveEpisodeIds(mediaInfo, bucket, key) {
 	if (mediaInfo.unresolvedShow) {
 		log("MediaFusion episode route has season/episode but no trusted show identity; manual correction required.");
@@ -1968,6 +2009,12 @@ async function getTraktIds(mediaInfo) {
 	var year = mediaInfo.year || "";
 	var bucket = type === "episode" ? cache.show : cache.movie;
 	var key = mediaCacheKey(mediaInfo);
+	if (type === "episode" && mediaInfo.identitySource === "aiostreams-title-fragment") {
+		// Each episode must be independently verified, not only the show.
+		var scopedKey = key + "|aios:S" + Number(mediaInfo.season) +
+			"E" + Number(mediaInfo.episode);
+		return resolveAiosEpisodeIds(mediaInfo, bucket, scopedKey);
+	}
 	var cached = bucket[key];
 	var cachedId = readCachedTraktId(cached);
 
