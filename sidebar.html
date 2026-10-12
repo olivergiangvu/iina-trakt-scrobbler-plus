@@ -918,10 +918,10 @@
           <p id="correction-status" class="correction-status">Search Trakt for a better match.</p>
           <div id="correction-episode-editor" class="correction-query-row" hidden>
             <label style="flex:1; min-width:0; font-size:12px">Season
-              <input id="correction-season" class="text-input" type="number" min="0" max="100" step="1" placeholder="2">
+              <input id="correction-season" class="text-input" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="3" autocomplete="off" spellcheck="false" placeholder="1">
             </label>
             <label style="flex:1; min-width:0; font-size:12px">Episode
-              <input id="correction-episode" class="text-input" type="number" min="1" max="9999" step="1" placeholder="6">
+              <input id="correction-episode" class="text-input" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="off" spellcheck="false" placeholder="10">
             </label>
           </div>
           <p id="correction-episode-help" class="caption" hidden>Correct Season/Episode first, then select Use. The episode must exist on Trakt.</p>
@@ -1070,6 +1070,48 @@
       var confirmDiscardId = "";
       var discardBusyId = "";
       var reviewFeedback = "";
+      // WebView state snapshots arrive while the user is typing.
+      // Keep editable S/E locally instead of overwriting it with parser guesses.
+      var correctionDraft = null;
+
+      function ensureCorrectionDraft(correction) {
+        var c = correction || {};
+        if (!c.active) {
+          correctionDraft = null;
+          return null;
+        }
+        var key = String(c.mediaKey || "") + "|" +
+          String(c.mediaLabel || "") + "|" + String(c.kind || "");
+        if (!correctionDraft || correctionDraft.key !== key) {
+          correctionDraft = {
+            key: key,
+            season: c.season == null ? "" : String(c.season),
+            episode: c.episode == null ? "" : String(c.episode)
+          };
+        }
+        return correctionDraft;
+      }
+
+      function readCorrectionPosition() {
+        var draft = ensureCorrectionDraft(state.correction || {});
+        return {
+          season: draft ? draft.season : "",
+          episode: draft ? draft.episode : ""
+        };
+      }
+
+      function bindCorrectionPositionInput(id, field) {
+        var node = document.getElementById(id);
+        if (!node) return;
+        var save = function () {
+          var correction = state.correction || {};
+          if (!correction.active || correction.kind !== "episode") return;
+          var draft = ensureCorrectionDraft(correction);
+          if (draft) draft[field] = node.value;
+        };
+        node.addEventListener("input", save);
+        node.addEventListener("change", save);
+      }
 
       function send(name, payload) {
         if (!window.iina || typeof iina.postMessage !== "function") return;
@@ -1775,11 +1817,13 @@
         var episodeMode = correction.kind === "episode";
         setHidden("correction-episode-editor", !episodeMode);
         setHidden("correction-episode-help", !episodeMode);
-        if (seasonInput && document.activeElement !== seasonInput) {
-          seasonInput.value = correction.season != null ? String(correction.season) : "";
+        var draft = ensureCorrectionDraft(correction);
+        // Do not overwrite a value or caret position when backend data refreshes.
+        if (seasonInput && draft && seasonInput.value !== draft.season) {
+          seasonInput.value = draft.season;
         }
-        if (episodeInput && document.activeElement !== episodeInput) {
-          episodeInput.value = correction.episode != null ? String(correction.episode) : "";
+        if (episodeInput && draft && episodeInput.value !== draft.episode) {
+          episodeInput.value = draft.episode;
         }
 
         if (openButton) {
@@ -1865,10 +1909,11 @@
             var activate = function (event) {
               event.preventDefault();
               event.stopPropagation();
+              var position = readCorrectionPosition();
               requestAction("choose_correction", {
                 trakt: result.trakt,
-                season: (document.getElementById("correction-season") || {}).value,
-                episode: (document.getElementById("correction-episode") || {}).value
+                season: position.season,
+                episode: position.episode
               });
             };
 
@@ -1986,6 +2031,7 @@
       if (kindSelector) {
         kindSelector.addEventListener("change", function() {
           var kind = kindSelector.value === "episode" ? "episode" : "movie";
+          correctionDraft = null;
           state.correction.kind = kind;
           state.correction.results = [];
           state.correction.error = "";
@@ -1993,6 +2039,8 @@
           send("change_correction_kind", {kind:kind});
         });
       }
+      bindCorrectionPositionInput("correction-season", "season");
+      bindCorrectionPositionInput("correction-episode", "episode");
       bindLocalAction("correction-search-button", function () {
         var input = document.getElementById("correction-query");
         requestAction("search_correction", {
@@ -2007,6 +2055,7 @@
       });
       bindLocalAction("correction-close-button", function () {
         pendingAction = "";
+        correctionDraft = null;
         send("close_correction");
       });
       bindLocalAction("signout-button", function () {
