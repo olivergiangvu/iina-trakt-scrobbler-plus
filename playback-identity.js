@@ -1,11 +1,14 @@
 // Playback identity selection for IINA + mpv streams.
 // Prefer readable player metadata over opaque stream URL path tokens.
 var mediaFusion = require("./mediafusion-identity.js");
+var aiosFragment = require("./aiostreams-fragment.js");
 
 function isOpaque(value) {
   var text = String(value || "").trim();
   if (!text) return true;
   if (/^https?:\/\//i.test(text)) return true;
+  // A generic HLS manifest is never proof of a film named "Index".
+  if (/^(?:index|master|playlist|manifest)\.(?:m3u8|mpd)(?:[?#].*)?$/i.test(text)) return true;
   // DMM/mpv can report an opaque playback ID followed by ?h=...&file=...
   // as the "filename". Never parse that whole query into a show title.
   if (/[?&](?:h|hash|infohash|file|filename|torrent_name|token)=/i.test(text)) return true;
@@ -18,6 +21,12 @@ function isOpaque(value) {
 
 function identify(source, parser, streamSource) {
   var hints = source || {};
+  var fragment = aiosFragment.inspect(hints);
+  // If a fragment claims playback identity but is malformed, fail closed:
+  // never let 'index.m3u8#aios_title=...' enter Guessit as a fabricated title.
+  if (fragment.present && !fragment.valid) {
+    return {parsed:null,imdb:"",source:"aiostreams-fragment-invalid"};
+  }
   var urls = [hints.path, hints.url, hints.filename, hints.title, hints.mediaTitle].filter(Boolean);
   var stream = { name: "", imdb: "", nameSource: "" };
   var episodeRoute = mediaFusion.fromSource(hints);
@@ -31,6 +40,12 @@ function identify(source, parser, streamSource) {
     if (!stream.imdb && entry.imdb) stream.imdb = entry.imdb;
   });
 
+  if (fragment.valid) {
+    // The hint is intentionally NOT sufficient to scrobble. Trakt applies
+    // strict one-exact-show + exact S/E verification in resolveEpisodeIds().
+    return {parsed:fragment.parsed,imdb:stream.imdb,
+      source:"aiostreams-title-fragment",episodeRoute:episodeRoute};
+  }
   // Prefer a verified readable media title. Opaque mpv labels containing
   // debrid query strings are ignored; stream-file then supplies the filename.
   var candidates = [
