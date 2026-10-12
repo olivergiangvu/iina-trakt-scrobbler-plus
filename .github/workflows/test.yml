@@ -36,6 +36,8 @@ jobs:
         run: node tests/correction-media.js
       - name: Manual type switch sidebar contract
         run: node tests/manual-correction-ui.js
+      - name: Yastream manual S/E editor refresh regression
+        run: node tests/manual-episode-editor-refresh.js
       - name: MediaFusion episode route and manual pack cache regression
         run: node tests/mediafusion-identity.js
       - name: Playback identity diagnostic redaction tests
