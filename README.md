@@ -2,7 +2,7 @@
 
 An enhanced fork of [i3p9/iina-trakt-scrobbler](https://github.com/i3p9/iina-trakt-scrobbler) with initial support for **Remux / AIOStreams streaming URLs**.
 
-**Current stable release: v0.2.5.** Promoted from the field-tested v0.2.5-beta.7 canary (4/4 Mac acceptance cases PASS). New features include independently verified IMDb/TMDB first-playback matching, safe Comet series IMDb + filename episode resolution, Trakt resume-overwrite protection, DMM filename hardening and batched diagnostic logs. The tested beta.7's scrobble, resume and identification logic is unchanged; release preparation changes only version metadata, documentation and packaging. The separate HomeDocker Trakt Bridge is unchanged.
+**Current stable release: v0.2.6.** Promoted from the Mac-tested v0.2.6-beta.2 canary: Yastream HLS Auto Matching from AIOStreams URL fragment, unique exact-title Trakt verification and exact TV episode checks (preventing the observed *A Certain Magical Index* false-positive), and reliable Manual Match Season/Episode editing (beta.1 field PASS). Previous v0.2.5 Comet/IMDb matching, resume protection, Trakt watched synchronization and batched debug logs remain intact. No custom IINA build or HomeDocker/Trakt Bridge change.
 
 ## Install directly from IINA (recommended)
 
@@ -38,6 +38,16 @@ Alternative: download the `.iinaplgz` file from [GitHub Releases](https://github
 
 The plugin should identify the correct S02E04/S02E06 from player metadata rather than guessing S01E25/S02E90 from encoded tokens. Playback identification, resume and quit finalization have passed live IINA checks; when localized titles lack an IMDb ID, use Manual Correction.
 
+
+## v0.2.6 Stable — Yastream HLS auto matching, safe metadata, manual correction
+
+- On official IINA 1.5.0, AIOStreams can deliver **Show · S01E10 · Episode title** through a URL fragment carried with the HLS stream path. This is helpful for HLS sources such as Yastream that otherwise appear as `index.m3u8`.
+- **Custom Link** (AIOStreams): `iina://weblink?url={encodedUrl}%23aios_title%3D{title}&mpv_start={position}`. The `mpv_start` resume point is unchanged; the metadata fragment is not sent in the HTTP request and was confirmed preserved by IINA/mpv in this setup.
+- Trakt+ requires **exactly one canonical show-title match** and a Trakt-confirmed episode before any auto-scrobble. Invalid metadata, same-title ambiguity and title mismatches require Manual Match. This corrects a previous false match to *A Certain Magical Index*.
+- **Manual Match:** editable Season/Episode inputs retain values across sidebar refreshes and Trakt search operations; exact episode existence continues to be verified with Trakt.
+- **Mac field results:** Manual Match S01E10 — PASS; auto-matching and scrobbling for Yastream S01E10 — PASS; resume protection was observed to block an older local checkpoint from overwriting a newer Trakt checkpoint.
+- Tested configuration: IINA 1.5.0 official, Audio → S/PDIF passthrough codecs OFF. No custom IINA version, background service, or HomeDocker changes.
+- **Scope:** metadata fragment matching currently supports series episodes with `SxxExx`; some movies/localized titles still require manual selection. Episode Info+ is a separate plugin and not part of this release. See [v0.2.6 Release Notes](docs/releases/v0.2.6.md).
 
 ## v0.2.5 Stable — new features and Mac validation
 

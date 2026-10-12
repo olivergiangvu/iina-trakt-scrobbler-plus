@@ -41,6 +41,8 @@ jobs:
           assert.ok(!content.includes('v0.2.4 — Stable\n- Validated'), 'Stale v0.2.4 release notes');
           assert.ok(info.version !== '0.2.5' || info.ghVersion === 20,
             'v0.2.5 must have ghVersion 20 to update beta.7');
+          assert.ok(info.version !== '0.2.6' || info.ghVersion === 23,
+            'v0.2.6 must have ghVersion 23 to update beta.2');
           assert.ok(fs.readFileSync('main.js', 'utf8').includes(
             'var PLUGIN_VERSION = "' + info.version + '";'), 'main.js version mismatch');
           fs.appendFileSync(process.env.GITHUB_OUTPUT, 'version=' + info.version + '\n');
@@ -53,7 +55,7 @@ jobs:
         run: |
           set -euo pipefail
           for module in main.js trakt.js debug-log-buffer.js stream-source.js \
-              playback-identity.js fresh-identity.js resume-protection.js \
+              playback-identity.js aiostreams-fragment.js fresh-identity.js resume-protection.js \
               mediafusion-identity.js correction-media.js playback-diagnostics.js \
               stop-journal.js sync-history.js trakt-api-gate.js monitor.js; do
             node --check "$module"
@@ -81,7 +83,7 @@ jobs:
           )
           unzip -t "$OUTPUT" >/dev/null
           for module in Info.json main.js trakt.js debug-log-buffer.js \
-              stream-source.js playback-identity.js fresh-identity.js \
+              stream-source.js playback-identity.js aiostreams-fragment.js fresh-identity.js \
               resume-protection.js stop-journal.js trakt-api-gate.js \
               mediafusion-identity.js correction-media.js \
               playback-diagnostics.js sync-history.js monitor.js \

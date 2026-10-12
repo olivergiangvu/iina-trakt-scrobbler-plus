@@ -13,7 +13,7 @@ var resumeProtection = require("./resume-protection.js");
 var correctionMedia = require("./correction-media.js");
 var trakt = require("./trakt.js");
 var debugLogBuffer = require("./debug-log-buffer.js");
-var PLUGIN_VERSION = "0.2.5";
+var PLUGIN_VERSION = "0.2.6";
 var DEBUG_LOG_PATH = "@data/debug.log";
 var MAX_DEBUG_LOG_CHARS = 200000;
 var DEBUG_LOG_FLUSH_INTERVAL_MS = 10000;
@@ -510,6 +510,9 @@ function determineMatchProvenance() {
   if (currentMedia.freshState==="rejected" || currentMedia.freshState==="conflict")
     return {code:"fresh-rejected",label:"External ID needs review"};
   if (currentMedia.manuallyCorrected) return {code:"manual",label:"Manual Confirmed"};
+  if (source==="aiostreams-title-fragment") return confirmedPlayback.key===monitor.mediaKey(info)
+    ? {code:"aiostreams-confirmed",label:"AIOStreams Title (Trakt Exact)"}
+    : {code:"aiostreams-pending",label:"AIOStreams Title (checking)"};
   if (/^tt\d{6,10}$/i.test(String(info.imdb||""))) return {code:"imdb",label:"Direct IMDb ID"};
   if (confirmedPlayback.key===monitor.mediaKey(info)) return {code:"trakt-confirmed",label:"Trakt Verified"};
   if (/^(?:mpv-|filename|stream-)/i.test(source)) return {code:"filename",label:"Filename / Metadata (unverified)"};
@@ -1313,7 +1316,9 @@ function mediaInfoFromParsed(parsed) {
       episode: parsed.episode,
       episodeTitle: parsed.episodeTitle || "",
       unresolvedShow: !!parsed.unresolvedShow,
-      manualTraktId: Number(parsed.manualTraktId || 0)
+      manualTraktId: Number(parsed.manualTraktId || 0),
+      identitySource: parsed.parserSource === "aiostreams-title-fragment"
+        ? "aiostreams-title-fragment" : ""
     };
   }
 
@@ -1384,6 +1389,7 @@ function cloneMediaInfo(mediaInfo) {
     episodeTitle: mediaInfo.episodeTitle,
     unresolvedShow: !!mediaInfo.unresolvedShow,
     manualTraktId: Number(mediaInfo.manualTraktId || 0),
+    identitySource: mediaInfo.identitySource === "aiostreams-title-fragment" ? "aiostreams-title-fragment" : "",
     imdb: mediaInfo.imdb || "",
     tmdb: Number(mediaInfo.tmdb||0)
   };
