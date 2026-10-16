@@ -13,7 +13,7 @@ var resumeProtection = require("./resume-protection.js");
 var correctionMedia = require("./correction-media.js");
 var trakt = require("./trakt.js");
 var debugLogBuffer = require("./debug-log-buffer.js");
-var PLUGIN_VERSION = "0.2.6";
+var PLUGIN_VERSION = "0.2.7";
 var DEBUG_LOG_PATH = "@data/debug.log";
 var MAX_DEBUG_LOG_CHARS = 200000;
 var DEBUG_LOG_FLUSH_INTERVAL_MS = 10000;
@@ -1302,7 +1302,9 @@ function mediaInfoFromParsed(parsed) {
     return {
       type: "movie",
       title: parsed.title,
-      year: parsed.year || null
+      year: parsed.year || null,
+      identitySource: parsed.parserSource === "aiostreams-title-fragment"
+        ? "aiostreams-title-fragment" : ""
     };
   }
 

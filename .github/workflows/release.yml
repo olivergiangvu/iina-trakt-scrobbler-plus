@@ -43,6 +43,8 @@ jobs:
             'v0.2.5 must have ghVersion 20 to update beta.7');
           assert.ok(info.version !== '0.2.6' || info.ghVersion === 23,
             'v0.2.6 must have ghVersion 23 to update beta.2');
+          assert.ok(info.version !== '0.2.7' || info.ghVersion === 26,
+            'v0.2.7 must have ghVersion 26 to update beta.2');
           assert.ok(fs.readFileSync('main.js', 'utf8').includes(
             'var PLUGIN_VERSION = "' + info.version + '";'), 'main.js version mismatch');
           fs.appendFileSync(process.env.GITHUB_OUTPUT, 'version=' + info.version + '\n');

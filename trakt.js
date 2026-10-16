@@ -1535,34 +1535,137 @@ async function resolveAiosEpisodeIds(mediaInfo, bucket, key) {
   if (!title || !Number.isInteger(season) || season < 0 || season > 100 ||
       !Number.isInteger(episode) || episode < 1 || episode > 9999) return null;
   var normalizedTitle = normalizeTitle(title);
+  var episodeKey = normalizeTitle(mediaInfo.episodeTitle);
+  var year = Number(mediaInfo.year || 0);
   var cached = bucket[key];
   if (cached && cached.aiosExact === true && cached.verified === true &&
-      cached.titleKey === normalizedTitle && Number(cached.trakt) > 0)
+      cached.titleKey === normalizedTitle && Number(cached.trakt) > 0 &&
+      (!cached.aliasVerified ||
+       (cached.episodeKey === episodeKey && Number(cached.year || 0) === year)))
     return {trakt:Number(cached.trakt)};
-  var year = mediaInfo.year || "";
+
   var results = await search(title, "show", year || undefined, 20);
   if ((!results || !results.length) && year)
     results = await search(title, "show", undefined, 20);
-  // Unique canonical show title is mandatory. Duplicate exact-title series
-  // without a trusted ID/year are ambiguous and require Manual Match.
   var exactById = Object.create(null);
   (results || []).forEach(function(record) {
     var show = record && record.show;
     var id = Number(show && show.ids && show.ids.trakt || 0);
     if (!id || Number(record.score || 0) < SEARCH_SCORE_THRESHOLD ||
         !titleIdentityMatches(title, show.title)) return;
-    if (year && show.year && Number(show.year) !== Number(year)) return;
+    if (year && Number(show.year) !== year) return;
     exactById[id] = id;
   });
   var ids = Object.keys(exactById).map(Number);
-  if (ids.length !== 1) {
-    log("AIOStreams title lookup rejected: exact canonical show count=" +
-      ids.length + " for " + episodeIdentityLabel(mediaInfo));
+  if (ids.length === 1) {
+    var exact = await verifyEpisodeCandidate(ids[0], mediaInfo);
+    if (!exact) return null;
+    bucket[key] = {trakt:ids[0],verified:true,aiosExact:true,titleKey:normalizedTitle};
+    saveSearchCache();
+    return {trakt:ids[0]};
+  }
+  if (ids.length > 1) {
+    log("AIOStreams exact title ambiguous; Manual Match required for " +
+      episodeIdentityLabel(mediaInfo));
     return null;
   }
-  var verified = await verifyEpisodeCandidate(ids[0], mediaInfo);
-  if (!verified) return null;
-  bucket[key] = {trakt:ids[0],verified:true,aiosExact:true,titleKey:normalizedTitle};
+
+  // TheTVDB/AIOStreams may name the Netflix show "The Diplomat (US)"
+  // while Trakt calls it "The Diplomat". Only allow a bounded country-tag
+  // alias, NEVER arbitrary fuzzy or prefix title matching.
+  var suffix = /^(.*?)\s+\((US|UK|AU|CA|NZ)\)$/i.exec(title);
+  var bareTitle = suffix && String(suffix[1] || "").trim();
+  if (!bareTitle || !episodeKey || bareTitle.length < 3) {
+    log("AIOStreams title lookup rejected: no exact Trakt show for " +
+      episodeIdentityLabel(mediaInfo));
+    return null;
+  }
+  var aliasResults = await search(bareTitle, "show", year || undefined, 20);
+  if ((!aliasResults || !aliasResults.length) && year)
+    aliasResults = await search(bareTitle, "show", undefined, 20);
+  // If results are truncated, uniqueness cannot be established safely.
+  if (!aliasResults || aliasResults.length >= 20) {
+    log("AIOStreams alias lookup truncated/unavailable; Manual Match required.");
+    return null;
+  }
+  var candidates = Object.create(null);
+  aliasResults.forEach(function(record) {
+    var show = record && record.show;
+    var id = Number(show && show.ids && show.ids.trakt || 0);
+    if (!id || Number(record.score || 0) < SEARCH_SCORE_THRESHOLD ||
+        !titleIdentityMatches(bareTitle, show.title)) return;
+    // A matching local release year is additional evidence, never a reason
+    // to accept a conflicting Trakt production year.
+    if (year && Number(show.year) !== year) return;
+    candidates[id] = id;
+  });
+  var aliasIds = Object.keys(candidates).map(Number);
+  if (!aliasIds.length || aliasIds.length > 8) return null;
+  var verifiedIds = [];
+  for (var index = 0; index < aliasIds.length; index++) {
+    var checked = await verifyEpisodeCandidate(aliasIds[index], mediaInfo);
+    // For a country alias, episode existence alone is NOT enough. Require
+    // the full episode TITLE to match too, and exactly one candidate.
+    if (checked && checked.episode &&
+        titleIdentityMatches(mediaInfo.episodeTitle, checked.episode.title))
+      verifiedIds.push(aliasIds[index]);
+  }
+  if (verifiedIds.length !== 1) {
+    log("AIOStreams country-tag alias rejected: exact episode title matches=" +
+      verifiedIds.length + " for " + episodeIdentityLabel(mediaInfo));
+    return null;
+  }
+  bucket[key] = {trakt:verifiedIds[0],verified:true,aiosExact:true,
+    aliasVerified:true,titleKey:normalizedTitle,episodeKey:episodeKey,year:year};
+  saveSearchCache();
+  log("AIOStreams country-tag alias verified with exact Trakt episode title.");
+  return {trakt:verifiedIds[0]};
+}
+// Movie titles from #aios_title are context, not an external media ID.
+// Require a corroborated production year and a unique exact Trakt movie match;
+// never auto-scrobble the first relevance-ranked movie from a title alone.
+async function resolveAiosMovieIds(mediaInfo, bucket, key) {
+  var title = String(mediaInfo.title || "").trim();
+  var year = Number(mediaInfo.year || 0);
+  if (!title || !Number.isInteger(year) || year < 1900 || year > 2100) {
+    log("AIOStreams movie needs a corroborated year or Manual Match.");
+    return null;
+  }
+  var titleKey = normalizeTitle(title);
+  var saved = bucket[key];
+  if (saved && saved.aiosMovieExact === true && saved.verified === true &&
+      saved.titleKey === titleKey && Number(saved.year) === year &&
+      Number(saved.trakt) > 0) return {trakt:Number(saved.trakt)};
+  var results = await search(title, "movie", year, 20);
+  if (!Array.isArray(results) || results.length >= 20) {
+    log("AIOStreams movie search failed or returned a truncated page.");
+    return null;
+  }
+  // Trakt search scores may prefer the wrong franchise/remake.
+  var exact = Object.create(null);
+  results.forEach(function(row) {
+    var movie = row && row.movie;
+    var id = Number(movie && movie.ids && movie.ids.trakt || 0);
+    if (!id || Number(row.score || 0) < SEARCH_SCORE_THRESHOLD ||
+        !titleIdentityMatches(title, movie.title) ||
+        Number(movie.year) !== year) return;
+    exact[id] = id;
+  });
+  var ids = Object.keys(exact).map(Number);
+  if (ids.length !== 1) {
+    log("AIOStreams movie title/year ambiguous or unmatched; candidates=" + ids.length);
+    return null;
+  }
+  var confirmed = await fetchMovieByReference(ids[0]);
+  if (!confirmed || !confirmed.ids ||
+      Number(confirmed.ids.trakt) !== ids[0] ||
+      !titleIdentityMatches(title, confirmed.title) ||
+      Number(confirmed.year) !== year) {
+    log("AIOStreams movie lookup failed canonical title/year confirmation.");
+    return null;
+  }
+  bucket[key] = {trakt:ids[0],verified:true,aiosMovieExact:true,
+    titleKey:titleKey,year:year};
   saveSearchCache();
   return {trakt:ids[0]};
 }
@@ -2009,6 +2112,9 @@ async function getTraktIds(mediaInfo) {
 	var year = mediaInfo.year || "";
 	var bucket = type === "episode" ? cache.show : cache.movie;
 	var key = mediaCacheKey(mediaInfo);
+	if (type === "movie" && mediaInfo.identitySource === "aiostreams-title-fragment") {
+		return resolveAiosMovieIds(mediaInfo, bucket, key + "|aios:movie");
+	}
 	if (type === "episode" && mediaInfo.identitySource === "aiostreams-title-fragment") {
 		// Each episode must be independently verified, not only the show.
 		var scopedKey = key + "|aios:S" + Number(mediaInfo.season) +

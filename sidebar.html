@@ -2004,8 +2004,11 @@
         send("restore_remote_resume");
       });
       bindLocalAction("copy-playback-diagnostics", function() {
-        if (!stateReady || !state.playback || !state.playback.available) {
-          setText("diagnostics-feedback", "Start playback first, then copy diagnostics.");
+        // Diagnostics are most useful when playback is active but matching
+        // fails and currentMedia is null. getCurrentSource() on the plugin
+        // side can safely report redacted mpv metadata in that state.
+        if (!stateReady) {
+          setText("diagnostics-feedback", "Connecting to plugin. Please retry.");
           setHidden("diagnostics-feedback", false);
           return;
         }

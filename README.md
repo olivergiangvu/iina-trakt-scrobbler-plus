@@ -2,7 +2,7 @@
 
 An enhanced fork of [i3p9/iina-trakt-scrobbler](https://github.com/i3p9/iina-trakt-scrobbler) with initial support for **Remux / AIOStreams streaming URLs**.
 
-**Current stable release: v0.2.6.** Promoted from the Mac-tested v0.2.6-beta.2 canary: Yastream HLS Auto Matching from AIOStreams URL fragment, unique exact-title Trakt verification and exact TV episode checks (preventing the observed *A Certain Magical Index* false-positive), and reliable Manual Match Season/Episode editing (beta.1 field PASS). Previous v0.2.5 Comet/IMDb matching, resume protection, Trakt watched synchronization and batched debug logs remain intact. No custom IINA build or HomeDocker/Trakt Bridge change.
+**Current stable release: v0.2.7.** Promoted from the Mac-tested v0.2.7-beta.2 canary: safe country-suffix series matching (**The Diplomat (US) S01E06** → Trakt's *The Diplomat*) and movie-only AIOStreams fragment identification (**Poetic Justice (1993)**). Both were verified to scrobble correctly on the user's IINA 1.5.0 setup. v0.2.6's Yastream HLS episode matching and Manual S/E correction, as well as Comet/IMDb matching, Resume Protection, and batched logging, remain intact. No custom IINA build, Episode Info+ change, or HomeDocker/Trakt Bridge change.
 
 ## Install directly from IINA (recommended)
 
@@ -30,7 +30,7 @@ Alternative: download the `.iinaplgz` file from [GitHub Releases](https://github
 - Keeps the original file-based Guessit parser, scrobble monitoring, sidebar and history.
 - Uses its own IINA plugin identifier and token Keychain service.
 
-**Not yet included:** Fresh IMDb/TMDB-first recognition when both player metadata and URL lack a trustworthy show ID. MediaFusion manual-confirmed pack cache is supported, but this is not an upstream series identity resolver.
+**Unresolved without stronger metadata:** A completely opaque media filename/URL with no trustworthy ID, readable title or verified AIOStreams fragment cannot be matched automatically. Use Manual Match; the plugin deliberately avoids speculative Trakt events.
 
 ## Supported test example
 
@@ -38,6 +38,15 @@ Alternative: download the `.iinaplgz` file from [GitHub Releases](https://github
 
 The plugin should identify the correct S02E04/S02E06 from player metadata rather than guessing S01E25/S02E90 from encoded tokens. Playback identification, resume and quit finalization have passed live IINA checks; when localized titles lack an IMDb ID, use Manual Correction.
 
+
+## v0.2.7 Stable — verified country aliases + safe movie identification
+
+- AIOStreams episodes tagged with regional suffixes (e.g. **The Diplomat (US)**) may match a single verified Trakt series without the suffix **only** after exact Trakt Season/Episode, episode-title and compatible year checks. Multiple candidates or ambiguous evidence require Manual Match.
+- AIOStreams movie fragments now support a plain title. A matching readable filename (for example `Poetic.Justice.1993.mkv`) supplies an independent production year for strict Trakt title+year verification. The plugin refuses to auto-scrobble a movie when only the title is known.
+- Copy Diagnostics works even if playback classification returns **No active media**, which allows troubleshooting failures without sharing stream credentials.
+- **Mac field results:** beta.1 alias detection/scrobble for *The Diplomat (US) S01E06* — PASS; beta.2 movie detection/scrobble for *Poetic Justice (1993)* — PASS.
+- Keep official IINA 1.5.0, Audio → SPDIF passthrough all OFF, and AIOStreams Custom Link `iina://weblink?url={encodedUrl}%23aios_title%3D{title}&mpv_start={position}`. Neither official IINA nor Episode Info+ was changed.
+- Versioned notes: [v0.2.7 release notes](docs/releases/v0.2.7.md). Earlier stable v0.2.6 remains available for rollback.
 
 ## v0.2.6 Stable — Yastream HLS auto matching, safe metadata, manual correction
 

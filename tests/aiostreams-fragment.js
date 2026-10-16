@@ -30,8 +30,16 @@ const noFragment=identity.identify({
   filename:"index.m3u8",title:"index.m3u8",mediaTitle:"index.m3u8"
 },parser,stream);
 assert.equal(noFragment.parsed,null,"bare HLS index must not become a film/show");
+// A title-only fragment can be a movie, but without an independent year
+// it MUST NOT be auto-scrobbled. The strict movie resolver enforces this.
+const titleOnly=identity.identify({
+  url:"https://example.com/index.m3u8#aios_title=Not%20An%20Episode",
+  path:"https://example.com/index.m3u8#aios_title=Not%20An%20Episode",
+  filename:"index.m3u8"
+},parser,stream);
+assert.equal(titleOnly.parsed.kind,"movie");
+assert.equal(titleOnly.parsed.year,null);
 for(const malformed of [
-  "#aios_title=Not%20An%20Episode",
   "#aios_title="+encodeURIComponent("Other Show · S01E00"),
   "#aios_title="+encodeURIComponent("Index.m3u8 · S01E10"),
   "#aios_title=%XY",
