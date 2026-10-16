@@ -1621,6 +1621,55 @@ async function resolveAiosEpisodeIds(mediaInfo, bucket, key) {
   log("AIOStreams country-tag alias verified with exact Trakt episode title.");
   return {trakt:verifiedIds[0]};
 }
+// Movie titles from #aios_title are context, not an external media ID.
+// Require a corroborated production year and a unique exact Trakt movie match;
+// never auto-scrobble the first relevance-ranked movie from a title alone.
+async function resolveAiosMovieIds(mediaInfo, bucket, key) {
+  var title = String(mediaInfo.title || "").trim();
+  var year = Number(mediaInfo.year || 0);
+  if (!title || !Number.isInteger(year) || year < 1900 || year > 2100) {
+    log("AIOStreams movie needs a corroborated year or Manual Match.");
+    return null;
+  }
+  var titleKey = normalizeTitle(title);
+  var saved = bucket[key];
+  if (saved && saved.aiosMovieExact === true && saved.verified === true &&
+      saved.titleKey === titleKey && Number(saved.year) === year &&
+      Number(saved.trakt) > 0) return {trakt:Number(saved.trakt)};
+  var results = await search(title, "movie", year, 20);
+  if (!Array.isArray(results) || results.length >= 20) {
+    log("AIOStreams movie search failed or returned a truncated page.");
+    return null;
+  }
+  // Trakt search scores may prefer the wrong franchise/remake.
+  var exact = Object.create(null);
+  results.forEach(function(row) {
+    var movie = row && row.movie;
+    var id = Number(movie && movie.ids && movie.ids.trakt || 0);
+    if (!id || Number(row.score || 0) < SEARCH_SCORE_THRESHOLD ||
+        !titleIdentityMatches(title, movie.title) ||
+        Number(movie.year) !== year) return;
+    exact[id] = id;
+  });
+  var ids = Object.keys(exact).map(Number);
+  if (ids.length !== 1) {
+    log("AIOStreams movie title/year ambiguous or unmatched; candidates=" + ids.length);
+    return null;
+  }
+  var confirmed = await fetchMovieByReference(ids[0]);
+  if (!confirmed || !confirmed.ids ||
+      Number(confirmed.ids.trakt) !== ids[0] ||
+      !titleIdentityMatches(title, confirmed.title) ||
+      Number(confirmed.year) !== year) {
+    log("AIOStreams movie lookup failed canonical title/year confirmation.");
+    return null;
+  }
+  bucket[key] = {trakt:ids[0],verified:true,aiosMovieExact:true,
+    titleKey:titleKey,year:year};
+  saveSearchCache();
+  return {trakt:ids[0]};
+}
+
 async function resolveEpisodeIds(mediaInfo, bucket, key) {
 	if (mediaInfo.unresolvedShow) {
 		log("MediaFusion episode route has season/episode but no trusted show identity; manual correction required.");
@@ -2063,6 +2112,9 @@ async function getTraktIds(mediaInfo) {
 	var year = mediaInfo.year || "";
 	var bucket = type === "episode" ? cache.show : cache.movie;
 	var key = mediaCacheKey(mediaInfo);
+	if (type === "movie" && mediaInfo.identitySource === "aiostreams-title-fragment") {
+		return resolveAiosMovieIds(mediaInfo, bucket, key + "|aios:movie");
+	}
 	if (type === "episode" && mediaInfo.identitySource === "aiostreams-title-fragment") {
 		// Each episode must be independently verified, not only the show.
 		var scopedKey = key + "|aios:S" + Number(mediaInfo.season) +
