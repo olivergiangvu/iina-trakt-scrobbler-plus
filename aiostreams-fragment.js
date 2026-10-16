@@ -42,9 +42,22 @@ function inspect(source) {
       !Number.isInteger(season) || season < 0 || season > 100 ||
       !Number.isInteger(episode) || episode < 1 || episode > 9999)
     return {present:true,valid:false,reason:"invalid-episode-position"};
+  // Only treat a year as independent corroboration when a readable local
+  // filename agrees with BOTH the show's base name and episode coordinates.
+  // Never parse dates out of opaque stream URLs or access-token paths.
+  var displayName = String(src.filename || "").split("#")[0].split("?")[0];
+  displayName = displayName.slice(displayName.lastIndexOf("/") + 1);
+  var fileMatch = /^(.+?)[. _-]+((?:19|20)\d{2})[. _-]+S(\d{1,3})E(\d{1,4})(?:[. _-]|$)/i.exec(displayName);
+  var bareShow = show.replace(/\s+\((?:US|UK|AU|CA|NZ)\)$/i, "");
+  function simplify(name) {
+    return String(name || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  }
+  var year = fileMatch && simplify(fileMatch[1]) === simplify(bareShow) &&
+    Number(fileMatch[3]) === season && Number(fileMatch[4]) === episode
+    ? Number(fileMatch[2]) : null;
   return {present:true,valid:true,parsed:{
     kind:"episode",showTitle:show,season:season,episode:episode,
-    episodeTitle:episodeTitle,unresolvedShow:false,
+    year:year,episodeTitle:episodeTitle,unresolvedShow:false,
     parserSource:"aiostreams-title-fragment"
   }};
 }
