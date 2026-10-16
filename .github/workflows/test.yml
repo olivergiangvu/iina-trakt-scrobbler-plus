@@ -40,6 +40,8 @@ jobs:
         run: node tests/manual-episode-editor-refresh.js
       - name: AIOStreams HLS metadata fragment parsing
         run: node tests/aiostreams-fragment.js
+      - name: AIOStreams Poetic Justice movie and strict year validation
+        run: node tests/aiostreams-movie.js
       - name: AIOStreams exact title and episode verification
         run: node tests/aiostreams-strict-match.js
       - name: AIOStreams regional alias with strict episode title and year
