@@ -1302,7 +1302,9 @@ function mediaInfoFromParsed(parsed) {
     return {
       type: "movie",
       title: parsed.title,
-      year: parsed.year || null
+      year: parsed.year || null,
+      identitySource: parsed.parserSource === "aiostreams-title-fragment"
+        ? "aiostreams-title-fragment" : ""
     };
   }
 
