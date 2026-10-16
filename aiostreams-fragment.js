@@ -35,7 +35,40 @@ function inspect(source) {
   // AIOStreams' current fullTitle() emits: Show · S01E10 · Episode Title.
   // Do not parse 'index.m3u8' or infer a TV identity from a bare movie title.
   var match = /^(.+?)\s*·\s*S(\d{1,3})E(\d{1,4})(?:\s*·\s*(.+))?$/i.exec(title);
-  if (!match) return {present:true,valid:false,reason:"unsupported-title-format"};
+  if (!match) {
+    // AIOStreams fullTitle() sends only the movie title. A local, readable
+    // filename such as Poetic.Justice.1993.mkv supplies the production year.
+    // A yearless HLS index.m3u8 is usable for display/manual correction, but
+    // cannot be auto-scrobbled without independently verified year or ID.
+    var movieTitle = title, declaredYear = null;
+    var inlineYear = /^(.*?)\s+\(((?:19|20)\d{2})\)$/.exec(title);
+    if (inlineYear) {
+      movieTitle = inlineYear[1].trim();
+      declaredYear = Number(inlineYear[2]);
+    }
+    if (!movieTitle || movieTitle.length > 200 ||
+        /\bS\d{1,3}E\d{1,4}\b/i.test(movieTitle) ||
+        /\s[·|]\s/.test(movieTitle) ||
+        /^(?:index|master|playlist|manifest)(?:\.(?:m3u8|mpd))?$/i.test(movieTitle) ||
+        /\.(?:m3u8|mpd|mkv|mp4|avi)$/i.test(movieTitle)) {
+      return {present:true,valid:false,reason:"unsupported-title-format"};
+    }
+    var filename = String(src.filename || "").split("#")[0].split("?")[0];
+    filename = filename.slice(filename.lastIndexOf("/") + 1);
+    var movieFile = /^(.*?)\.?((?:19|20)\d{2})(?:[. _-]|\.(?:mkv|mp4|mov|avi)$|$)/i.exec(filename);
+    function movieKey(str) {
+      return String(str || "").toLowerCase().normalize("NFKD")
+        .replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g," ").trim();
+    }
+    var matchingFileYear = movieFile && movieKey(movieFile[1]) === movieKey(movieTitle)
+      ? Number(movieFile[2]) : null;
+    if (declaredYear && matchingFileYear && declaredYear !== matchingFileYear)
+      return {present:true,valid:false,reason:"conflicting-movie-year"};
+    return {present:true,valid:true,parsed:{
+      kind:"movie",title:movieTitle,year:declaredYear || matchingFileYear,
+      parserSource:"aiostreams-title-fragment"
+    }};
+  }
   var show = match[1].trim(), season = Number(match[2]), episode = Number(match[3]);
   var episodeTitle = String(match[4] || "").trim();
   if (!show || show.length > 200 || /^(?:index|master|playlist|manifest)(?:\.m3u8)?$/i.test(show) ||
