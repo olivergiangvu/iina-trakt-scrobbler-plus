@@ -16,6 +16,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - name: Shared Glass Light/Dark parity contract
+        run: node tests/glass-parity.js
       - name: Stream URL tests
         run: node tests/stream-source.js
       - name: Playback metadata identity tests
