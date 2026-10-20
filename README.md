@@ -2,7 +2,7 @@
 
 An enhanced fork of [i3p9/iina-trakt-scrobbler](https://github.com/i3p9/iina-trakt-scrobbler) with initial support for **Remux / AIOStreams streaming URLs**.
 
-**Current stable release: v0.2.7.** Promoted from the Mac-tested v0.2.7-beta.2 canary: safe country-suffix series matching (**The Diplomat (US) S01E06** → Trakt's *The Diplomat*) and movie-only AIOStreams fragment identification (**Poetic Justice (1993)**). Both were verified to scrobble correctly on the user's IINA 1.5.0 setup. v0.2.6's Yastream HLS episode matching and Manual S/E correction, as well as Comet/IMDb matching, Resume Protection, and batched logging, remain intact. No custom IINA build, Episode Info+ change, or HomeDocker/Trakt Bridge change.
+**Current stable release: v0.2.7.** Upcoming v0.2.8-beta.1 uses the same Light/Dark semantic glass palette as Episode Info Plus v1.3.3-beta.1. It keeps the native transparent sidebar and reduces opacity in authentication/code surfaces without changing Trakt matching, network, playback or scrobbling. Promoted from the Mac-tested v0.2.7-beta.2 canary: safe country-suffix series matching (**The Diplomat (US) S01E06** → Trakt's *The Diplomat*) and movie-only AIOStreams fragment identification (**Poetic Justice (1993)**). Both were verified to scrobble correctly on the user's IINA 1.5.0 setup. v0.2.6's Yastream HLS episode matching and Manual S/E correction, as well as Comet/IMDb matching, Resume Protection, and batched logging, remain intact. No custom IINA build, Episode Info+ change, or HomeDocker/Trakt Bridge change.
 
 ## Install directly from IINA (recommended)
 
