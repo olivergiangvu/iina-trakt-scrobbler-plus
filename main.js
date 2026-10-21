@@ -13,7 +13,7 @@ var resumeProtection = require("./resume-protection.js");
 var correctionMedia = require("./correction-media.js");
 var trakt = require("./trakt.js");
 var debugLogBuffer = require("./debug-log-buffer.js");
-var PLUGIN_VERSION = "0.2.8";
+var PLUGIN_VERSION = "0.2.9-beta.1";
 var DEBUG_LOG_PATH = "@data/debug.log";
 var MAX_DEBUG_LOG_CHARS = 200000;
 var DEBUG_LOG_FLUSH_INTERVAL_MS = 10000;
@@ -448,6 +448,10 @@ function beginResumeCheck(target) {
     if(currentMedia!==target || target.resumeGate!==gate ||
        target.mediaInfo!==inspectedInfo)return;
     gate.update(result);
+    // A successful read-only preflight is itself proof that this Trakt show
+    // and episode were matched, even before the first outbound scrobble.
+    target.resumeVerifiedTraktId=result && result.status==="ok"?
+      Number(result.traktId||0):0;
     var current=currentResumeStatus();
     log("Resume guard: "+current.status+"; "+current.message);
     queueSidebarRefresh(false);
@@ -510,7 +514,9 @@ function determineMatchProvenance() {
   if (currentMedia.freshState==="rejected" || currentMedia.freshState==="conflict")
     return {code:"fresh-rejected",label:"External ID needs review"};
   if (currentMedia.manuallyCorrected) return {code:"manual",label:"Manual Confirmed"};
-  if (source==="aiostreams-title-fragment") return confirmedPlayback.key===monitor.mediaKey(info)
+  if (source==="aiostreams-title-fragment") return (
+    confirmedPlayback.key===monitor.mediaKey(info) ||
+    Number(currentMedia.resumeVerifiedTraktId||0)>0)
     ? {code:"aiostreams-confirmed",label:"AIOStreams Title (Trakt Exact)"}
     : {code:"aiostreams-pending",label:"AIOStreams Title (checking)"};
   if (/^tt\d{6,10}$/i.test(String(info.imdb||""))) return {code:"imdb",label:"Direct IMDb ID"};
@@ -1817,6 +1823,7 @@ function queueScrobble(verb, snapshot, options) {
         detail:reason==="remote-ahead"
           ? "Resume Protection: seek to saved Trakt point before syncing."
           : pendingIdentity ? pendingIdentity.message
+          : currentGate ? currentResumeStatus().message
           : "Resume Protection: waiting for verified Trakt resume.",
         reason:requiresMatch?"missing-trakt-match":"resume-guard",progress:payload.progress});
       return;

@@ -336,3 +336,27 @@ Trakt target separately. This could split identity and resume tracking.
   Resume Protection and Trakt Bridge configuration are unchanged.
 
 Beta.3 is a canary. The stable release stays v0.2.4.
+
+## v0.2.9-beta.1 Canary — The Diplomat same-title disambiguation
+
+A field report on v0.2.8 exposed `The Diplomat · S02E04 · The Other Army` through
+`#aios_title`, but Trakt+ displayed AIOStreams Title (checking) and Resume Protection
+blocked outgoing updates. The title alone is shared across distinct TV series
+(including two 2023 productions). The existing resolver stopped after finding
+multiple exact-title search hits without comparing the individual episodes.
+
+The canary now checks the exact requested S/E on up to eight identically
+titled candidates and requires exactly ONE independently verified matching
+episode title before allowing a Trakt ID through. A truncated search page,
+missing episode title or multiple valid matches still fails closed and
+requires Correct Match; no speculative scrobbles. The verification cache
+is episode-title aware for this multi-series path.
+
+The resume preflight now differentiates **unverified show identity** from
+**Trakt HTTP/network errors** instead of calling every failure a generic
+resume outage. A successful read-only preflight immediately marks the
+AIOStreams title Trakt-exact in sidebar Match Source.
+
+This update does not alter the IINA Custom Link, upstream stream routing,
+HomeDocker, or the Trakt Bridge. `v0.2.8` stays Latest Stable while the
+IINA v0.2.9-beta.1 prerelease receives field tests.

@@ -46,6 +46,8 @@ jobs:
         run: node tests/aiostreams-movie.js
       - name: AIOStreams exact title and episode verification
         run: node tests/aiostreams-strict-match.js
+      - name: AIOStreams duplicate-title exact S/E and resume preflight
+        run: node tests/aiostreams-duplicate-title-episode.js
       - name: AIOStreams regional alias with strict episode title and year
         run: node tests/aiostreams-country-alias.js
       - name: MediaFusion episode route and manual pack cache regression

@@ -1540,7 +1540,7 @@ async function resolveAiosEpisodeIds(mediaInfo, bucket, key) {
   var cached = bucket[key];
   if (cached && cached.aiosExact === true && cached.verified === true &&
       cached.titleKey === normalizedTitle && Number(cached.trakt) > 0 &&
-      (!cached.aliasVerified ||
+      (!(cached.aliasVerified || cached.exactEpisodeTitleVerified) ||
        (cached.episodeKey === episodeKey && Number(cached.year || 0) === year)))
     return {trakt:Number(cached.trakt)};
 
@@ -1565,9 +1565,33 @@ async function resolveAiosEpisodeIds(mediaInfo, bucket, key) {
     return {trakt:ids[0]};
   }
   if (ids.length > 1) {
-    log("AIOStreams exact title ambiguous; Manual Match required for " +
-      episodeIdentityLabel(mediaInfo));
-    return null;
+    // An exact title is not an identity: e.g. multiple 2023 TV series share
+    // "The Diplomat". Distinguish them by an independently fetched episode
+    // TITLE at the EXACT requested season/episode. Never guess by ranking.
+    // A full search page may hide further same-title candidates.
+    if (!episodeKey || ids.length > 8 ||
+        !Array.isArray(results) || results.length >= 20) {
+      log("AIOStreams duplicate exact show titles require a nontruncated search and episode title.");
+      return null;
+    }
+    var exactEpisodeIds=[];
+    for (var idIndex=0; idIndex<ids.length; idIndex++) {
+      var checkedExact=await verifyEpisodeCandidate(ids[idIndex],mediaInfo);
+      if (checkedExact && checkedExact.episode &&
+          titleIdentityMatches(mediaInfo.episodeTitle,checkedExact.episode.title))
+        exactEpisodeIds.push(ids[idIndex]);
+    }
+    if (exactEpisodeIds.length!==1) {
+      log("AIOStreams exact-title duplicate disambiguation rejected: episode-title matches="+
+        exactEpisodeIds.length+" for "+episodeIdentityLabel(mediaInfo));
+      return null;
+    }
+    bucket[key]={trakt:exactEpisodeIds[0],verified:true,aiosExact:true,
+      exactEpisodeTitleVerified:true,titleKey:normalizedTitle,
+      episodeKey:episodeKey,year:year};
+    saveSearchCache();
+    log("AIOStreams same-title series uniquely verified by exact S/E and episode title.");
+    return {trakt:exactEpisodeIds[0]};
   }
 
   // TheTVDB/AIOStreams may name the Netflix show "The Diplomat (US)"

@@ -1,0 +1,92 @@
+name: Publish v0.2.9 Duplicate-Title Resume Canary
+
+on:
+  push:
+    branches: ['fix/v0.2.9-diplomat-resume-preflight']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: v029-diplomat-canary
+  cancel-in-progress: false
+
+jobs:
+  prerelease:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout canary
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Verify canary version and field notes
+        shell: bash
+        run: |
+          set -euo pipefail
+          node - <<'NODE'
+          const assert = require('node:assert/strict');
+          const fs = require('node:fs');
+          const info = require('./Info.json');
+          assert.equal(info.version,'0.2.9-beta.1');
+          assert.equal(info.ghVersion,29);
+          assert.equal(info.identifier,'io.github.olivergiangvu.iinatraktscrobblerplus');
+          assert.equal(info.ghRepo,'olivergiangvu/iina-trakt-scrobbler-plus');
+          assert.ok(fs.readFileSync('main.js','utf8').includes('var PLUGIN_VERSION = "0.2.9-beta.1";'));
+          assert.ok(fs.readFileSync('docs/releases/v0.2.9-beta.1.md','utf8').length>200);
+          NODE
+
+      - name: Syntax and complete regression suite
+        shell: bash
+        run: |
+          set -euo pipefail
+          for module in main.js trakt.js debug-log-buffer.js stream-source.js \
+              playback-identity.js aiostreams-fragment.js fresh-identity.js resume-protection.js \
+              mediafusion-identity.js correction-media.js playback-diagnostics.js \
+              stop-journal.js sync-history.js trakt-api-gate.js monitor.js; do
+            node --check "$module"
+          done
+          for testfile in tests/*.js; do
+            echo "RUN $testfile"
+            node "$testfile"
+          done
+
+      - name: Package IINA plugin and verify modules
+        shell: bash
+        run: |
+          set -euo pipefail
+          STAGE="$(./scripts/stage-plugin.sh)"
+          ASSET="$GITHUB_WORKSPACE/Trakt-Scrobbler-Plus-v0.2.9-beta.1.iinaplgz"
+          (cd "$STAGE" && zip -q -r "$ASSET" .)
+          unzip -t "$ASSET" >/dev/null
+          for module in Info.json main.js trakt.js debug-log-buffer.js \
+              stream-source.js playback-identity.js aiostreams-fragment.js fresh-identity.js \
+              resume-protection.js stop-journal.js trakt-api-gate.js \
+              mediafusion-identity.js correction-media.js playback-diagnostics.js \
+              sync-history.js monitor.js sidebar.html preferences.html parser.iina.js; do
+            unzip -Z1 "$ASSET" | grep -Fxq "$module"
+          done
+          unzip -p "$ASSET" Info.json | node -e \
+            'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const v=JSON.parse(s);if(v.version!=="0.2.9-beta.1")process.exit(1)})'
+          echo "ASSET=$ASSET" >> "$GITHUB_ENV"
+
+      - name: Publish prerelease, preserve v0.2.8 stable
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="v0.2.9-beta.1"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "$TAG already published; not replacing a tested asset."
+            exit 0
+          fi
+          gh release create "$TAG" "$ASSET" \
+            --target "$GITHUB_SHA" \
+            --title "$TAG — AIOStreams Duplicate-Title Canary" \
+            --notes-file docs/releases/v0.2.9-beta.1.md \
+            --prerelease
