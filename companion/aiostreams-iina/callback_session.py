@@ -31,7 +31,7 @@ def _audit_result(result: str) -> None:
         CALLBACK_LOG.parent.mkdir(parents=True, exist_ok=True)
         with CALLBACK_LOG.open("a", encoding="utf-8") as handle:
             handle.write(datetime.now(timezone.utc).isoformat() +
-                         " AIO_CALLBACK_RETURN=" + result + "\\n")
+                         " AIO_CALLBACK_RETURN=" + result + "\n")
     except OSError:
         pass
 
