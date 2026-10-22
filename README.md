@@ -4,6 +4,12 @@ An enhanced fork of [i3p9/iina-trakt-scrobbler](https://github.com/i3p9/iina-tra
 
 **Current Stable: v0.2.8.** Promoted from the Light/Dark native-glass parity beta after macOS user validation alongside Episode Info Plus v1.3.3. Reuses semantic glass colors, keeps the IINA-native transparent sidebar, and softens credential/code panel opacity without altering Trakt matching, network, playback, queue, OAuth or scrobbling. See [v0.2.8 release notes](docs/releases/v0.2.8.md). Previous Stable v0.2.7 is available for rollback. Promoted from the Mac-tested v0.2.7-beta.2 canary: safe country-suffix series matching (**The Diplomat (US) S01E06** → Trakt's *The Diplomat*) and movie-only AIOStreams fragment identification (**Poetic Justice (1993)**). Both were verified to scrobble correctly on the user's IINA 1.5.0 setup. v0.2.6's Yastream HLS episode matching and Manual S/E correction, as well as Comet/IMDb matching, Resume Protection, and batched logging, remain intact. No custom IINA build, Episode Info+ change, or HomeDocker/Trakt Bridge change.
 
+## AIO-IINA Companion app (same repository, independent Mac artifact)
+
+The source of the existing **AIOIINABridge.app v0.5.1** lives under [`companion/aiostreams-iina/`](companion/aiostreams-iina/). This is the external player URL handler for AIOStreams → official IINA with subtitle, title and resume preservation. **Trakt+ remains the only IINA → Trakt writer.**
+
+The companion is a separate macOS `.app` distributable within **this same GitHub repo** (not another repository, plugin, or HomeDocker service). Versions remain independent: Trakt+ `v0.2.8` and AIO-IINA `v0.5.1`. Beta packages are built by a separate Actions workflow and **are not auto-installed or published**. The root `.iinaplgz` staging/release workflow is unchanged; approved future releases can attach both assets under one repo. See [Companion README](companion/aiostreams-iina/README.md) and [v0.6 x-callback design](docs/proposals/aio-iina-xcallback-v0.6.md).
+
 ## Install directly from IINA (recommended)
 
 1. On **your Mac**, open **IINA → Settings → Plugins**.
