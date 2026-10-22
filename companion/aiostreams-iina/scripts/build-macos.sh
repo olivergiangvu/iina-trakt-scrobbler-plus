@@ -3,7 +3,7 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT="${1:-$ROOT/dist}"
-APP="$OUT/AIOIINABridge.app"
+APP="$OUT/AIOIINABridge-beta.app"
 PLIST="$APP/Contents/Info.plist"
 for tool in osacompile /usr/libexec/PlistBuddy ditto python3 codesign; do
   command -v "$tool" >/dev/null || { echo "Missing macOS build tool: $tool" >&2; exit 2; }
@@ -18,8 +18,8 @@ cp "$ROOT/bridge.py" "$APP/Contents/Resources/bridge.py"
 cp "$ROOT/callback_session.py" "$APP/Contents/Resources/callback_session.py"
 cp "$ROOT/launcher.sh" "$APP/Contents/Resources/launcher.sh"
 chmod 755 "$APP/Contents/Resources/launcher.sh"
-/usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier io.github.olivergiangvu.AIOIINABridge" "$PLIST" ||
-  /usr/libexec/PlistBuddy -c "Add :CFBundleIdentifier string io.github.olivergiangvu.AIOIINABridge" "$PLIST"
+/usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier io.github.olivergiangvu.AIOIINABridge.beta" "$PLIST" ||
+  /usr/libexec/PlistBuddy -c "Add :CFBundleIdentifier string io.github.olivergiangvu.AIOIINABridge.beta" "$PLIST"
 /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string 0.6.0" "$PLIST" 2>/dev/null ||
   /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString 0.6.0" "$PLIST"
 /usr/libexec/PlistBuddy -c "Add :CFBundleVersion string 60" "$PLIST" 2>/dev/null ||
