@@ -16,6 +16,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - name: AIO-IINA callback SHA and one-shot regression
+        run: node tests/aio-companion-callback.js
       - name: Shared Glass Light/Dark parity contract
         run: node tests/glass-parity.js
       - name: Stream URL tests
