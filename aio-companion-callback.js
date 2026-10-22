@@ -69,6 +69,10 @@ function createCompanionCallback(options) {
   var fs = options.file, utils = options.utils;
   var now = options.now || Date.now;
   var enabled = options.enabled || function() { return false; };
+  var onStatus = options.onStatus || function() {};
+  function emit(status) {
+    try { onStatus(status); } catch (_error) {}
+  }
   var current = null;
   var lastPosition = 0;
   var lastDuration = 0;
@@ -105,6 +109,7 @@ function createCompanionCallback(options) {
       matches.sort(function(a,b) { return b.when - a.when; });
       if (!matches.length) return false;
       current = matches[0].id;
+      emit("session-matched");
       return true;
     } catch (_error) {
       return false;
@@ -142,9 +147,15 @@ function createCompanionCallback(options) {
   async function onClose(position, duration, paths) {
     if (!enabled() || finished) return false;
     onPosition(position, duration, paths);
-    if (!current || lastPosition < 1) return false;
+    if (!current || lastPosition < 1) {
+      emit("close-no-session-or-position");
+      return false;
+    }
     var helper = helperPath();
-    if (!helper) return false; // no launch/side effect without a matching app
+    if (!helper) {
+      emit("helper-missing");
+      return false; // no launch/side effect without a matching app
+    }
     finished = true;
     var pos = Math.floor(lastPosition);
     var id = current;
@@ -152,8 +163,11 @@ function createCompanionCallback(options) {
     try {
       var result = await utils.exec("/usr/bin/python3",
         [helper, "--complete", id, "--position", String(pos)]);
-      return !!(result && result.status === 0);
+      var ok = !!(result && result.status === 0);
+      emit(ok ? "helper-ok" : "helper-failed");
+      return ok;
     } catch (_err) {
+      emit("helper-error");
       return false;
     }
   }
