@@ -541,6 +541,9 @@ def handle(raw):
         urls, known_facts = merge_subtitle_candidates(subtitles, selected_urls, selected_facts)
         paths, labelled = prepare_subtitles(urls, known_facts if selected_urls else None)
         args = [cli] + cli_args(media, title, position, paths)
+        # Read-only diagnostic: the first resume value is authored by AIOStreams.
+        # Never write raw signed media/subtitle/return URLs, titles or tokens.
+        log("AIO_RESUME_INPUT_SECONDS=%d" % position)
         # AIO callback is opt-in: only explicit allow-listed Web origin or
         # aiostreams://return creates a short-lived, permission-restricted
         # descriptor. No signed stream URL is stored in it.
