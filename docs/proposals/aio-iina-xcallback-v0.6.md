@@ -1,10 +1,10 @@
 # AIOStreams → IINA: Infuse-style x-callback return (design gate v0.6)
 
-**Status:** Design only; no IINA plugin or Mac launcher production changes. Branch: `beta/aiostreams-xcallback-v0.6`.
+**Status:** Monorepo beta baseline is imported (AIOIINABridge v0.5.1); x-callback is design-only. No deployed Mac or IINA plugin change. Branch: `beta/aiostreams-xcallback-v0.6`.
 
 ## Goal and boundaries
 
-Keep existing IINA 1.5.0, Trakt Scrobbler Plus stable v0.2.8, AIOIINABridge.app 0.5.1 launch/subtitle workflow and HomeDocker Trakt Bridge v1.5. The Mac launcher source in the user's Library is **v0.5.0** and cannot be treated as current production v0.5.1; obtain exact installed v0.5.1 before replacing it.
+Keep existing IINA 1.5.0, Trakt Scrobbler Plus stable v0.2.8, AIOIINABridge.app 0.5.1 launch/subtitle workflow and HomeDocker Trakt Bridge v1.5. Exact v0.5.1 launcher source was recovered from the user's Library and imported unchanged into `companion/aiostreams-iina/bridge.py`; neither that source nor the newly staged `.app` packaging has yet been tested against the currently installed binary on the user's Mac. Keep the deployed v0.5.1 app untouched.
 
 No AIOStreams source/image changes, no new Docker container or background server, no second Trakt writer. Callback channel is **IINA → AIO**; Trakt+ remains **IINA → Trakt**. The HomeDocker Fast Lane `Trakt → AIO` is separate.
 
@@ -33,7 +33,7 @@ Keep `context` as original AIO-generated return address, rather than constructin
 
 ## Implementation contract
 
-1. **Mac launcher 0.6 (not in Trakt+ repo):** safely parse and validate `context`, create permission 0700 session directory and 0600 session descriptor with cryptographically random per-launch id, item/source/return context (not logs), TTL and stream URL SHA-256 correlation. Keep unchanged signed source URL, title fragment, subtitle selection and resume.
+1. **Mac launcher 0.6 (`companion/aiostreams-iina/` in this same Trakt+ repo):** safely parse and validate `context`, create permission 0700 session directory and 0600 session descriptor with cryptographically random per-launch id, item/source/return context (not logs), TTL and stream URL SHA-256 correlation. Keep unchanged signed source URL, title fragment, subtitle selection and resume.
 2. **IINA listener (in this repo, opt-in only):** correlate playback to `session id`; read mpv time position and duration, capture a bounded last-good position journal; use `mpv.end-file` and `iina.window-will-close`; no callback for unrelated media or another window. On normal close/stop/EOF issue at most one terminal callback, idempotent per session.
 3. **Callback:** add `position=<nonnegative integer seconds>` to the *original* AIO return URL; `finished=1` only on verifiable EOF or explicit safe played decision after canonical duplicate checks. AIO Web requires current authenticated session for reporter request; Desktop `aiostreams://return` must reach originating app instance. For malformed/missing context, remain Trakt-only.
 4. **Errors:** bad/unplayable media triggers local failure feedback; optional `x-error` is supported by the local client contract but AIO `useExternalReturn` does not yet interpret error metadata—do not misrepresent it as upstream error UI.
@@ -59,7 +59,7 @@ Keep `context` as original AIO-generated return address, rather than constructin
 
 ## Implementation order
 
-1. Recover exact Mac launcher 0.5.1 file for nonregression baseline.
+1. [Completed — source only] Recover exact 0.5.1 launcher and import into `companion/aiostreams-iina/bridge.py`; run macOS beta package CI and verify source/package versus installed app before replacing it.
 2. Add isolated callback contract + fixture tests; keep flag off.
 3. Add Mac launcher session journal and IINA main-entry observer, opt-in.
 4. Canary on user Mac: stop, EOF, ⌘Q, Web, Desktop; verify IINA Trakt+ & Bridge duplicate protections.
