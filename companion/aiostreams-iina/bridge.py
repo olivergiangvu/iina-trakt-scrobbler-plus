@@ -27,6 +27,7 @@ import callback_session
 
 VERSION = "0.6.0-beta.1"
 SCHEME = "aios-iina"
+BETA_SCHEME = "aios-iina-beta"
 MAX_URL_CHARS = 100000
 MAX_VALUE_CHARS = 24000
 MAX_SUBTITLES = 10  # AIOStreams player external-subtitle cap
@@ -82,7 +83,7 @@ def parse_link(raw):
     if len(raw) > MAX_URL_CHARS:
         raise ValueError("custom link too long")
     parts = urllib.parse.urlsplit(raw)
-    if parts.scheme.lower() != SCHEME or parts.netloc.lower() != "play":
+    if parts.scheme.lower() not in (SCHEME, BETA_SCHEME) or parts.netloc.lower() != "play":
         raise ValueError("unexpected link scheme/host")
     params = urllib.parse.parse_qsl(parts.query, keep_blank_values=True)
 
@@ -575,6 +576,8 @@ def self_test():
            "&sub=https%3A%2F%2Fsub.example.com%2Fvie.srt%3Ftoken%3DA%2526B"
            "&sub=https%3A%2F%2Fsub.example.com%2Feng.srt")
     media, title, pos, subs, context = parse_link(raw)
+    beta_raw = BETA_SCHEME + raw[len(SCHEME):]
+    assert parse_link(beta_raw) == (media, title, pos, subs, context)
     assert pos == 93 and title == "Example S01E02" and len(subs) == 2 and not context
     assert subs[0].endswith("token=A%26B")
     cmd = cli_args(media, title, pos, ["/tmp/sub 1.srt", "/tmp/sub 2.ass"])
