@@ -28,9 +28,9 @@ python3 companion/aiostreams-iina/bridge.py --self-test
 bash companion/aiostreams-iina/scripts/build-macos.sh "$PWD/.build/aio-iina-beta"
 ```
 
-The build generates `AIOIINABridge-v0.6.0-beta.1.zip`; it is **ad-hoc signed, not notarized**, and has not been validated on the user's Mac. It is a **beta build artifact**, not a replacement for a working v0.5.1 app. Do not install over the existing app before canary checks.
+The build generates `AIOIINABridge-v0.6.0-beta.2.zip`; it is **ad-hoc signed, not notarized**, and has not been validated on the user's Mac. It is a **beta build artifact**, not a replacement for a working v0.5.1 app. Do not install over the existing app before canary checks.
 
-**New v0.6 beta implementation (off by default):** AIOIINABridge.app can save a short-lived callback session for approved AIO Web origins (explicit `allowed-origins.txt`) or Desktop `aiostreams://return`, and the Trakt+ plugin observes the existing close event to return the last valid playback position. No automatic Watched flag is emitted. The existing `v0.5.1` installed app stays intact. The new workflow packages a `v0.6.0-beta.1` Mac ZIP; the Python source must be tested with a Mac canary before production use.
+**New v0.6 beta implementation (off by default):** AIOIINABridge.app can save a short-lived callback session for approved AIO Web origins (explicit `allowed-origins.txt`) or Desktop `aiostreams://return`, and the Trakt+ plugin observes the existing close event to return the last valid playback position. No automatic Watched flag is emitted. The existing `v0.5.1` installed app stays intact. The new workflow packages a `v0.6.0-beta.2` Mac ZIP; the Python source must be tested with a Mac canary before production use.
 
 The beta GitHub Actions workflow `companion-beta.yml` executes the self-test and macOS packaging and uploads an Actions artifact. It **never publishes a GitHub Release** or changes Trakt+ auto-updates.
 
@@ -53,7 +53,7 @@ For future x-callback/position/EOF logic, see [the v0.6 design gate](../../docs/
 - A failure of the companion should never prevent IINA/Trakt+ from playing an ordinary link.
 - Keep installed v0.5.1 and Trakt+ v0.2.8 available for rollback.
 
-## v0.6.0-beta.1 opt-in requirements (NOT installed)
+## v0.6.0-beta.2 opt-in requirements (NOT installed)
 
 The Mac launcher only creates callback sessions when the origin is explicitly trusted. Configure exactly the AIO Web origin, one line each, in:
 
@@ -96,3 +96,7 @@ as completed.
 If the callback is not needed, turn the plugin preference back off and restore
 the previous `aios-iina://` custom link. The production Companion and Trakt+
 continue unchanged.
+
+### v0.6.0-beta.2 callback return fix
+
+Browser callback validation now supports AIO hosted at `/` or a safe reverse-proxy prefix while requiring the exact approved origin and `#/...` hash-route markers. The Companion logs redacted `AIO_CALLBACK_SESSION=created|not-created`, and its Python helper records `AIO_CALLBACK_RETURN=sent|failed|...` in `~/Library/Logs/AIO-IINA-Bridge.log`. IINA Trakt+ opt-in observer records `AIO_CALLBACK_OBSERVER=session-matched|...` in its existing plugin debug log. These are diagnostics for the **IINA → AIO** return leg; none contains stream URLs or OAuth data. No automatic `finished=1` or Watched events are enabled. Build v0.6.0-beta.2 side-by-side with stable, test before deployment.
