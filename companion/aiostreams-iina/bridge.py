@@ -23,7 +23,9 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-VERSION = "0.5.1"
+import callback_session
+
+VERSION = "0.6.0-beta.1"
 SCHEME = "aios-iina"
 MAX_URL_CHARS = 100000
 MAX_VALUE_CHARS = 24000
@@ -105,7 +107,10 @@ def parse_link(raw):
             if len(subtitles) == MAX_SUBTITLES:
                 break
     context = first("context")
-    if context and (not valid_http_url(context) or len(context) > 4000):
+    if context and len(context) > 4096:
+        context = ""
+    # The AIO desktop callback uses aiostreams://return, not HTTP.
+    if context and not (valid_http_url(context) or context.startswith("aiostreams://return/")):
         context = ""
     return media, title, position, subtitles, context
 
@@ -535,9 +540,18 @@ def handle(raw):
         urls, known_facts = merge_subtitle_candidates(subtitles, selected_urls, selected_facts)
         paths, labelled = prepare_subtitles(urls, known_facts if selected_urls else None)
         args = [cli] + cli_args(media, title, position, paths)
-        # No shell interpolation. Signed URLs are passed as argv, never logged.
-        subprocess.Popen(args, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                         stderr=subprocess.DEVNULL, close_fds=True, start_new_session=True)
+        # AIO callback is opt-in: only explicit allow-listed Web origin or
+        # aiostreams://return creates a short-lived, permission-restricted
+        # descriptor. No signed stream URL is stored in it.
+        session_id = callback_session.create_session(media, context) if context else None
+        try:
+            # No shell interpolation. Signed URLs are passed as argv, never logged.
+            subprocess.Popen(args, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL, close_fds=True, start_new_session=True)
+        except OSError:
+            if session_id:
+                callback_session.discard_session(session_id)
+            raise
         counts = language_counts(paths)
         log("IINA CLI submitted; v0.5.1 url_unchanged=true; external_subtitles=%d/%d; metadata_labels=%d; "
             "context_provided=%s; context_tracks=%d; passed_tracks=%d; priority=VI>EN; vi_tracks=%d; en_tracks=%d; other_tracks=%d; resumed=%s" %
@@ -606,7 +620,7 @@ def self_test():
         except ValueError:
             continue
         raise AssertionError("invalid link accepted")
-    print("PASS v%s: playback URL / Trakt+ / resume / context parsing / VI > EN > others / mpv selection / metadata fallback" % VERSION)
+    print("PASS v%s: playback URL / Trakt+ / resume / context parsing / VI > EN > others / mpv selection / metadata fallback / optional callback" % VERSION)
 
 
 def main(argv):
