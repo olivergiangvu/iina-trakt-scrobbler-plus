@@ -22,8 +22,8 @@ chmod 755 "$APP/Contents/Resources/launcher.sh"
   /usr/libexec/PlistBuddy -c "Add :CFBundleIdentifier string io.github.olivergiangvu.AIOIINABridge.beta" "$PLIST"
 /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string 0.6.0" "$PLIST" 2>/dev/null ||
   /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString 0.6.0" "$PLIST"
-/usr/libexec/PlistBuddy -c "Add :CFBundleVersion string 60" "$PLIST" 2>/dev/null ||
-  /usr/libexec/PlistBuddy -c "Set :CFBundleVersion 60" "$PLIST"
+/usr/libexec/PlistBuddy -c "Add :CFBundleVersion string 62" "$PLIST" 2>/dev/null ||
+  /usr/libexec/PlistBuddy -c "Set :CFBundleVersion 62" "$PLIST"
 /usr/libexec/PlistBuddy -c "Add :LSUIElement bool true" "$PLIST" 2>/dev/null ||
   /usr/libexec/PlistBuddy -c "Set :LSUIElement true" "$PLIST"
 /usr/libexec/PlistBuddy -c "Add :CFBundleURLTypes array" "$PLIST"
@@ -33,6 +33,6 @@ chmod 755 "$APP/Contents/Resources/launcher.sh"
 /usr/libexec/PlistBuddy -c "Add :CFBundleURLTypes:0:CFBundleURLSchemes:0 string aios-iina-beta" "$PLIST"
 codesign --force --deep --sign - "$APP"
 codesign --verify --deep --strict --verbose=2 "$APP"
-ditto -c -k --sequesterRsrc --keepParent "$APP" "$OUT/AIOIINABridge-v0.6.0-beta.1.zip"
-echo "BUILD_OK: $OUT/AIOIINABridge-v0.6.0-beta.1.zip"
+ditto -c -k --sequesterRsrc --keepParent "$APP" "$OUT/AIOIINABridge-v0.6.0-beta.2.zip"
+echo "BUILD_OK: $OUT/AIOIINABridge-v0.6.0-beta.2.zip"
 echo "NOT_INSTALLED; ad-hoc signed only, not notarized. Test on Mac before deployment."
