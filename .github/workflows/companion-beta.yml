@@ -35,10 +35,10 @@ jobs:
         run: bash companion/aiostreams-iina/scripts/build-macos.sh "$RUNNER_TEMP/aio-iina-beta"
       - name: Inspect URL scheme (no app launch)
         run: |
-          /usr/libexec/PlistBuddy -c "Print :CFBundleURLTypes:0:CFBundleURLSchemes:0" "$RUNNER_TEMP/aio-iina-beta/AIOIINABridge.app/Contents/Info.plist" | grep -Fx aios-iina
-          /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$RUNNER_TEMP/aio-iina-beta/AIOIINABridge.app/Contents/Info.plist" | grep -Fx io.github.olivergiangvu.AIOIINABridge
-          /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$RUNNER_TEMP/aio-iina-beta/AIOIINABridge.app/Contents/Info.plist" | grep -Fx '0.6.0'
-          test -s "$RUNNER_TEMP/aio-iina-beta/AIOIINABridge.app/Contents/Resources/callback_session.py"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleURLTypes:0:CFBundleURLSchemes:0" "$RUNNER_TEMP/aio-iina-beta/AIOIINABridge-beta.app/Contents/Info.plist" | grep -Fx aios-iina
+          /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$RUNNER_TEMP/aio-iina-beta/AIOIINABridge-beta.app/Contents/Info.plist" | grep -Fx io.github.olivergiangvu.AIOIINABridge.beta
+          /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$RUNNER_TEMP/aio-iina-beta/AIOIINABridge-beta.app/Contents/Info.plist" | grep -Fx '0.6.0'
+          test -s "$RUNNER_TEMP/aio-iina-beta/AIOIINABridge-beta.app/Contents/Resources/callback_session.py"
           unzip -t "$RUNNER_TEMP/aio-iina-beta/AIOIINABridge-v0.6.0-beta.1.zip" >/dev/null
       - uses: actions/upload-artifact@v4
         with:
