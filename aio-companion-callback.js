@@ -142,6 +142,19 @@ function createCompanionCallback(options) {
     }) || null;
   }
 
+  function pythonBinary() {
+    // Match the Companion launcher. macOS system Python may be absent even
+    // when Homebrew Python is installed, especially on clean machines.
+    var candidates = options.pythonPaths || [
+      "/opt/homebrew/bin/python3",
+      "/usr/local/bin/python3",
+      "/usr/bin/python3"
+    ];
+    return candidates.find(function(p) {
+      return typeof p === "string" && utils.fileInPath(p);
+    }) || null;
+  }
+
   // Only a terminal close calls the macOS helper. end-file on media switch is
   // not a trusted EOF signal, so do not auto-mark Watched or open AIO there.
   async function onClose(position, duration, paths) {
@@ -156,12 +169,17 @@ function createCompanionCallback(options) {
       emit("helper-missing");
       return false; // no launch/side effect without a matching app
     }
+    var python = pythonBinary();
+    if (!python) {
+      emit("python-missing");
+      return false; // do not call a non-existent /usr/bin/python3
+    }
     finished = true;
     var pos = Math.floor(lastPosition);
     var id = current;
     current = null;
     try {
-      var result = await utils.exec("/usr/bin/python3",
+      var result = await utils.exec(python,
         [helper, "--complete", id, "--position", String(pos)]);
       var ok = !!(result && result.status === 0);
       emit(ok ? "helper-ok" : "helper-failed");
