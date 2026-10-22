@@ -1,6 +1,6 @@
 # AIOStreams → IINA: Infuse-style x-callback return (design gate v0.6)
 
-**Status:** Monorepo beta baseline is imported (AIOIINABridge v0.5.1); x-callback is design-only. No deployed Mac or IINA plugin change. Branch: `beta/aiostreams-xcallback-v0.6`.
+**Status:** v0.6.0-beta.1 implements opt-in window-close Resume callback, offline tests, a separate beta macOS bundle/protocol and CI. It does **not** implement verified EOF-to-Watched or x-error callbacks and has **not** been tested on the user’s Mac. No production deployment. Branch: `beta/aiostreams-xcallback-v0.6`.
 
 ## Goal and boundaries
 
@@ -23,10 +23,10 @@ Sources:
 - https://support.firecore.com/hc/en-us/articles/215090997-API-for-Third-Party-Apps-Services
 - https://docs.iina.io/interfaces/IINA.API.Event
 
-## New AIO Custom Link (optional v0.6; old links keep working)
+## New AIO Custom Link (beta v0.6; old stable links keep working)
 
 ```text
-aios-iina://play?url={encodedUrl}&title={title}&position={position}&sub={subtitles}&context={returnUrl}
+aios-iina-beta://play?url={encodedUrl}&title={title}&position={position}&sub={subtitles}&context={returnUrl}
 ```
 
 Keep `context` as original AIO-generated return address, rather than constructing identity from media title or video URL. The AIO helper `fillParam` URL-encodes `{returnUrl}` when inside a query parameter. Never decode twice.
@@ -64,3 +64,33 @@ Keep `context` as original AIO-generated return address, rather than constructin
 3. Add Mac launcher session journal and IINA main-entry observer, opt-in.
 4. Canary on user Mac: stop, EOF, ⌘Q, Web, Desktop; verify IINA Trakt+ & Bridge duplicate protections.
 5. Only then merge and publish v0.6 stable. Keep 0.5.1 and stable Trakt+ rollback.
+
+
+## Code landing and limits (v0.6.0-beta.1)
+
+Implemented:
+- \`companion/aiostreams-iina/callback_session.py\` creates time-bounded,
+  0600-mode session rows containing only SHA256 of the signed URL, and
+  validates allow-listed web origins or \`aiostreams://return\`.
+- \`companion/aiostreams-iina/bridge.py\` preserves video URL, title,
+  source-specific subtitles and resume, then creates an optional session.
+- \`aio-companion-callback.js\` uses the Trakt+ main-entry file-loaded,
+  time-position, and window-close lifecycle. At close it invokes the
+  local companion helper by opaque session id and integer seconds (never media
+  URL in the helper arguments), with one-time receipt.
+- Root Info.json flag \`aio_callback_enabled=false\` and opt-in Preferences;
+  no changes to Trakt's scrobble writer/canonical matching.
+- \`AIOIINABridge-beta.app\` registers **only** \`aios-iina-beta://\`, not
+  the production \`aios-iina://\` link.
+- Python/Node regression tests; GitHub Actions macOS packaging and root tests.
+
+Not yet qualified:
+- EOF-to-Watched and x-error contract.
+- Match reliability of IINA/MPV URL versus the exact SHA256 of AIO source
+  under HLS variants.
+- Asynchronous callback completion before actual window/process teardown,
+  per-OS app routing behavior, Web tab reuse, or native Desktop return handling.
+- Live Trakt echo / duplicate prevention. Keep \`finished=1\` **disabled**.
+
+Do not merge or release as Stable until Mac canary verifies stop/resume and
+all existing Trakt+ scrobble/matching behaviors.
