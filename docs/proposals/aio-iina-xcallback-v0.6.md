@@ -69,19 +69,19 @@ Keep `context` as original AIO-generated return address, rather than constructin
 ## Code landing and limits (v0.6.0-beta.1)
 
 Implemented:
-- \`companion/aiostreams-iina/callback_session.py\` creates time-bounded,
+- `companion/aiostreams-iina/callback_session.py` creates time-bounded,
   0600-mode session rows containing only SHA256 of the signed URL, and
-  validates allow-listed web origins or \`aiostreams://return\`.
-- \`companion/aiostreams-iina/bridge.py\` preserves video URL, title,
+  validates allow-listed web origins or `aiostreams://return`.
+- `companion/aiostreams-iina/bridge.py` preserves video URL, title,
   source-specific subtitles and resume, then creates an optional session.
-- \`aio-companion-callback.js\` uses the Trakt+ main-entry file-loaded,
+- `aio-companion-callback.js` uses the Trakt+ main-entry file-loaded,
   time-position, and window-close lifecycle. At close it invokes the
   local companion helper by opaque session id and integer seconds (never media
   URL in the helper arguments), with one-time receipt.
-- Root Info.json flag \`aio_callback_enabled=false\` and opt-in Preferences;
+- Root Info.json flag `aio_callback_enabled=false` and opt-in Preferences;
   no changes to Trakt's scrobble writer/canonical matching.
-- \`AIOIINABridge-beta.app\` registers **only** \`aios-iina-beta://\`, not
-  the production \`aios-iina://\` link.
+- `AIOIINABridge-beta.app` registers **only** `aios-iina-beta://`, not
+  the production `aios-iina://` link.
 - Python/Node regression tests; GitHub Actions macOS packaging and root tests.
 
 Not yet qualified:
@@ -90,7 +90,7 @@ Not yet qualified:
   under HLS variants.
 - Asynchronous callback completion before actual window/process teardown,
   per-OS app routing behavior, Web tab reuse, or native Desktop return handling.
-- Live Trakt echo / duplicate prevention. Keep \`finished=1\` **disabled**.
+- Live Trakt echo / duplicate prevention. Keep `finished=1` **disabled**.
 
 Do not merge or release as Stable until Mac canary verifies stop/resume and
 all existing Trakt+ scrobble/matching behaviors.
