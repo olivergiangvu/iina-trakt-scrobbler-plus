@@ -18,7 +18,12 @@ var PLUGIN_VERSION = "0.2.8";
 // v0.6 Mac canary: opt-in AIO return; Trakt+ remains the only Trakt writer.
 var aioCallback = aioCompanion.createCompanionCallback({
   file: file, utils: utils,
-  enabled: function() { return preferences.get("aio_callback_enabled") === true; }
+  enabled: function() { return preferences.get("aio_callback_enabled") === true; },
+  onStatus: function(status) {
+    // Callback telemetry includes only controlled outcome labels, no URLs,
+    // identity, device tokens or signed media addresses.
+    log("AIO_CALLBACK_OBSERVER=" + status);
+  }
 });
 var DEBUG_LOG_PATH = "@data/debug.log";
 var MAX_DEBUG_LOG_CHARS = 200000;
@@ -2420,10 +2425,14 @@ event.on("iina.window-will-close", wrapEvent("iina.window-will-close", function(
   // Dispatch only on terminal window close; callback sends Resume position,
   // never finished=1, until history echo protection is canary-qualified.
   var source = getCurrentSource();
-  void aioCallback.onClose(core.status.position, core.status.duration, [source.path, source.url]);
-  // Capture the current diagnostic batch before IINA starts teardown.
+  var aioReturn = Promise.resolve(
+    aioCallback.onClose(core.status.position, core.status.duration, [source.path, source.url])
+  ).catch(function() { return false; });
+  // Launch callback and Trakt final stop in parallel, so either can complete
+  // independently. Do not suppress the Trakt finalization if callback fails.
   debugLog.flush();
-  return Promise.resolve(finalizeCurrentMedia("window-will-close")).finally(function() {
+  var traktFinal = Promise.resolve(finalizeCurrentMedia("window-will-close"));
+  return Promise.allSettled([aioReturn, traktFinal]).finally(function() {
     debugLog.flush();
   });
 }));
