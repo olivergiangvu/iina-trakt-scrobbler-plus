@@ -7,6 +7,7 @@ A callback can only originate from a validated return URL + an exact session id.
 from __future__ import annotations
 
 import hashlib
+from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
@@ -18,6 +19,23 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 SESSION_DIR = Path.home() / "Library" / "Application Support" / "AIO-IINA-Bridge" / "sessions"
 ALLOWED_ORIGINS = SESSION_DIR.parent / "allowed-origins.txt"
+CALLBACK_LOG = Path.home() / "Library" / "Logs" / "AIO-IINA-Bridge.log"
+
+
+def _audit_result(result: str) -> None:
+    """Log only a fixed outcome label; never raw URL, media identity or token."""
+    if result not in {"invalid-position", "missing-session", "invalid-session",
+                      "expired", "blocked-return", "sent", "failed"}:
+        return
+    try:
+        CALLBACK_LOG.parent.mkdir(parents=True, exist_ok=True)
+        with CALLBACK_LOG.open("a", encoding="utf-8") as handle:
+            handle.write(datetime.now(timezone.utc).isoformat() +
+                         " AIO_CALLBACK_RETURN=" + result + "\\n")
+    except OSError:
+        pass
+
+
 SESSION_TTL_MS = 3 * 60 * 60 * 1000
 SESSION_RE = re.compile(r"^[a-f0-9]{32}$")
 ID_RE = re.compile(r"^[A-Za-z0-9-]{8,128}$")
@@ -167,19 +185,24 @@ def complete_session(session_id: str, position: int, *,
                      now_ms: int | None = None, opener=None) -> bool:
     """At-most-once opening. Uses O_EXCL marker; never claims arbitrary context."""
     if type(position) is not int or position < 1 or position > 604800:
+        _audit_result("invalid-position")
         return False
     try:
         path = _descriptor(session_id)
         if path.stat().st_size > 8192 or path.is_symlink():
+            _audit_result("invalid-session")
             return False
         row = json.loads(path.read_text(encoding="utf-8"))
         at = int(time.time() * 1000) if now_ms is None else int(now_ms)
         if row.get("schema") != 1 or row.get("session") != session_id:
+            _audit_result("invalid-session")
             return False
         if not (int(row["issued_at_ms"]) <= at <= int(row["expires_at_ms"])):
+            _audit_result("expired")
             return False
         context = validated_return_url(row.get("return_url"))
         if not context:
+            _audit_result("blocked-return")
             return False
         stamp = SESSION_DIR / (session_id + ".sent")
         fd = os.open(stamp, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
@@ -191,8 +214,13 @@ def complete_session(session_id: str, position: int, *,
                            stderr=subprocess.DEVNULL, timeout=8)
         else:
             opener(target)
+        _audit_result("sent")
         return True
+    except FileNotFoundError:
+        _audit_result("missing-session")
+        return False
     except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError):
+        _audit_result("failed")
         return False
 
 
