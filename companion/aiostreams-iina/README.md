@@ -70,29 +70,29 @@ Test manual stop/close after >1 second playback and verify AIO Resume. EOF-to-Wa
 
 ## Mac canary protocol isolation
 
-The **beta** is built as \`AIOIINABridge-beta.app\` with a distinct bundle
-identifier \`io.github.olivergiangvu.AIOIINABridge.beta\`. It registers only
-\`aios-iina-beta://\`. The existing stable \`AIOIINABridge.app\` remains the
-handler for \`aios-iina://\` and must not be overwritten.
+The **beta** is built as `AIOIINABridge-beta.app` with a distinct bundle
+identifier `io.github.olivergiangvu.AIOIINABridge.beta`. It registers only
+`aios-iina-beta://`. The existing stable `AIOIINABridge.app` remains the
+handler for `aios-iina://` and must not be overwritten.
 
 To test a single AIO Web/Desktop player link in **Custom Link** mode, temporarily
 use (do not modify the stable custom link until the beta is installed and verified):
 
-\`\`\`text
+```text
 aios-iina-beta://play?url={encodedUrl}&title={title}&position={position}&sub={subtitles}&context={returnUrl}
-\`\`\`
+```
 
 The IINA Trakt+ plugin beta must also be installed from PR CI (back up the
 existing plugin and its credentials first); stable v0.2.8 remains the rollback.
-Enable \`aio_callback_enabled\` in the Trakt+ preference panel only during canary.
+Enable `aio_callback_enabled` in the Trakt+ preference panel only during canary.
 
 Canary acceptance: normal video playback, identical subtitle priority, trusted
 title, correct resume, no signed URLs in logs, and AIO Web/Desktop Resume return
 on closing the IINA window. **Natural EOF auto-Watched, x-error, and guaranteed
 quit callbacks are not yet implemented**, nor is the exact AIO Web tab reused
-necessarily guaranteed by \`open\`. These are the next gates, not advertised
+necessarily guaranteed by `open`. These are the next gates, not advertised
 as completed.
 
 If the callback is not needed, turn the plugin preference back off and restore
-the previous \`aios-iina://\` custom link. The production Companion and Trakt+
+the previous `aios-iina://` custom link. The production Companion and Trakt+
 continue unchanged.
