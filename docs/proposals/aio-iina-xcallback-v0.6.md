@@ -1,0 +1,66 @@
+# AIOStreams → IINA: Infuse-style x-callback return (design gate v0.6)
+
+**Status:** Design only; no IINA plugin or Mac launcher production changes. Branch: `beta/aiostreams-xcallback-v0.6`.
+
+## Goal and boundaries
+
+Keep existing IINA 1.5.0, Trakt Scrobbler Plus stable v0.2.8, AIOIINABridge.app 0.5.1 launch/subtitle workflow and HomeDocker Trakt Bridge v1.5. The Mac launcher source in the user's Library is **v0.5.0** and cannot be treated as current production v0.5.1; obtain exact installed v0.5.1 before replacing it.
+
+No AIOStreams source/image changes, no new Docker container or background server, no second Trakt writer. Callback channel is **IINA → AIO**; Trakt+ remains **IINA → Trakt**. The HomeDocker Fast Lane `Trakt → AIO` is separate.
+
+## Exact upstream contracts (as audited 2026-10-22)
+
+- AIO `playerLink()` supports `{encodedUrl}`, `{title}`, `{position}` (seconds), `{subtitles}` (repeating), `{returnUrl}` (encoded once for a query parameter).
+- AIO `externalReturnUrl()` generates `https://<origin>/...#/...?...&played=<id>&source=<id>` (Browser) or `aiostreams://return/...?played=<id>&source=<id>` (Desktop).
+- Its `useExternalReturn()` consumes `position` (integer **seconds**, as mpv time-pos), `finished=1`, `played`, `source`; the callback must preserve source identity.
+- Infuse 8.4.7+ `x-success` returns `lastPlayedUrl` and `position` in **seconds** after playback/close, `x-error` for failure. Native IINA scheme does **not** support an x-callback return; companion code must implement it.
+- IINA Plugin API supports `mpv.end-file`, `iina.window-will-close`, `mpv.time-pos.changed`, `core.status.position`, `core.status.duration`, `file.read` and `utils.exec`.
+
+Sources:
+- https://github.com/Viren070/AIOStreams/blob/main/packages/web/src/lib/playback/player-choice.ts
+- https://github.com/Viren070/AIOStreams/blob/main/packages/web/src/lib/playback/external-return.ts
+- https://github.com/Viren070/AIOStreams/blob/main/packages/web/src/lib/playback/play.ts
+- https://support.firecore.com/hc/en-us/articles/215090997-API-for-Third-Party-Apps-Services
+- https://docs.iina.io/interfaces/IINA.API.Event
+
+## New AIO Custom Link (optional v0.6; old links keep working)
+
+```text
+aios-iina://play?url={encodedUrl}&title={title}&position={position}&sub={subtitles}&context={returnUrl}
+```
+
+Keep `context` as original AIO-generated return address, rather than constructing identity from media title or video URL. The AIO helper `fillParam` URL-encodes `{returnUrl}` when inside a query parameter. Never decode twice.
+
+## Implementation contract
+
+1. **Mac launcher 0.6 (not in Trakt+ repo):** safely parse and validate `context`, create permission 0700 session directory and 0600 session descriptor with cryptographically random per-launch id, item/source/return context (not logs), TTL and stream URL SHA-256 correlation. Keep unchanged signed source URL, title fragment, subtitle selection and resume.
+2. **IINA listener (in this repo, opt-in only):** correlate playback to `session id`; read mpv time position and duration, capture a bounded last-good position journal; use `mpv.end-file` and `iina.window-will-close`; no callback for unrelated media or another window. On normal close/stop/EOF issue at most one terminal callback, idempotent per session.
+3. **Callback:** add `position=<nonnegative integer seconds>` to the *original* AIO return URL; `finished=1` only on verifiable EOF or explicit safe played decision after canonical duplicate checks. AIO Web requires current authenticated session for reporter request; Desktop `aiostreams://return` must reach originating app instance. For malformed/missing context, remain Trakt-only.
+4. **Errors:** bad/unplayable media triggers local failure feedback; optional `x-error` is supported by the local client contract but AIO `useExternalReturn` does not yet interpret error metadata—do not misrepresent it as upstream error UI.
+5. **Security:** restrict return destinations to exact known AIO HTTPS authority or `aiostreams://return`; no generic arbitrary `open` or HTTP redirects, never emit signed `lastPlayedUrl` to third parties, no secrets in telemetry.
+6. **Single Trakt writer:** Trakt+ already writes playback. AIO `position` or `finished` callbacks may create Jellyfin playback events and Bridge echo to Trakt; prove canonical-history echo suppression in Bridge before enabling `finished=1`, never rely on unverified assumption that duplicates cannot occur.
+7. **Termination:** `⌘Q` is best-effort, force-kill/crash cannot guarantee return; retain Trakt+ + HomeDocker fallback without a permanent helper process.
+8. **Multi-file playlist:** v0.6 MVP supports exactly one active AIO launch at a time per playback window. Later versions can map per-item position; do not claim Infuse multi-URL callback parity until tested.
+
+## Acceptance matrix
+
+| Case | Expected |
+| --- | --- |
+| Open movie and pause/stop midstream | AIO resumes from correct integer seconds; no false Watched |
+| Finish naturally | Immediate AIO Watched only when safely guarded against duplicate Trakt history |
+| Switch episode or source | No callback attributed to wrong item/source |
+| Web AIO origin | Return via validated original https page |
+| Desktop AIO origin | Return via `aiostreams://return` |
+| External subtitles and signed stream | Existing playback/VI,EN selection unchanged |
+| Manual `⌘Q` | Best-effort last-position callback; fallback Trakt for missed exit |
+| Invalid custom URL, expired signed URL | No arbitrary return redirect or private data leak |
+| Plain IINA playback | No callback |
+| Callback already processed | Idempotent; no double open/history |
+
+## Implementation order
+
+1. Recover exact Mac launcher 0.5.1 file for nonregression baseline.
+2. Add isolated callback contract + fixture tests; keep flag off.
+3. Add Mac launcher session journal and IINA main-entry observer, opt-in.
+4. Canary on user Mac: stop, EOF, ⌘Q, Web, Desktop; verify IINA Trakt+ & Bridge duplicate protections.
+5. Only then merge and publish v0.6 stable. Keep 0.5.1 and stable Trakt+ rollback.
