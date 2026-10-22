@@ -42,8 +42,10 @@ assert.equal(retry.pendingChars(), 0);
 assert.ok(files[p].includes("DO-NOT-LOSE-ON-ERROR"));
 
 const source = fs.readFileSync(path.join(__dirname, "../main.js"), "utf8");
-assert.match(source, /debugLog\.flush\(\);\s*return Promise\.resolve\(finalizeCurrentMedia\("window-will-close"\)\)/,
+assert.match(source, /debugLog\.flush\(\);\s*var traktFinal = Promise\.resolve\(finalizeCurrentMedia\("window-will-close"\)\)/,
   "force synchronous diagnostic flush before window teardown");
+assert.match(source, /return Promise\.allSettled\(\[aioReturn, traktFinal\]\)/,
+  "callback and Trakt finalization must settle independently before teardown");
 assert.match(source, /debugLog\.flush\(\);\s*return Promise\.resolve\(finalizeCurrentMedia\("mpv.shutdown"\)\)/,
   "force synchronous diagnostic flush before mpv teardown");
 console.log("Batched debug log bounded write, rollover, retry, teardown tests PASS");

@@ -1,0 +1,48 @@
+name: AIO-IINA Companion beta build
+
+on:
+  pull_request:
+    paths:
+      - 'companion/aiostreams-iina/**'
+      - '.github/workflows/companion-beta.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  companion-source:
+    name: Validate v0.6.0-beta.2 source compatibility
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Python syntax
+        run: python3 -m py_compile companion/aiostreams-iina/bridge.py
+      - name: Launcher self-test
+        run: python3 companion/aiostreams-iina/bridge.py --self-test
+      - name: Callback origin + at-most-once regression
+        run: python3 -m unittest discover -s companion/aiostreams-iina/tests -p "test_*.py"
+      - name: Shell syntax
+        run: sh -n companion/aiostreams-iina/launcher.sh && bash -n companion/aiostreams-iina/scripts/build-macos.sh
+
+  companion-macos:
+    name: Package beta macOS URL handler (not publish)
+    runs-on: macos-15
+    needs: companion-source
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build .app from 0.6.0-beta.2 source
+        run: bash companion/aiostreams-iina/scripts/build-macos.sh "$RUNNER_TEMP/aio-iina-beta"
+      - name: Inspect URL scheme (no app launch)
+        run: |
+          /usr/libexec/PlistBuddy -c "Print :CFBundleURLTypes:0:CFBundleURLSchemes:0" "$RUNNER_TEMP/aio-iina-beta/AIOIINABridge-beta.app/Contents/Info.plist" | grep -Fx aios-iina-beta
+          /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$RUNNER_TEMP/aio-iina-beta/AIOIINABridge-beta.app/Contents/Info.plist" | grep -Fx io.github.olivergiangvu.AIOIINABridge.beta
+          /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$RUNNER_TEMP/aio-iina-beta/AIOIINABridge-beta.app/Contents/Info.plist" | grep -Fx '0.6.0'
+          test -s "$RUNNER_TEMP/aio-iina-beta/AIOIINABridge-beta.app/Contents/Resources/callback_session.py"
+          unzip -t "$RUNNER_TEMP/aio-iina-beta/AIOIINABridge-v0.6.0-beta.2.zip" >/dev/null
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AIOIINABridge-v0.6.0-beta.2-mac-beta
+          path: ${{ runner.temp }}/aio-iina-beta/AIOIINABridge-v0.6.0-beta.2.zip
+          if-no-files-found: error
+          retention-days: 7

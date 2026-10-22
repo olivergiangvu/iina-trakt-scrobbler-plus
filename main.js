@@ -4,6 +4,7 @@ var parser = require("./parser.iina.js");
 var streamSource = require("./stream-source.js");
 var playbackIdentity = require("./playback-identity.js");
 var monitor = require("./monitor.js");
+var aioCompanion = require("./aio-companion-callback.js");
 var stopJournalModule = require("./stop-journal.js");
 var syncHistoryModule = require("./sync-history.js");
 var playbackDiagnostics = require("./playback-diagnostics.js");
@@ -14,6 +15,16 @@ var correctionMedia = require("./correction-media.js");
 var trakt = require("./trakt.js");
 var debugLogBuffer = require("./debug-log-buffer.js");
 var PLUGIN_VERSION = "0.2.8";
+// v0.6 Mac canary: opt-in AIO return; Trakt+ remains the only Trakt writer.
+var aioCallback = aioCompanion.createCompanionCallback({
+  file: file, utils: utils,
+  enabled: function() { return preferences.get("aio_callback_enabled") === true; },
+  onStatus: function(status) {
+    // Callback telemetry includes only controlled outcome labels, no URLs,
+    // identity, device tokens or signed media addresses.
+    log("AIO_CALLBACK_OBSERVER=" + status);
+  }
+});
 var DEBUG_LOG_PATH = "@data/debug.log";
 var MAX_DEBUG_LOG_CHARS = 200000;
 var DEBUG_LOG_FLUSH_INTERVAL_MS = 10000;
@@ -2376,6 +2387,8 @@ event.on("iina.window-loaded", wrapEvent("iina.window-loaded", function() {
 }));
 
 event.on("iina.file-loaded", wrapEvent("iina.file-loaded", function() {
+  var source = getCurrentSource();
+  aioCallback.onLoaded([source.path, source.url]);
   return handleFileLoaded();
 }));
 
@@ -2384,6 +2397,8 @@ event.on("mpv.pause.changed", wrapEvent("mpv.pause.changed", function() {
 }));
 
 event.on("mpv.time-pos.changed", wrapEvent("mpv.time-pos.changed", function() {
+  var source = getCurrentSource();
+  aioCallback.onPosition(core.status.position, core.status.duration, [source.path, source.url]);
   handleStatusUpdate("time-pos.changed");
 }));
 
@@ -2392,6 +2407,7 @@ event.on("mpv.duration.changed", wrapEvent("mpv.duration.changed", function() {
 }));
 
 event.on("mpv.end-file", wrapEvent("mpv.end-file", function() {
+  // Not every end-file is EOF; playlist/source switches must not open AIO.
   return finalizeCurrentMedia("end-file");
 }));
 
@@ -2406,9 +2422,17 @@ event.on("iina.window-will-close", wrapEvent("iina.window-will-close", function(
       playbackState.prevSnapshot = latest;
     }
   }
-  // Capture the current diagnostic batch before IINA starts teardown.
+  // Dispatch only on terminal window close; callback sends Resume position,
+  // never finished=1, until history echo protection is canary-qualified.
+  var source = getCurrentSource();
+  var aioReturn = Promise.resolve(
+    aioCallback.onClose(core.status.position, core.status.duration, [source.path, source.url])
+  ).catch(function() { return false; });
+  // Launch callback and Trakt final stop in parallel, so either can complete
+  // independently. Do not suppress the Trakt finalization if callback fails.
   debugLog.flush();
-  return Promise.resolve(finalizeCurrentMedia("window-will-close")).finally(function() {
+  var traktFinal = Promise.resolve(finalizeCurrentMedia("window-will-close"));
+  return Promise.allSettled([aioReturn, traktFinal]).finally(function() {
     debugLog.flush();
   });
 }));
