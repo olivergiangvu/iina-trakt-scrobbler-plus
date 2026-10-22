@@ -24,10 +24,13 @@ class CallbackTests(unittest.TestCase):
         folder = Path(self.tmp.name)
         patcher1 = patch.object(cb, "SESSION_DIR", folder / "sessions")
         patcher2 = patch.object(cb, "ALLOWED_ORIGINS", folder / "allow.txt")
+        patcher3 = patch.object(cb, "CALLBACK_LOG", folder / "callback-audit.log")
         patcher1.start()
         patcher2.start()
+        patcher3.start()
         self.addCleanup(patcher1.stop)
         self.addCleanup(patcher2.stop)
+        self.addCleanup(patcher3.stop)
         cb.ALLOWED_ORIGINS.write_text("https://aio.example:18447\n", encoding="utf-8")
 
     def test_allowed_context(self):
@@ -60,6 +63,7 @@ class CallbackTests(unittest.TestCase):
         seen = []
         self.assertTrue(cb.complete_session(token, 315, now_ms=1_700_000_000_200, opener=seen.append))
         self.assertEqual(len(seen), 1)
+        self.assertIn("AIO_CALLBACK_RETURN=sent", cb.CALLBACK_LOG.read_text(encoding="utf-8"))
         url = urlsplit(seen[0])
         self.assertEqual(parse_qs(url.fragment.split("?")[1])["position"], ["315"])
         self.assertEqual(parse_qs(url.fragment.split("?")[1])["played"], ["12345678"])
