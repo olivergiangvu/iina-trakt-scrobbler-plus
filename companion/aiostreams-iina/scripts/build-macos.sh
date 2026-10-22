@@ -15,13 +15,14 @@ python3 "$ROOT/bridge.py" --self-test
 osacompile -o "$APP" "$ROOT/AIOIINABridge.applescript"
 mkdir -p "$APP/Contents/Resources"
 cp "$ROOT/bridge.py" "$APP/Contents/Resources/bridge.py"
+cp "$ROOT/callback_session.py" "$APP/Contents/Resources/callback_session.py"
 cp "$ROOT/launcher.sh" "$APP/Contents/Resources/launcher.sh"
 chmod 755 "$APP/Contents/Resources/launcher.sh"
 /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier io.github.olivergiangvu.AIOIINABridge" "$PLIST" ||
   /usr/libexec/PlistBuddy -c "Add :CFBundleIdentifier string io.github.olivergiangvu.AIOIINABridge" "$PLIST"
-/usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string 0.5.1" "$PLIST" 2>/dev/null ||
+/usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string 0.6.0" "$PLIST" 2>/dev/null ||
   /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString 0.5.1" "$PLIST"
-/usr/libexec/PlistBuddy -c "Add :CFBundleVersion string 51" "$PLIST" 2>/dev/null ||
+/usr/libexec/PlistBuddy -c "Add :CFBundleVersion string 60" "$PLIST" 2>/dev/null ||
   /usr/libexec/PlistBuddy -c "Set :CFBundleVersion 51" "$PLIST"
 /usr/libexec/PlistBuddy -c "Add :LSUIElement bool true" "$PLIST" 2>/dev/null ||
   /usr/libexec/PlistBuddy -c "Set :LSUIElement true" "$PLIST"
@@ -32,6 +33,6 @@ chmod 755 "$APP/Contents/Resources/launcher.sh"
 /usr/libexec/PlistBuddy -c "Add :CFBundleURLTypes:0:CFBundleURLSchemes:0 string aios-iina" "$PLIST"
 codesign --force --deep --sign - "$APP"
 codesign --verify --deep --strict --verbose=2 "$APP"
-ditto -c -k --sequesterRsrc --keepParent "$APP" "$OUT/AIOIINABridge-v0.5.1-beta-monorepo.zip"
-echo "BUILD_OK: $OUT/AIOIINABridge-v0.5.1-beta-monorepo.zip"
+ditto -c -k --sequesterRsrc --keepParent "$APP" "$OUT/AIOIINABridge-v0.6.0-beta.1.zip"
+echo "BUILD_OK: $OUT/AIOIINABridge-v0.6.0-beta.1.zip"
 echo "NOT_INSTALLED; ad-hoc signed only, not notarized. Test on Mac before deployment."
