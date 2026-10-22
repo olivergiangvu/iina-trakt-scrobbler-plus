@@ -66,3 +66,33 @@ Example origin syntax: `https://your-aio-host.example:18447` (replace with the a
 Trakt+ plugin Preferences → **AIO-IINA Companion (v0.6 canary)** → check **Enable AIOStreams return-on-close (beta)** only after the matching Companion beta has been installed and validated. The file stays disabled by default, and Trakt+ remains the sole Trakt writer. Playback is never blocked by a missing callback helper.
 
 Test manual stop/close after >1 second playback and verify AIO Resume. EOF-to-Watched is intentionally **not enabled** until Trakt history echo suppression is proven on the user's server. Early source-switch callbacks are also deferred until window close for safety. No release automation auto-installs the Mac package.
+
+
+## Mac canary protocol isolation
+
+The **beta** is built as \`AIOIINABridge-beta.app\` with a distinct bundle
+identifier \`io.github.olivergiangvu.AIOIINABridge.beta\`. It registers only
+\`aios-iina-beta://\`. The existing stable \`AIOIINABridge.app\` remains the
+handler for \`aios-iina://\` and must not be overwritten.
+
+To test a single AIO Web/Desktop player link in **Custom Link** mode, temporarily
+use (do not modify the stable custom link until the beta is installed and verified):
+
+\`\`\`text
+aios-iina-beta://play?url={encodedUrl}&title={title}&position={position}&sub={subtitles}&context={returnUrl}
+\`\`\`
+
+The IINA Trakt+ plugin beta must also be installed from PR CI (back up the
+existing plugin and its credentials first); stable v0.2.8 remains the rollback.
+Enable \`aio_callback_enabled\` in the Trakt+ preference panel only during canary.
+
+Canary acceptance: normal video playback, identical subtitle priority, trusted
+title, correct resume, no signed URLs in logs, and AIO Web/Desktop Resume return
+on closing the IINA window. **Natural EOF auto-Watched, x-error, and guaranteed
+quit callbacks are not yet implemented**, nor is the exact AIO Web tab reused
+necessarily guaranteed by \`open\`. These are the next gates, not advertised
+as completed.
+
+If the callback is not needed, turn the plugin preference back off and restore
+the previous \`aios-iina://\` custom link. The production Companion and Trakt+
+continue unchanged.
