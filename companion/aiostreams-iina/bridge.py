@@ -543,7 +543,13 @@ def handle(raw):
         # AIO callback is opt-in: only explicit allow-listed Web origin or
         # aiostreams://return creates a short-lived, permission-restricted
         # descriptor. No signed stream URL is stored in it.
-        session_id = callback_session.create_session(media, context) if context else None
+        session_id = None
+        if context:
+            try:
+                session_id = callback_session.create_session(media, context)
+            except (OSError, ValueError):
+                # Callback is never allowed to break otherwise valid video playback.
+                log("Companion return disabled: session preparation unavailable")
         try:
             # No shell interpolation. Signed URLs are passed as argv, never logged.
             subprocess.Popen(args, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
