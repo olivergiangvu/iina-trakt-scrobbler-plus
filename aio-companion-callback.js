@@ -127,10 +127,10 @@ function createCompanionCallback(options) {
 
   function helperPath() {
     var candidates = options.helperPaths || [
-      "/Applications/AIOIINABridge.app/Contents/Resources/callback_session.py",
-      utils.resolvePath("~/Applications/AIOIINABridge.app/Contents/Resources/callback_session.py"),
       utils.resolvePath("~/Applications/AIOIINABridge-beta.app/Contents/Resources/callback_session.py"),
-      "/Applications/AIOIINABridge-beta.app/Contents/Resources/callback_session.py"
+      "/Applications/AIOIINABridge-beta.app/Contents/Resources/callback_session.py",
+      "/Applications/AIOIINABridge.app/Contents/Resources/callback_session.py",
+      utils.resolvePath("~/Applications/AIOIINABridge.app/Contents/Resources/callback_session.py")
     ];
     return candidates.find(function(p) {
       return typeof p === "string" && utils.fileInPath(p);
