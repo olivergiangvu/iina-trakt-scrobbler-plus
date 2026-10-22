@@ -11,6 +11,8 @@ import callback_session as cb
 
 
 BROWSER = "https://aio.example:18447/jellyfin/web#/details?id=1?played=12345678&source=abcdef12"
+BROWSER_ROOT = "https://aio.example:18447/#/series/tt12345?played=12345678&source=abcdef12"
+BROWSER_PROXY = "https://aio.example:18447/aio/#/series/tt12345?played=12345678&source=abcdef12"
 DESKTOP = "aiostreams://return/series/12345?played=12345678&source=abcdef12"
 MEDIA = "https://cdn.example/signed/master.m3u8?token=VERY_PRIVATE&x=1"
 
@@ -30,6 +32,13 @@ class CallbackTests(unittest.TestCase):
 
     def test_allowed_context(self):
         self.assertEqual(cb.validated_return_url(BROWSER), BROWSER)
+        self.assertEqual(cb.validated_return_url(BROWSER_ROOT), BROWSER_ROOT)
+        self.assertEqual(cb.validated_return_url(BROWSER_PROXY), BROWSER_PROXY)
+        self.assertIsNone(cb.validated_return_url("https://aio.example:18447/#/details?played=12345678"))
+        self.assertIsNone(cb.validated_return_url("https://aio.example:18447/?played=12345678&source=abcdef12"))
+        self.assertIsNone(cb.validated_return_url("https://aio.example:18447/#/details"))
+        self.assertIsNone(cb.validated_return_url("https://evil.example/#/details?played=12345678&source=abcdef12"))
+        self.assertIsNone(cb.validated_return_url("https://aio.example:18447/aio/../admin/#/details?played=12345678&source=abcdef12"))
         self.assertEqual(cb.validated_return_url(DESKTOP), DESKTOP)
         self.assertIsNone(cb.validated_return_url("https://evil.example/jellyfin/web?played=12345678&source=abcdef12"))
         self.assertIsNone(cb.validated_return_url("https://aio.example:18447/admin?played=12345678&source=abcdef12"))
@@ -57,6 +66,16 @@ class CallbackTests(unittest.TestCase):
         self.assertEqual(parse_qs(url.fragment.split("?")[1])["source"], ["abcdef12"])
         self.assertFalse(cb.complete_session(token, 315, now_ms=1_700_000_000_200, opener=seen.append))
         self.assertEqual(len(seen), 1)
+
+    def test_root_browser_return(self):
+        token = cb.create_session(MEDIA, BROWSER_ROOT, now_ms=1_700_000_000_000)
+        self.assertIsNotNone(token)
+        seen = []
+        self.assertTrue(cb.complete_session(token, 420, now_ms=1_700_000_000_100, opener=seen.append))
+        self.assertEqual(len(seen), 1)
+        url = urlsplit(seen[0])
+        self.assertEqual(url.path, "/")
+        self.assertEqual(parse_qs(url.fragment.split("?", 1)[1])["position"], ["420"])
 
     def test_desktop(self):
         token = cb.create_session(MEDIA, DESKTOP, now_ms=1_700_000_000_000)
