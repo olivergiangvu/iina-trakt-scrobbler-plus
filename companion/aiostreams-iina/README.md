@@ -28,7 +28,9 @@ python3 companion/aiostreams-iina/bridge.py --self-test
 bash companion/aiostreams-iina/scripts/build-macos.sh "$PWD/.build/aio-iina-beta"
 ```
 
-The build generates `AIOIINABridge-v0.5.1-beta-monorepo.zip`; it is **ad-hoc signed, not notarized**, and has not been validated on the user's Mac. It is a **beta build artifact**, not a replacement for a working v0.5.1 app. Do not install over the existing app before canary checks.
+The build generates `AIOIINABridge-v0.6.0-beta.1.zip`; it is **ad-hoc signed, not notarized**, and has not been validated on the user's Mac. It is a **beta build artifact**, not a replacement for a working v0.5.1 app. Do not install over the existing app before canary checks.
+
+**New v0.6 beta implementation (off by default):** AIOIINABridge.app can save a short-lived callback session for approved AIO Web origins (explicit `allowed-origins.txt`) or Desktop `aiostreams://return`, and the Trakt+ plugin observes the existing close event to return the last valid playback position. No automatic Watched flag is emitted. The existing `v0.5.1` installed app stays intact. The new workflow packages a `v0.6.0-beta.1` Mac ZIP; the Python source must be tested with a Mac canary before production use.
 
 The beta GitHub Actions workflow `companion-beta.yml` executes the self-test and macOS packaging and uploads an Actions artifact. It **never publishes a GitHub Release** or changes Trakt+ auto-updates.
 
@@ -50,3 +52,17 @@ For future x-callback/position/EOF logic, see [the v0.6 design gate](../../docs/
 - Do not auto-mark Watched from a manual stop; suppress any possible AIO → Bridge → Trakt duplicate echo before enabling EOF callback.
 - A failure of the companion should never prevent IINA/Trakt+ from playing an ordinary link.
 - Keep installed v0.5.1 and Trakt+ v0.2.8 available for rollback.
+
+## v0.6.0-beta.1 opt-in requirements (NOT installed)
+
+The Mac launcher only creates callback sessions when the origin is explicitly trusted. Configure exactly the AIO Web origin, one line each, in:
+
+```text
+~/Library/Application Support/AIO-IINA-Bridge/allowed-origins.txt
+```
+
+Example origin syntax: `https://your-aio-host.example:18447` (replace with the actual configured AIO address); the Desktop `aiostreams://return` callback is also supported. No wildcards, unrelated websites, cookies, stream credentials or API keys are accepted as origins.
+
+Trakt+ plugin Preferences → **AIO-IINA Companion (v0.6 canary)** → check **Enable AIOStreams return-on-close (beta)** only after the matching Companion beta has been installed and validated. The file stays disabled by default, and Trakt+ remains the sole Trakt writer. Playback is never blocked by a missing callback helper.
+
+Test manual stop/close after >1 second playback and verify AIO Resume. EOF-to-Watched is intentionally **not enabled** until Trakt history echo suppression is proven on the user's server. Early source-switch callbacks are also deferred until window close for safety. No release automation auto-installs the Mac package.
