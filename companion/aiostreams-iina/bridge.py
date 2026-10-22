@@ -561,7 +561,11 @@ def handle(raw):
                 session_id = callback_session.create_session(media, context)
             except (OSError, ValueError):
                 # Callback is never allowed to break otherwise valid video playback.
-                log("Companion return disabled: session preparation unavailable")
+                log("AIO_CALLBACK_SESSION=unavailable")
+        # Session creation is independent from video playback. A failed allowlist
+        # or missing returnUrl is observable without revealing the URL or token.
+        log("AIO_CALLBACK_SESSION=%s; context_present=%s" %
+            ("created" if session_id else "not-created", bool(context)))
         try:
             # No shell interpolation. Signed URLs are passed as argv, never logged.
             subprocess.Popen(args, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
