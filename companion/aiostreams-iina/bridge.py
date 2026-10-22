@@ -543,7 +543,15 @@ def handle(raw):
         args = [cli] + cli_args(media, title, position, paths)
         # Read-only diagnostic: the first resume value is authored by AIOStreams.
         # Never write raw signed media/subtitle/return URLs, titles or tokens.
-        log("AIO_RESUME_INPUT_SECONDS=%d" % position)
+        # A missing 'position' is also parsed as zero for compatibility.
+        # Log only parameter presence, never raw link or its signed values.
+        position_fields = [
+            v for k, v in urllib.parse.parse_qsl(
+                urllib.parse.urlsplit(raw).query, keep_blank_values=True
+            ) if k == "position"
+        ]
+        log("AIO_RESUME_INPUT_SECONDS=%d; position_present=%s; position_fields=%d" %
+            (position, bool(position_fields), len(position_fields)))
         # AIO callback is opt-in: only explicit allow-listed Web origin or
         # aiostreams://return creates a short-lived, permission-restricted
         # descriptor. No signed stream URL is stored in it.
