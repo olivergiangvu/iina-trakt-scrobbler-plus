@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   companion-source:
-    name: Validate v0.6.0-beta.1 source compatibility
+    name: Validate v0.6.0-beta.2 source compatibility
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -31,7 +31,7 @@ jobs:
     needs: companion-source
     steps:
       - uses: actions/checkout@v4
-      - name: Build .app from 0.6.0-beta.1 source
+      - name: Build .app from 0.6.0-beta.2 source
         run: bash companion/aiostreams-iina/scripts/build-macos.sh "$RUNNER_TEMP/aio-iina-beta"
       - name: Inspect URL scheme (no app launch)
         run: |
@@ -39,10 +39,10 @@ jobs:
           /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$RUNNER_TEMP/aio-iina-beta/AIOIINABridge-beta.app/Contents/Info.plist" | grep -Fx io.github.olivergiangvu.AIOIINABridge.beta
           /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$RUNNER_TEMP/aio-iina-beta/AIOIINABridge-beta.app/Contents/Info.plist" | grep -Fx '0.6.0'
           test -s "$RUNNER_TEMP/aio-iina-beta/AIOIINABridge-beta.app/Contents/Resources/callback_session.py"
-          unzip -t "$RUNNER_TEMP/aio-iina-beta/AIOIINABridge-v0.6.0-beta.1.zip" >/dev/null
+          unzip -t "$RUNNER_TEMP/aio-iina-beta/AIOIINABridge-v0.6.0-beta.2.zip" >/dev/null
       - uses: actions/upload-artifact@v4
         with:
-          name: AIOIINABridge-v0.6.0-beta.1-mac-beta
-          path: ${{ runner.temp }}/aio-iina-beta/AIOIINABridge-v0.6.0-beta.1.zip
+          name: AIOIINABridge-v0.6.0-beta.2-mac-beta
+          path: ${{ runner.temp }}/aio-iina-beta/AIOIINABridge-v0.6.0-beta.2.zip
           if-no-files-found: error
           retention-days: 7
