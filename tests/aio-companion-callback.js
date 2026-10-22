@@ -30,7 +30,7 @@ const file = {
 };
 const utils = {
   resolvePath: p => p === "~/Library/Application Support/AIO-IINA-Bridge/sessions" ? dir : p,
-  fileInPath: p => p === "/fake/callback_session.py",
+  fileInPath: p => p === "/fake/callback_session.py" || p === "/opt/homebrew/bin/python3",
   exec: async (bin, args) => {
     calls.push({bin,args});
     return {status:0};
@@ -49,7 +49,7 @@ callback.onPosition(31.8, 120);
 callback.onPosition(32.9, 120);
 (async () => {
   assert.equal(await callback.onClose(0, 0), true, "last-good position survives mpv reset");
-  assert.deepEqual(calls, [{bin:"/usr/bin/python3",
+  assert.deepEqual(calls, [{bin:"/opt/homebrew/bin/python3",
     args:["/fake/callback_session.py","--complete",session,"--position","32"]}]);
   assert.equal(await callback.onClose(50,120), false, "no duplicate");
   assert.equal(calls.length,1);
@@ -61,5 +61,16 @@ callback.onPosition(32.9, 120);
   another.onPosition(55, 120);
   assert.equal(await another.onClose(55,120), false, "missing app is safe");
   assert.equal(calls.length,1);
+  const noPython = createCompanionCallback({
+    file, now: () => now, enabled: () => true,
+    utils: Object.assign({}, utils, {
+      fileInPath: p => p === "/fake/callback_session.py"
+    }),
+    helperPaths: ["/fake/callback_session.py"]
+  });
+  noPython.onLoaded([STREAM]);
+  noPython.onPosition(48, 120);
+  assert.equal(await noPython.onClose(48, 120), false, "no Python is safe");
+  assert.equal(calls.length, 1);
   console.log("PASS IINA companion: SHA256 / opt-in / exact session / Resume / at-most-once / no helper fallback");
 })().catch(err=>{console.error(err);process.exitCode=1;});
