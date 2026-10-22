@@ -42,6 +42,7 @@
     "auth_credential_mode": "",
     "auth_updated_at": "",
     "auth_action_kind": "",
-    "auth_action_nonce": ""
+    "auth_action_nonce": "",
+    "aio_callback_enabled": false
   }
 }
