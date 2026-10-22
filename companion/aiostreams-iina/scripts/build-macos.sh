@@ -21,9 +21,9 @@ chmod 755 "$APP/Contents/Resources/launcher.sh"
 /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier io.github.olivergiangvu.AIOIINABridge" "$PLIST" ||
   /usr/libexec/PlistBuddy -c "Add :CFBundleIdentifier string io.github.olivergiangvu.AIOIINABridge" "$PLIST"
 /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string 0.6.0" "$PLIST" 2>/dev/null ||
-  /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString 0.5.1" "$PLIST"
+  /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString 0.6.0" "$PLIST"
 /usr/libexec/PlistBuddy -c "Add :CFBundleVersion string 60" "$PLIST" 2>/dev/null ||
-  /usr/libexec/PlistBuddy -c "Set :CFBundleVersion 51" "$PLIST"
+  /usr/libexec/PlistBuddy -c "Set :CFBundleVersion 60" "$PLIST"
 /usr/libexec/PlistBuddy -c "Add :LSUIElement bool true" "$PLIST" 2>/dev/null ||
   /usr/libexec/PlistBuddy -c "Set :LSUIElement true" "$PLIST"
 /usr/libexec/PlistBuddy -c "Add :CFBundleURLTypes array" "$PLIST"
