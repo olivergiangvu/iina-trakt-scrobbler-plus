@@ -35,7 +35,7 @@ jobs:
         run: bash companion/aiostreams-iina/scripts/build-macos.sh "$RUNNER_TEMP/aio-iina-beta"
       - name: Inspect URL scheme (no app launch)
         run: |
-          /usr/libexec/PlistBuddy -c "Print :CFBundleURLTypes:0:CFBundleURLSchemes:0" "$RUNNER_TEMP/aio-iina-beta/AIOIINABridge-beta.app/Contents/Info.plist" | grep -Fx aios-iina
+          /usr/libexec/PlistBuddy -c "Print :CFBundleURLTypes:0:CFBundleURLSchemes:0" "$RUNNER_TEMP/aio-iina-beta/AIOIINABridge-beta.app/Contents/Info.plist" | grep -Fx aios-iina-beta
           /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$RUNNER_TEMP/aio-iina-beta/AIOIINABridge-beta.app/Contents/Info.plist" | grep -Fx io.github.olivergiangvu.AIOIINABridge.beta
           /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$RUNNER_TEMP/aio-iina-beta/AIOIINABridge-beta.app/Contents/Info.plist" | grep -Fx '0.6.0'
           test -s "$RUNNER_TEMP/aio-iina-beta/AIOIINABridge-beta.app/Contents/Resources/callback_session.py"
