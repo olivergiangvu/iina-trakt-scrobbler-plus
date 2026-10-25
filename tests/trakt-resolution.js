@@ -216,7 +216,7 @@ async function run() {
     const cache = JSON.parse(store[CACHE_PATH]);
     assert.strictEqual(cache.show["game changer|"].trakt, 153142);
     assert.strictEqual(cache.show["game changer|"].identityVersion, 2);
-    assert.strictEqual(cache.show["game changer|"].source, "episode-title");
+    assert.strictEqual(cache.show["game changer|"].source, "unique-title");
 
     const payload = await trakt.prepareScrobblePayload(mediaInfo);
     assert.deepStrictEqual(payload, {
