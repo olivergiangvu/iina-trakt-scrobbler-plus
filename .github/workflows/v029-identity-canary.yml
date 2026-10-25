@@ -1,0 +1,67 @@
+name: Build v0.2.9-beta.2 Identity Canary
+
+on:
+  push:
+    branches: ['fix/v029-strict-show-identity-cache-v2']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  mac-canary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check independent canary version and syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          node - <<'NODE'
+          const assert = require('node:assert/strict');
+          const fs = require('node:fs');
+          const m = require('./Info.json');
+          assert.equal(m.version, '0.2.9-beta.2');
+          assert.equal(m.ghVersion, 30);
+          assert.equal(m.identifier, 'io.github.olivergiangvu.iinatraktscrobblerplus');
+          assert.ok(fs.readFileSync('main.js','utf8').includes('var PLUGIN_VERSION = "0.2.9-beta.2";'));
+          NODE
+          for m in main.js trakt.js monitor.js playback-identity.js parser.js \
+            fresh-identity.js resume-protection.js mediafusion-identity.js \
+            correction-media.js stop-journal.js sync-history.js trakt-api-gate.js; do
+            node --check "$m"
+          done
+      - name: Run full mocked regression suite
+        shell: bash
+        run: |
+          set -euo pipefail
+          for t in tests/*.js; do
+            echo "TEST $t"
+            node "$t"
+          done
+      - name: Stage and verify installable Mac canary
+        shell: bash
+        run: |
+          set -euo pipefail
+          STAGE="$(./scripts/stage-plugin.sh)"
+          ASSET="$GITHUB_WORKSPACE/Trakt-Scrobbler-Plus-v0.2.9-beta.2-identity-canary.iinaplgz"
+          (cd "$STAGE" && zip -q -r "$ASSET" .)
+          unzip -t "$ASSET" >/dev/null
+          for f in Info.json main.js trakt.js trakt_keys.js monitor.js sidebar.html \
+            preferences.html playback-identity.js correction-media.js; do
+            unzip -Z1 "$ASSET" | grep -Fxq "$f"
+          done
+          unzip -p "$ASSET" Info.json | node -e 'let s="";process.stdin.on("data",x=>s+=x).on("end",()=>{const a=JSON.parse(s);if(a.version!=="0.2.9-beta.2"||a.ghVersion!==30)process.exit(1)})'
+          sha256sum "$ASSET" > SHA256SUMS.txt
+      - name: Upload test artifact only — no GitHub release
+        uses: actions/upload-artifact@v4
+        with:
+          name: IINA-Trakt-Plus-v0.2.9-beta.2-identity-canary
+          path: |
+            Trakt-Scrobbler-Plus-v0.2.9-beta.2-identity-canary.iinaplgz
+            SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 14

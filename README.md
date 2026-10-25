@@ -1,5 +1,7 @@
 # Trakt Scrobbler Plus for IINA
 
+**Identity safety canary:** `v0.2.9-beta.2` is available as a GitHub Actions artifact for Mac testing from [draft PR #15](https://github.com/olivergiangvu/iina-trakt-scrobbler-plus/pull/15). It is not a GitHub Release and does not replace stable `v0.2.8`. See [canary test notes](docs/releases/v0.2.9-beta.2.md).
+
 An enhanced fork of [i3p9/iina-trakt-scrobbler](https://github.com/i3p9/iina-trakt-scrobbler) with initial support for **Remux / AIOStreams streaming URLs**.
 
 **Current Stable: v0.2.8.** Promoted from the Light/Dark native-glass parity beta after macOS user validation alongside Episode Info Plus v1.3.3. Reuses semantic glass colors, keeps the IINA-native transparent sidebar, and softens credential/code panel opacity without altering Trakt matching, network, playback, queue, OAuth or scrobbling. See [v0.2.8 release notes](docs/releases/v0.2.8.md). Previous Stable v0.2.7 is available for rollback. Promoted from the Mac-tested v0.2.7-beta.2 canary: safe country-suffix series matching (**The Diplomat (US) S01E06** → Trakt's *The Diplomat*) and movie-only AIOStreams fragment identification (**Poetic Justice (1993)**). Both were verified to scrobble correctly on the user's IINA 1.5.0 setup. v0.2.6's Yastream HLS episode matching and Manual S/E correction, as well as Comet/IMDb matching, Resume Protection, and batched logging, remain intact. No custom IINA build, Episode Info+ change, or HomeDocker/Trakt Bridge change.

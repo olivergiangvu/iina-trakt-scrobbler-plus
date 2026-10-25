@@ -78,3 +78,5 @@ jobs:
         run: node tests/parser-smoke.js
       - name: Trakt resolution tests
         run: node tests/trakt-resolution.js
+      - name: Strict show identity and cached remake regression
+        run: node tests/night-manager-show-identity.js
