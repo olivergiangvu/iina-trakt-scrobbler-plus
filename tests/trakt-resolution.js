@@ -124,9 +124,9 @@ async function run() {
     });
     assert.strictEqual(calls.filter(function(c) { return c.includes("/search/"); }).length, 0);
     const cache = JSON.parse(store[CACHE_PATH]);
-    assert.deepStrictEqual(cache.show["imdb:tt11247158|the legend of vox machina|"], {
-      trakt: 4242, verified: true
-    });
+    assert.strictEqual(cache.show["imdb:tt11247158|the legend of vox machina|"].trakt, 4242);
+    assert.strictEqual(cache.show["imdb:tt11247158|the legend of vox machina|"].identityVersion, 2);
+    assert.strictEqual(cache.show["imdb:tt11247158|the legend of vox machina|"].source, "imdb");
   });
 
   await test("does not scrobble non-existent episode even with IMDb ID", async function() {
@@ -214,10 +214,9 @@ async function run() {
     assert.deepStrictEqual(ids, { trakt: 153142 });
 
     const cache = JSON.parse(store[CACHE_PATH]);
-    assert.deepStrictEqual(cache.show["game changer|"], {
-      trakt: 153142,
-      verified: true
-    });
+    assert.strictEqual(cache.show["game changer|"].trakt, 153142);
+    assert.strictEqual(cache.show["game changer|"].identityVersion, 2);
+    assert.strictEqual(cache.show["game changer|"].source, "episode-title");
 
     const payload = await trakt.prepareScrobblePayload(mediaInfo);
     assert.deepStrictEqual(payload, {
@@ -230,9 +229,9 @@ async function run() {
       }
     });
 
-    assert(calls.some(function(call) {
+    assert(!calls.some(function(call) {
       return call.indexOf("/shows/172377/seasons/5/episodes/4") >= 0;
-    }));
+    }), "Unproven legacy cache must not trigger episode lookup against stale show");
     assert(calls.some(function(call) {
       return call.indexOf("/search/show") >= 0;
     }));
@@ -308,10 +307,9 @@ async function run() {
 
     assert.deepStrictEqual(ids, { trakt: 222 });
     const cache = JSON.parse(store[CACHE_PATH]);
-    assert.deepStrictEqual(cache.show["the show|"], {
-      trakt: 222,
-      verified: true
-    });
+    assert.strictEqual(cache.show["the show|"].trakt, 222);
+    assert.strictEqual(cache.show["the show|"].identityVersion, 2);
+    assert.strictEqual(cache.show["the show|"].source, "episode-title");
     assert(logs.some(function(line) {
       return line.indexOf('parsedTitleMatch=yes') >= 0;
     }));
@@ -324,8 +322,9 @@ async function run() {
       movie: {},
       show: {
         "game changer|": {
-          trakt: 153142,
-          verified: true
+          trakt: 153142, verified: true, identityVersion: 2,
+          source: "manual", titleKey: "game changer",
+          showYear: 0, imdb: ""
         }
       }
     });
@@ -497,10 +496,9 @@ async function run() {
     }, 222);
 
     const cache = JSON.parse(store[CACHE_PATH]);
-    assert.deepStrictEqual(cache.show["arrested development|"], {
-      trakt: 222,
-      verified: true
-    });
+    assert.strictEqual(cache.show["arrested development|"].trakt, 222);
+    assert.strictEqual(cache.show["arrested development|"].identityVersion, 2);
+    assert.strictEqual(cache.show["arrested development|"].source, "manual");
 
     const payload = await trakt.prepareScrobblePayload({
       type: "episode",
@@ -885,8 +883,9 @@ async function run() {
     store[CACHE_PATH] = JSON.stringify({
       show: {
         "make some noise|": {
-          trakt: 196240,
-          verified: true
+          trakt: 196240, verified: true, identityVersion: 2,
+          source: "manual", titleKey: "make some noise",
+          showYear: 0, imdb: ""
         }
       },
       movie: {}
