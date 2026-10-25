@@ -14,7 +14,7 @@ const media = {type:"episode",title:"The Night Manager",
   showTitle:"The Night Manager",year:2016,season:1,episode:2,
   episodeTitle:"Episode 2"};
 
-function setup(legacy, shows=[wrong,correct,third]) {
+function setup(legacy, shows=[wrong,correct,third], episodeTitles={}) {
   const modulePath=path.resolve(__dirname,"../trakt.js");
   delete require.cache[modulePath];
   const trakt=require("../trakt.js");
@@ -42,7 +42,7 @@ function setup(legacy, shows=[wrong,correct,third]) {
           const ep=/^\/shows\/(\d+)\/seasons\/(\d+)\/episodes\/(\d+)$/.exec(url.pathname);
           if(ep) {
             const id=Number(ep[1]);
-            body={title:id===202191?"Part I - Mission":"Episode 2",
+            body={title:episodeTitles[id] || (id===202191?"Part I - Mission":"Episode 2"),
               season:Number(ep[2]),number:Number(ep[3])};
           } else {
             const detail=/^\/shows\/(\d+)$/.exec(url.pathname);
@@ -89,6 +89,21 @@ function setup(legacy, shows=[wrong,correct,third]) {
   assert.equal(await ambiguous.trakt.getTraktIds(media),null,
     "Two 2016 same-title shows with indistinguishable episode titles must fail closed");
   assert.equal(ambiguous.calls.some(p=>p.startsWith("POST")),false);
+
+  // Same title and SAME year: an episode-title proof may not be reused
+  // as show-wide identity for the next episode.
+  const duplicate2016={...correct,ids:{trakt:314181}};
+  const scoped=setup(null,[correct,duplicate2016],{
+    94686:"Night at the Embassy",314181:"Different Dispatch"
+  });
+  const special={...media,episodeTitle:"Night at the Embassy"};
+  assert.deepEqual(await scoped.trakt.getTraktIds(special),{trakt:94686});
+  assert.equal(JSON.parse(scoped.store[CACHE]).show["the night manager|2016"].source,
+    "episode-title");
+  const before=scoped.calls.length;
+  assert.equal(await scoped.trakt.getTraktIds({...special,episode:3,episodeTitle:"A New Mission"}),null,
+    "Episode-title evidence from S01E02 must not auto-identify S01E03");
+  assert.ok(scoped.calls.length>before,"next S/E requires a fresh identity lookup");
 
   const noYear=setup();
   assert.equal(await noYear.trakt.getTraktIds({...media,year:null}),null,
