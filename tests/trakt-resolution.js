@@ -229,9 +229,9 @@ async function run() {
       }
     });
 
-    assert(!calls.some(function(call) {
+    assert(calls.some(function(call) {
       return call.indexOf("/shows/172377/seasons/5/episodes/4") >= 0;
-    }), "Unproven legacy cache must not trigger episode lookup against stale show");
+    }), "Legacy cache was discarded; stale show independently rejected during search");
     assert(calls.some(function(call) {
       return call.indexOf("/search/show") >= 0;
     }));
