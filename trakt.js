@@ -1146,10 +1146,20 @@ function isVerifiedEpisodeCacheEntry(value, mediaInfo) {
 	var year = episodeExpectedYear(mediaInfo);
 	if (year && value.source !== "manual" && Number(value.showYear || 0) !== year)
 		return false;
+	// If this identity was proven by ONE episode among multiple same-name
+	// shows, it cannot identify an unrelated episode of the same title/year.
+	if (value.source === "episode-title" || value.source === "episode-position") {
+		if (Number(value.season) !== Number(mediaInfo && mediaInfo.season) ||
+			Number(value.episode) !== Number(mediaInfo && mediaInfo.episode))
+			return false;
+		if (value.source === "episode-title" &&
+			value.episodeTitleKey !== normalizeTitle(mediaInfo && mediaInfo.episodeTitle))
+			return false;
+	}
 	var imdb = String(mediaInfo && mediaInfo.imdb || "").toLowerCase();
 	if (/^tt\d{6,10}$/.test(imdb) && value.source !== "manual" &&
 		String(value.imdb || "").toLowerCase() !== imdb) return false;
-	return ["manual", "imdb", "title-year", "unique-title", "episode-title"].includes(value.source);
+	return ["manual", "imdb", "title-year", "unique-title", "episode-title", "episode-position"].includes(value.source);
 }
 
 function createVerifiedEpisodeCacheEntry(traktId, mediaInfo, show, source) {
@@ -1161,7 +1171,13 @@ function createVerifiedEpisodeCacheEntry(traktId, mediaInfo, show, source) {
 		source: String(source || "manual"),
 		titleKey: episodeShowTitleKey(mediaInfo),
 		showYear: Number(show && show.year || 0),
-		imdb: String(ids.imdb || (source === "imdb" && mediaInfo && mediaInfo.imdb) || "").toLowerCase()
+		imdb: String(ids.imdb || (source === "imdb" && mediaInfo && mediaInfo.imdb) || "").toLowerCase(),
+		season: source === "episode-title" || source === "episode-position"
+			? Number(mediaInfo && mediaInfo.season) : null,
+		episode: source === "episode-title" || source === "episode-position"
+			? Number(mediaInfo && mediaInfo.episode) : null,
+		episodeTitleKey: source === "episode-title"
+			? normalizeTitle(mediaInfo && mediaInfo.episodeTitle) : ""
 	};
 }
 
@@ -1813,7 +1829,10 @@ async function resolveEpisodeIds(mediaInfo, bucket, key) {
 	var selected = null, source = "";
 	if (verified.length === 1) {
 		selected = verified[0];
-		source = year ? "title-year" : "unique-title";
+		// Multiple eligible same-name shows: one matching S/E does not prove
+		// show-wide identity. Only cache this specific episode in that case.
+		source = eligible.length > 1 ? "episode-position" :
+			(year ? "title-year" : "unique-title");
 	} else if (verified.length > 1) {
 		// Episode titles like "Episode 3" are generic labels, not evidence.
 		var episodeTitle = normalizeTitle(mediaInfo.episodeTitle);
