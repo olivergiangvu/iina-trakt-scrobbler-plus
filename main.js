@@ -12,6 +12,7 @@ var freshIdentity = require("./fresh-identity.js");
 var resumeProtection = require("./resume-protection.js");
 var correctionMedia = require("./correction-media.js");
 var trakt = require("./trakt.js");
+var trustedSeriesAliases = require("./trusted-series-aliases.js");
 var debugLogBuffer = require("./debug-log-buffer.js");
 var PLUGIN_VERSION = "0.2.9-beta.5";
 var DEBUG_LOG_PATH = "@data/debug.log";
@@ -1399,7 +1400,8 @@ function cloneMediaInfo(mediaInfo) {
     manualTraktId: Number(mediaInfo.manualTraktId || 0),
     identitySource: mediaInfo.identitySource === "aiostreams-title-fragment" ? "aiostreams-title-fragment" : "",
     imdb: mediaInfo.imdb || "",
-    tmdb: Number(mediaInfo.tmdb||0)
+    tmdb: Number(mediaInfo.tmdb||0),
+    sourceHost: String(mediaInfo.sourceHost||"")
   };
 }
 
@@ -1597,6 +1599,7 @@ function identifyCurrentMedia() {
   }
   logGuessitFailureOnce();
   var mediaInfo = mediaInfoFromParsed(parsed);
+  if(mediaInfo)mediaInfo.sourceHost = trustedSeriesAliases.hostOf(source.url||source.path||"");
   if (mediaInfo && picked.imdb) {
     mediaInfo.imdb = picked.imdb;
   }
