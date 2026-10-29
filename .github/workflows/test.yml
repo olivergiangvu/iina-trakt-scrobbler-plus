@@ -2,7 +2,7 @@ name: Node smoke tests
 
 on:
   push:
-    branches: [main, 'fix/**', 'feature/**']
+    branches: [main, 'fix/**', 'feature/**', 'feat/**']
   pull_request:
 
 permissions:
