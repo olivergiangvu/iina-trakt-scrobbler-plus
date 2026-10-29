@@ -24,8 +24,9 @@ import urllib.parse
 import urllib.request
 
 import callback_session
+import identity_context
 
-VERSION = "0.6.0-beta.2"
+VERSION = "0.7.0-beta.1"
 SCHEME = "aios-iina"
 BETA_SCHEME = "aios-iina-beta"
 MAX_URL_CHARS = 100000
@@ -574,6 +575,16 @@ def handle(raw):
             if session_id:
                 callback_session.discard_session(session_id)
             raise
+        # Optional, read-only identity lookup. IINA is ALREADY launched.
+        # Never allow unavailable metadata, auth or API timeouts to block video.
+        # Only sanitized, short-lived identity fields are written on success.
+        identity_created = False
+        if context:
+            try:
+                identity_created = identity_context.create_from_launch(media, title, context)
+            except Exception:
+                identity_created = False
+        log("AIO_IDENTITY_CONTEXT=" + ("created" if identity_created else "not-created"))
         counts = language_counts(paths)
         log("IINA CLI submitted; v0.5.1 url_unchanged=true; external_subtitles=%d/%d; metadata_labels=%d; "
             "context_provided=%s; context_tracks=%d; passed_tracks=%d; priority=VI>EN; vi_tracks=%d; en_tracks=%d; other_tracks=%d; resumed=%s" %
