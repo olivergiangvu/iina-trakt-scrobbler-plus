@@ -92,3 +92,100 @@ For genuinely zero-touch matching of **previously unseen** aliases:
   provenance; do not automatically trust arbitrary internet search.
 - Add explicit UI controls to inspect, correct and revoke remembered
   aliases, and synchronize only approved mappings between plugins.
+
+
+## Proposed v2: AIOStreams first-party launch context + TheTVDB discovery
+
+### What is actually present in the upstream custom external-player link (2026-10-29)
+Source: `Viren070/AIOStreams`:
+- `packages/web/src/lib/playback/player-choice.ts`
+- `packages/web/src/lib/playback/play.ts`
+- `packages/web/src/lib/playback/external-return.ts`
+- `packages/web/src/lib/playback/now-playing.ts`
+- `packages/web/src/lib/queries.ts`
+
+**Current supported Custom Link tokens:** `{url}`, `{encodedUrl}`, `{scheme}`,
+`{filename}`, `{subtitles}`, `{title}`, `{position}`, `{positionMs}`,
+`{returnUrl}`. **No** `{imdb}`, `{tmdb}`, `{tvdb}`, `{seriesId}`, `{episode}`,
+or arbitrary formatter `{metadata.*}` expansion in the external player template.
+AIOStreams Custom Formatter placeholders are a separate template namespace.
+
+**Key discovery:** AIOStreams' `externalReturnUrl()` includes
+`played=item.Id` and `source=source.Id` in a first-party callback URL.
+These are opaque, internal **AIOStreams/Jellyfin IDs** — **not IMDb/TVDB IDs**.
+They can identify a media-server item and selected version *after authenticated
+lookup*; they are not authenticated proof by themselves.
+
+The AIOStreams web app already reads `item.SeriesId` and uses
+`show.ProviderIds.Imdb` for episodes in `now-playing.ts`. Item lookup uses
+`GET /Items?userId=...&Ids=<item.Id>&Fields=...` via an authenticated
+Jellyfin client (queries.ts). A launch context could retrieve that exact
+episode item plus its parent show and cross-provider IDs from AIOStreams,
+instead of re-searching by a localized title.
+
+### Recommended integration
+1. Use a custom Mac URL handler or a small locally installed handoff helper,
+   not a raw `iina://weblink` query parameter IINA might discard:
+   `aios-iina://open?stream={encodedUrl}&title={title}&filename={filename}&position={position}&context={returnUrl}`.
+   This is a **proposed** template, not usable until the helper is installed.
+2. Parse only **allowlisted AIOStreams origin URLs**, extract the internal
+   `played` and `source` IDs; do not trust query parameters as metadata proof.
+3. Resolve the item through the user's *authenticated* AIOStreams media server;
+   verify its `Type=Episode`, `SeriesId`, `ParentIndexNumber`,
+   `IndexNumber`, parent `ProviderIds` and matching `MediaSourceId`.
+   Provider IDs may be absent; do not invent missing IDs.
+4. Supply a versioned launch context (or short-lived, locally signed identity
+   envelope) to IINA plugins. Include show IDs, S/E, origin, authoritative
+   source and expiry; omit playback credentials and raw stream URL from
+   persistent identity cache.
+5. Both plugins validate externally supplied IDs again against Trakt/TMDb
+   before scrobbling/showing verified metadata; stale, contradictory or
+   cross-user contexts **fail closed**.
+6. A future upstream contribution could add direct, whitelisted
+   `{itemId}`, `{seriesId}`, `{imdb}`, `{tmdb}`, `{tvdb}`, `{season}` and
+   `{episode}` placeholders to AIOStreams' playerLink. AIOStreams' current
+   source code does NOT implement these tokens.
+
+### TheTVDB fallback for Asian / TVB titles
+TheTVDB series 483239 displays **璀璨之城** with alias **City of Splendour**;
+Trakt has **This City Never Sleeps** show 289996 (IMDb tt39443161,
+TMDb 295002), but Trakt alias list is empty. This makes TVDB a valuable
+**discovery** source, not automatically the final authority to scrobble.
+
+Recommended chain:
+`query alias/translation (TVDB) → candidate TVDB series →
+cross-check TVDB remote IMDb/TMDb IDs with Trakt/TMDb →
+confirm country/year and S/E order → verified identity`.
+Respect TVDB broadcast vs DVD/absolute episode orders: do not blindly map
+S01E02 between all catalogs.
+
+AIOStreams already exposes `TVDB_API_KEY`, `ID_MAPPINGS_ENABLED` (default
+true, Wikidata-fetcher CSV), `TITLE_CONFLICTS_ENABLED` and TMDb; prefer one
+server-side TVDB adapter/verified identity broker rather than a separate key
+in each IINA plugin. TVDB v4 needs legitimate project API credentials and
+has licensing/attribution requirements. Do not scrape HTML as a substitute.
+
+### Security and rollout
+- Never log or persist signed stream URLs, auth tokens, return URLs containing
+  credentials, or the AIOStreams media-server admin API key.
+- The Custom Link `{returnUrl}` gives *item identifiers* only; the helper
+  must authenticate with a scoped user session and cross-check both item and
+  selected version. An admin AIOStreams API key is broadly privileged and
+  should not be embedded in launch URLs or distributed to every Mac client.
+- A Custom Link-based helper must be registered as a macOS protocol handler.
+  The current `iina://weblink?url=...` format alone does not guarantee that
+  unknown query fields reach either IINA plugin.
+- When playback starts outside AIOStreams (raw `index.m3u8`), this handoff
+  context is unavailable; keep TVDB discovery / user-confirmed learned aliases
+  as safe fallbacks.
+- Keep PRs in draft and the working beta.5/beta.4 installed until an actual Mac
+  test demonstrates first-party item-id context and non-ghost remote scrobble.
+
+References:
+- https://github.com/Viren070/AIOStreams/blob/main/packages/web/src/lib/playback/player-choice.ts
+- https://github.com/Viren070/AIOStreams/blob/main/packages/web/src/lib/playback/external-return.ts
+- https://github.com/Viren070/AIOStreams/blob/main/packages/web/src/lib/playback/now-playing.ts
+- https://docs.aiostreams.viren070.me/reference/addon-protocol/metadata/
+- https://docs.aiostreams.viren070.me/configuration/environment-variables/
+- https://www.thetvdb.com/series/483239
+- https://thetvdb.com/api-information
