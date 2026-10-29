@@ -4,7 +4,7 @@
 
 This is a source-code migration into the Trakt+ repository. It is **not** a combined executable, a second IINA plugin, a Docker service, a changed AIOStreams image, nor a deployed update. No HomeDocker changes are needed.
 
-## Single active macOS app — v0.7.1 candidate
+## Single active macOS app — v0.7.2 candidate
 
 GitHub source/ref is the only version history. Install **one**
 `~/Applications/AIOIINABridge.app` for both beta testing and stable use,
@@ -17,6 +17,10 @@ From the selected candidate source checkout on macOS:
 ```bash
 bash companion/aiostreams-iina/scripts/install-single-macos.sh
 ```
+
+The v0.7.2 beta also repairs the exact malformed HLS path suffix
+`index.m3u8%23aios_title=...` (legacy encoded title metadata) before opening
+IINA; it does not alter any other signed playback URLs or query bytes.
 
 The installer runs all offline regressions, builds and verifies the signed app,
 then unregisters/removes only the three known older Companion app bundles and
