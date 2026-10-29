@@ -23,7 +23,7 @@ jobs:
       - name: Callback origin + at-most-once regression
         run: python3 -m unittest discover -s companion/aiostreams-iina/tests -p "test_*.py"
       - name: Shell syntax
-        run: sh -n companion/aiostreams-iina/launcher.sh && bash -n companion/aiostreams-iina/scripts/build-macos.sh
+        run: sh -n companion/aiostreams-iina/launcher.sh && bash -n companion/aiostreams-iina/scripts/build-macos.sh && bash -n companion/aiostreams-iina/scripts/install-single-macos.sh
 
   companion-macos:
     name: Package beta macOS URL handler (not publish)
