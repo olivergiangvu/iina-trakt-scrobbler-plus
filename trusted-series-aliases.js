@@ -47,11 +47,13 @@ function find(title,year,kind,extra,originHost){
     .filter(r=>r&&norm(r.alias)===key&&(!requestedYear||r.year===requestedYear)&&
       (r.source!=="user-confirmed"||(host&&r.originHost===host)));
   if(!found.length)return null;
-  const distinct=new Set(found.map(r=>[r.imdb,r.tmdb,r.trakt||"?",r.year].join("|")));
-  // Same reviewed/learned show may be duplicated, but contradictory proof
-  // must fail closed, even if one row seems more popular.
-  if(distinct.size!==1)return null;
-  return {...found[0]};
+  // A learned TMDb record may not know a Trakt ID yet; zero is unknown,
+  // never a competing ID. Every KNOWN identifier must agree.
+  const first=found[0];
+  if(found.some(r=>r.imdb!==first.imdb||r.tmdb!==first.tmdb||
+     r.year!==first.year||(r.trakt>0&&first.trakt>0&&r.trakt!==first.trakt)))
+    return null;
+  return {...(found.find(r=>r.source==="reviewed")||first)};
 }
 function read(raw){
   let parsed;try{parsed=typeof raw==="string"?JSON.parse(raw):raw;}catch{return [];}
