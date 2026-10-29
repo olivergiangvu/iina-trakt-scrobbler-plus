@@ -80,5 +80,7 @@ jobs:
         run: node tests/trakt-resolution.js
       - name: Trakt provider-attested title aliases
         run: node tests/trakt-verified-alias.js
+      - name: Reviewed cross-provider HLS identity
+        run: node tests/hls-reviewed-identity.js
       - name: Strict show identity and cached remake regression
         run: node tests/night-manager-show-identity.js
