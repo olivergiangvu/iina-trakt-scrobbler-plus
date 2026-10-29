@@ -2,7 +2,7 @@ name: Node smoke tests
 
 on:
   push:
-    branches: [main, 'fix/**', 'feature/**']
+    branches: [main, 'fix/**', 'feature/**', 'feat/**']
   pull_request:
 
 permissions:
@@ -82,5 +82,9 @@ jobs:
         run: node tests/trakt-verified-alias.js
       - name: Reviewed cross-provider HLS identity
         run: node tests/hls-reviewed-identity.js
+      - name: Shared identity framework
+        run: node tests/identity-framework.js
+      - name: Learned Trakt identity persists across episodes
+        run: node tests/learned-trakt-identity.js
       - name: Strict show identity and cached remake regression
         run: node tests/night-manager-show-identity.js
