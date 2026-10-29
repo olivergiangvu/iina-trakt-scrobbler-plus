@@ -24,7 +24,8 @@ function setup({show=official,episodeFound=true}={}) {
     calls.push(method+" "+url.pathname);
     assert.equal(method,"GET","Identity proof must never POST scrobbles");
     let code=200,body={};
-    if(url.pathname==="/shows/tt39443161")body=show;
+    if(url.pathname==="/search/show")body=[];
+    else if(url.pathname==="/shows/tt39443161")body=show;
     else if(url.pathname==="/shows/289996/seasons/1/episodes/2"){
       if(episodeFound)body={season:1,number:2,title:"Episode 2"};
       else{code=404;body={};}
