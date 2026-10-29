@@ -120,19 +120,43 @@ def exactly_one_item(payload, expected):
 
 
 def context_info(return_url):
-    """Only explicitly allowlisted HTTPS AIO Web origin; desktop is separate."""
+    """Resolve approved Web/Desktop callback without trusting media URL hosts."""
     if not validated_return_url(return_url):
         return None
     parts = urlsplit(return_url)
-    if parts.scheme != "https":  # no remote bearer tokens over plaintext HTTP
-        return None
     ids = _markers(return_url)
     if not ids:
         return None
     item, source = ids.get("played"), ids.get("source")
     if not ID_RE.fullmatch(item or "") or not ID_RE.fullmatch(source or ""):
         return None
-    return f"{parts.scheme}://{parts.netloc.lower()}", item, source
+
+    if parts.scheme == "https":
+        return f"https://{parts.netloc.lower()}", item, source
+
+    if parts.scheme != "aiostreams" or parts.netloc != "return":
+        return None
+    # Desktop callbacks contain no trusted HTTPS host. Resolve only to a
+    # privately configured, exact HTTPS origin; never infer from media URL.
+    try:
+        if CONFIG_FILE.is_symlink() or CONFIG_FILE.stat().st_mode & 0o077:
+            return None
+        settings = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+        if not isinstance(settings, dict) or settings.get("enabled") is not True:
+            return None
+        origin = settings.get("origin")
+        if not isinstance(origin, str):
+            return None
+        trusted = urlsplit(origin)
+        if (trusted.scheme != "https" or not trusted.hostname
+                or trusted.username is not None or trusted.password is not None
+                or trusted.path or trusted.query or trusted.fragment
+                or origin != f"https://{trusted.netloc.lower()}"):
+            return None
+        _ = trusted.port  # Validate optional port syntax.
+    except (OSError, ValueError, TypeError):
+        return None
+    return origin, item, source
 
 
 def obtain_identity(media, title, return_url, *, token=None, fetch=None, now_ms=None):
