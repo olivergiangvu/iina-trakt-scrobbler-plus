@@ -4,10 +4,10 @@ const path=require("node:path");
 const TOKEN="@data/trakt-token.json", CACHE="@data/trakt-cache.json";
 const official={title:"This City Never Sleeps",year:2026,
   ids:{trakt:401001,imdb:"tt39443161"}};
-const media={type:"episode",title:"City of Splendour",showTitle:"City of Splendour",
+const media={type:"episode",title:"City of Elegance",showTitle:"City of Elegance",
   season:1,episode:2,episodeTitle:"Episode 2"};
 
-function create(shows=[official], aliases={401001:[{title:"City of Splendour",country:"gb"}]}) {
+function create(shows=[official], aliases={401001:[{title:"City of Elegance",country:"gb"}]}) {
   delete require.cache[path.resolve(__dirname,"../trakt.js")];
   const trakt=require("../trakt.js");
   const data={
@@ -46,7 +46,7 @@ function create(shows=[official], aliases={401001:[{title:"City of Splendour",co
   const confirmed=create();
   assert.deepEqual(await confirmed.trakt.getTraktIds(media),{trakt:401001},
     "Trakt's exact alias plus verified S/E can resolve a differently named show");
-  const item=JSON.parse(confirmed.data[CACHE]).show["city of splendour|"];
+  const item=JSON.parse(confirmed.data[CACHE]).show["city of elegance|"];
   assert.equal(item.trakt,401001);
   assert.equal(item.identityVersion,2);
   assert.equal(item.source,"trakt-alias");
@@ -58,7 +58,7 @@ function create(shows=[official], aliases={401001:[{title:"City of Splendour",co
   assert.equal(await absent.trakt.getTraktIds(media),null,
     "No alias in the Trakt catalog means NO inferred identity");
 
-  const fuzzy=create([official],{401001:[{title:"City of Splendours"}]});
+  const fuzzy=create([official],{401001:[{title:"City of Elegances"}]});
   assert.equal(await fuzzy.trakt.getTraktIds(media),null,
     "A close spelling must not bypass exact alias verification");
 
@@ -69,13 +69,13 @@ function create(shows=[official], aliases={401001:[{title:"City of Splendour",co
 
   const competing={title:"A Different City",year:2026,ids:{trakt:401002}};
   const duplicate=create([official,competing],{
-    401001:[{title:"City of Splendour"}],
-    401002:[{title:"City of Splendour"}]
+    401001:[{title:"City of Elegance"}],
+    401002:[{title:"City of Elegance"}]
   });
   assert.equal(await duplicate.trakt.getTraktIds(media),null,
     "Duplicate exact aliases with generic episode titles must fail closed");
 
-  const blocked=create([official],{401001:[{title:"City of Splendour, Part II"}]});
+  const blocked=create([official],{401001:[{title:"City of Elegance, Part II"}]});
   assert.equal(await blocked.trakt.getTraktIds(media),null);
   console.log("Trakt exact aliases, unique match, no fuzzy, year check, duplicate fail-closed PASS");
 })().catch(e=>{console.error(e);process.exitCode=1});
