@@ -1159,7 +1159,7 @@ function isVerifiedEpisodeCacheEntry(value, mediaInfo) {
 	var imdb = String(mediaInfo && mediaInfo.imdb || "").toLowerCase();
 	if (/^tt\d{6,10}$/.test(imdb) && value.source !== "manual" &&
 		String(value.imdb || "").toLowerCase() !== imdb) return false;
-	return ["manual", "imdb", "title-year", "unique-title", "episode-title", "episode-position"].includes(value.source);
+	return ["manual", "imdb", "title-year", "unique-title", "episode-title", "episode-position", "trakt-alias"].includes(value.source);
 }
 
 function createVerifiedEpisodeCacheEntry(traktId, mediaInfo, show, source) {
@@ -1303,6 +1303,17 @@ async function fetchShowByReference(reference) {
 	}
 
 	return response.body || null;
+}
+
+// A search score can nominate a show, but only Trakt's own aliases can
+// prove that a differently titled result uses the player's exact show name.
+async function fetchShowAliases(showReference) {
+	var response = await authedRequest("GET",
+		"/shows/" + traktReferenceSegment(showReference) + "/aliases");
+	if (response.statusCode === 404) return [];
+	if (response.statusCode >= 400) throw new Error(
+		"Trakt alias lookup failed with status " + response.statusCode);
+	return Array.isArray(response.body) ? response.body : [];
 }
 
 async function fetchEpisodeForShow(showReference, season, episode) {
@@ -1805,25 +1816,51 @@ async function resolveEpisodeIds(mediaInfo, bucket, key) {
 		": " + results.map(summarizeSearchCandidate).join(" | "));
 
 	var eligible = [];
-	var seen = Object.create(null);
+	var seen = Object.create(null), possibleAliases = [];
 	for (var index = 0; index < results.length; index += 1) {
 		var candidate = results[index] || {};
 		var show = candidate.show;
 		var score = Number(candidate.score || 0);
 		var id = Number(show && show.ids && show.ids.trakt || 0);
-		if (!id || seen[id] || score < SEARCH_SCORE_THRESHOLD ||
-			!titleIdentityMatches(title, show.title)) continue;
+		if (!id || seen[id] || score < SEARCH_SCORE_THRESHOLD) continue;
 		// Hard filter: never accept a 2023 remake for a known 2016 release.
 		if (year && Number(show.year || 0) !== year) continue;
 		seen[id] = true;
-		eligible.push({id:id,show:show});
+		if (titleIdentityMatches(title, show.title)) {
+			eligible.push({id:id,show:show,alias:false});
+		} else {
+			possibleAliases.push({id:id,show:show});
+		}
+	}
+
+	// The Trakt show search includes aliases, but its result payload contains
+	// only canonical titles. A distinct title can only be accepted if the
+	// provider itself attests the player's complete title as an EXACT alias.
+	// Keep this bounded; missing/blocked/overlarge alias lookups fail closed.
+	if (possibleAliases.length > 0 && possibleAliases.length <= 8) {
+		for (var a=0; a<possibleAliases.length; a++) {
+			var item=possibleAliases[a];
+			var aliases=await fetchShowAliases(item.id);
+			if (aliases.length > 100) {
+				log("Trakt aliases list too long; manual match required.");
+				return null;
+			}
+			if (aliases.some(function(alias) {
+				return titleIdentityMatches(title,alias && alias.title);
+			})) {
+				eligible.push({id:item.id,show:item.show,alias:true});
+			}
+		}
+	} else if (possibleAliases.length > 8) {
+		log("Trakt title alias search too ambiguous; manual match required.");
+		return null;
 	}
 
 	var verified = [];
 	for (var itemIndex = 0; itemIndex < eligible.length; itemIndex += 1) {
 		var entry = eligible[itemIndex];
 		var match = await verifyEpisodeCandidate(entry.id, mediaInfo);
-		if (match) verified.push({match:match,show:entry.show});
+		if (match) verified.push({match:match,show:entry.show,alias:entry.alias});
 	}
 
 	var selected = null, source = "";
@@ -1832,7 +1869,7 @@ async function resolveEpisodeIds(mediaInfo, bucket, key) {
 		// Multiple eligible same-name shows: one matching S/E does not prove
 		// show-wide identity. Only cache this specific episode in that case.
 		source = eligible.length > 1 ? "episode-position" :
-			(year ? "title-year" : "unique-title");
+			(verified[0].alias ? "trakt-alias" : (year ? "title-year" : "unique-title"));
 	} else if (verified.length > 1) {
 		// Episode titles like "Episode 3" are generic labels, not evidence.
 		var episodeTitle = normalizeTitle(mediaInfo.episodeTitle);
