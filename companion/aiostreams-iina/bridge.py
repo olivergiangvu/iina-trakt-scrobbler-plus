@@ -89,7 +89,7 @@ def normalize_legacy_hls_title_marker(media):
     percent-encoded paths, authorization parameters or valid signed URLs.
     """
     parts = urllib.parse.urlsplit(media)
-    marker = re.search(r"(?i)(?<=\\.m3u8)%23aios_title=[^/]+$", parts.path)
+    marker = re.search(r"(?i)(?<=\.m3u8)%23aios_title=[^/]+$", parts.path)
     if marker is None:
         return media
     return urllib.parse.urlunsplit(parts._replace(path=parts.path[:marker.start()]))
