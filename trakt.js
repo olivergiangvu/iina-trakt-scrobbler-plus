@@ -1,5 +1,6 @@
 var traktKeys = require("./trakt_keys.js");
 var apiGateModule = require("./trakt-api-gate.js");
+var trustedSeriesAliases = require("./trusted-series-aliases.js");
 
 var API_ROOT = "https://api.trakt.tv";
 var DEVICE_CODE_PATH = "/oauth/device/code";
@@ -1146,6 +1147,13 @@ function isVerifiedEpisodeCacheEntry(value, mediaInfo) {
 	var year = episodeExpectedYear(mediaInfo);
 	if (year && value.source !== "manual" && Number(value.showYear || 0) !== year)
 		return false;
+	// Invalidate stale reviewed entries if their registry proof disappears.
+	if (value.source === "reviewed-alias") {
+		var reviewed = trustedSeriesAliases.find(
+			mediaInfo && (mediaInfo.showTitle || mediaInfo.title), year, "episode");
+		if (!reviewed || Number(value.trakt) !== reviewed.trakt ||
+			String(value.imdb || "").toLowerCase() !== reviewed.imdb) return false;
+	}
 	// If this identity was proven by ONE episode among multiple same-name
 	// shows, it cannot identify an unrelated episode of the same title/year.
 	if (value.source === "episode-title" || value.source === "episode-position") {
@@ -1159,7 +1167,7 @@ function isVerifiedEpisodeCacheEntry(value, mediaInfo) {
 	var imdb = String(mediaInfo && mediaInfo.imdb || "").toLowerCase();
 	if (/^tt\d{6,10}$/.test(imdb) && value.source !== "manual" &&
 		String(value.imdb || "").toLowerCase() !== imdb) return false;
-	return ["manual", "imdb", "title-year", "unique-title", "episode-title", "episode-position", "trakt-alias"].includes(value.source);
+	return ["manual", "imdb", "title-year", "unique-title", "episode-title", "episode-position", "trakt-alias", "reviewed-alias"].includes(value.source);
 }
 
 function createVerifiedEpisodeCacheEntry(traktId, mediaInfo, show, source) {
@@ -1774,6 +1782,29 @@ async function resolveEpisodeIds(mediaInfo, bucket, key) {
 		log("Trakt episode cache entry invalidated for " + episodeIdentityLabel(mediaInfo));
 	}
 
+	// A reviewed cross-provider alias can supply identity for an opaque
+	// HLS manifest, but ALL external IDs and this exact episode are checked.
+	var catalog = trustedSeriesAliases.find(mediaInfo.showTitle || mediaInfo.title,
+		episodeExpectedYear(mediaInfo), "episode");
+	if (catalog) {
+		var catalogShow = await fetchShowByReference(catalog.imdb);
+		if (!catalogShow || !catalogShow.ids ||
+			Number(catalogShow.ids.trakt) !== catalog.trakt ||
+			Number(catalogShow.ids.tmdb) !== catalog.tmdb ||
+			String(catalogShow.ids.imdb || "").toLowerCase() !== catalog.imdb ||
+			Number(catalogShow.year) !== catalog.year) {
+			log("Reviewed alias identity mismatch on Trakt; manual confirmation required.");
+			return null;
+		}
+		var catalogEpisode = await verifyEpisodeCandidate(catalog.trakt, mediaInfo);
+		if (!catalogEpisode) return null;
+		bucket[key] = createVerifiedEpisodeCacheEntry(catalog.trakt,
+			mediaInfo, catalogShow, "reviewed-alias");
+		saveSearchCache();
+		log("Reviewed catalog alias verified: " + episodeIdentityLabel(mediaInfo) +
+			" show=" + catalog.trakt);
+		return {trakt:catalog.trakt};
+	}
 	var imdb = String(mediaInfo.imdb || "").trim().toLowerCase();
 	if (/^tt\d{6,10}$/.test(imdb)) {
 		var identifiedShow = await fetchShowByReference(imdb);
