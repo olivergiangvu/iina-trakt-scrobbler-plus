@@ -26,7 +26,7 @@ import urllib.request
 import callback_session
 import identity_context
 
-VERSION = "0.7.0-beta.1"
+VERSION = "0.7.3-beta.1"
 SCHEME = "aios-iina"
 BETA_SCHEME = "aios-iina-beta"
 MAX_URL_CHARS = 100000
@@ -80,6 +80,26 @@ def valid_http_url(value):
         return False
 
 
+def normalize_legacy_hls_title_marker(media):
+    """Repair legacy AIO HLS path suffix, preserving query bytes and other URLs.
+
+    Some upstream links percent-encode the old #aios_title fragment into the
+    HLS path, yielding index.m3u8%23aios_title=... and a failing HTTP request.
+    Only remove that exact terminal suffix after .m3u8, never arbitrary
+    percent-encoded paths, authorization parameters or valid signed URLs.
+    """
+    parts = urllib.parse.urlsplit(media)
+    # AIO custom-link substitution may decode %23 into a real # before this
+    # function sees the nested media URL. IINA can then encode it again as a
+    # literal path suffix, which fails on CDN HLS endpoints.
+    if parts.path.lower().endswith(".m3u8") and parts.fragment.lower().startswith("aios_title="):
+        return urllib.parse.urlunsplit(parts._replace(fragment=""))
+    marker = re.search(r"(?i)(?<=\.m3u8)%23aios_title=[^/]+$", parts.path)
+    if marker is None:
+        return media
+    return urllib.parse.urlunsplit(parts._replace(path=parts.path[:marker.start()]))
+
+
 def parse_link(raw):
     if len(raw) > MAX_URL_CHARS:
         raise ValueError("custom link too long")
@@ -94,6 +114,7 @@ def parse_link(raw):
     media = first("url")
     if not valid_http_url(media):
         raise ValueError("invalid media URL")
+    media = normalize_legacy_hls_title_marker(media)
     title = first("title")[:240]
     pos_text = first("position", "0")
     if not pos_text.isascii() or not pos_text.isdecimal():
@@ -534,6 +555,10 @@ def language_counts(paths):
 def handle(raw):
     try:
         media, title, position, subtitles, context = parse_link(raw)
+        incoming_media = next((value for key, value in urllib.parse.parse_qsl(
+            urllib.parse.urlsplit(raw).query, keep_blank_values=True
+        ) if key == "url"), "")
+        legacy_marker_removed = incoming_media != media
         cli = iina_cli_path()
         if not cli:
             log("ERROR: IINA CLI not found in /Applications or ~/Applications")
@@ -586,9 +611,11 @@ def handle(raw):
                 identity_created = False
         log("AIO_IDENTITY_CONTEXT=" + ("created" if identity_created else "not-created"))
         counts = language_counts(paths)
-        log("IINA CLI submitted; v0.5.1 url_unchanged=true; external_subtitles=%d/%d; metadata_labels=%d; "
+        log("IINA CLI submitted; v0.5.1 url_unchanged=%s; legacy_title_marker_removed=%s; external_subtitles=%d/%d; metadata_labels=%d; "
             "context_provided=%s; context_tracks=%d; passed_tracks=%d; priority=VI>EN; vi_tracks=%d; en_tracks=%d; other_tracks=%d; resumed=%s" %
-            (len(paths), len(urls), labelled, bool(context), len(selected_urls), len(subtitles),
+            ("false" if legacy_marker_removed else "true",
+             "true" if legacy_marker_removed else "false",
+             len(paths), len(urls), labelled, bool(context), len(selected_urls), len(subtitles),
              counts["vi"], counts["en"], counts["other"], bool(position)))
         return 0
     except (ValueError, OSError) as exc:
@@ -623,6 +650,32 @@ def self_test():
         assert "--mpv-sub-files=/tmp/sub.vi.vtt" in argv
         assert any(x.startswith("--mpv-force-media-title=") for x in argv) == bool(video_title)
         assert "#aios_title" not in argv[-1]
+    legacy_bad = "https://a.example/video/index.m3u8%23aios_title=City%20of%20Splendour"
+    legacy_clean = "https://a.example/video/index.m3u8"
+    parsed_legacy = SCHEME + "://play?" + urllib.parse.urlencode({
+        "url": legacy_bad, "title": "City of Splendour S01E03",
+        "position": "0"
+    })
+    assert parse_link(parsed_legacy)[0] == legacy_clean
+    assert cli_args(parse_link(parsed_legacy)[0], "City S01E03", 0, [])[-1] == legacy_clean
+    # Encoded only once in the outer custom link: parse_qsl() decodes %23 to
+    # a literal #aios_title fragment. This was missed by v0.7.2.
+    once_encoded_outer = SCHEME + "://play?url=" + legacy_bad + "&title=City"
+    assert parse_link(once_encoded_outer)[0] == legacy_clean
+    fragment_bad = legacy_clean + "#aios_title=City%20of%20Splendour"
+    assert normalize_legacy_hls_title_marker(fragment_bad) == legacy_clean
+    signed_query = "?token=abc%26def&x=2%2F5"
+    assert normalize_legacy_hls_title_marker(legacy_clean + signed_query + "#aios_title=City") == legacy_clean + signed_query
+    assert normalize_legacy_hls_title_marker(legacy_bad + signed_query) == legacy_clean + signed_query
+    for unchanged in (
+        "https://a.example/video/index.m3u8%23other=value",
+        "https://a.example/video/index.m3u8%2523aios_title=value",
+        "https://a.example/video/movie.mp4%23aios_title=value",
+        "https://a.example/video/index.m3u8?token=secret%26a",
+        "https://a.example/video/index.m3u8#unrelated=fragment",
+        "https://a.example/video/movie.mp4#aios_title=Original",
+    ):
+        assert normalize_legacy_hls_title_marker(unchanged) == unchanged
     assert safe_player_title("Example\nSeason\t2") == "Example Season 2"
     assert choose_ext(b"WEBVTT\n\n", "text/plain", "https://example.com/sub") == "vtt"
     assert choose_ext(b"[Script Info]\n", "text/plain", "https://example.com/sub") == "ass"
