@@ -3,7 +3,7 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT="${1:-$ROOT/dist}"
-APP="$OUT/AIOIINABridge-beta.app"
+APP="$OUT/AIOIINABridge.app"
 PLIST="$APP/Contents/Info.plist"
 for tool in osacompile /usr/libexec/PlistBuddy ditto python3 codesign; do
   command -v "$tool" >/dev/null || { echo "Missing macOS build tool: $tool" >&2; exit 2; }
@@ -20,11 +20,11 @@ cp "$ROOT/identity_context.py" "$APP/Contents/Resources/identity_context.py"
 cp "$ROOT/callback_session.py" "$APP/Contents/Resources/callback_session.py"
 cp "$ROOT/launcher.sh" "$APP/Contents/Resources/launcher.sh"
 chmod 755 "$APP/Contents/Resources/launcher.sh"
-/usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier io.github.olivergiangvu.AIOIINABridge.beta" "$PLIST" ||
-  /usr/libexec/PlistBuddy -c "Add :CFBundleIdentifier string io.github.olivergiangvu.AIOIINABridge.beta" "$PLIST"
-/usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string 0.7.0" "$PLIST" 2>/dev/null ||
-  /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString 0.7.0" "$PLIST"
-/usr/libexec/PlistBuddy -c "Add :CFBundleVersion string 71" "$PLIST" 2>/dev/null ||
+/usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier io.github.olivergiangvu.AIOIINABridge" "$PLIST" ||
+  /usr/libexec/PlistBuddy -c "Add :CFBundleIdentifier string io.github.olivergiangvu.AIOIINABridge" "$PLIST"
+/usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string 0.7.1" "$PLIST" 2>/dev/null ||
+  /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString 0.7.1" "$PLIST"
+/usr/libexec/PlistBuddy -c "Add :CFBundleVersion string 72" "$PLIST" 2>/dev/null ||
   /usr/libexec/PlistBuddy -c "Set :CFBundleVersion 71" "$PLIST"
 /usr/libexec/PlistBuddy -c "Add :LSUIElement bool true" "$PLIST" 2>/dev/null ||
   /usr/libexec/PlistBuddy -c "Set :LSUIElement true" "$PLIST"
@@ -32,9 +32,9 @@ chmod 755 "$APP/Contents/Resources/launcher.sh"
 /usr/libexec/PlistBuddy -c "Add :CFBundleURLTypes:0 dict" "$PLIST"
 /usr/libexec/PlistBuddy -c "Add :CFBundleURLTypes:0:CFBundleURLName string io.github.olivergiangvu.aios-iina" "$PLIST"
 /usr/libexec/PlistBuddy -c "Add :CFBundleURLTypes:0:CFBundleURLSchemes array" "$PLIST"
-/usr/libexec/PlistBuddy -c "Add :CFBundleURLTypes:0:CFBundleURLSchemes:0 string aios-iina-beta" "$PLIST"
+/usr/libexec/PlistBuddy -c "Add :CFBundleURLTypes:0:CFBundleURLSchemes:0 string aios-iina" "$PLIST"
 codesign --force --deep --sign - "$APP"
 codesign --verify --deep --strict --verbose=2 "$APP"
-ditto -c -k --sequesterRsrc --keepParent "$APP" "$OUT/AIOIINABridge-v0.7.0-beta.1.zip"
-echo "BUILD_OK: $OUT/AIOIINABridge-v0.7.0-beta.1.zip"
+ditto -c -k --sequesterRsrc --keepParent "$APP" "$OUT/AIOIINABridge-v0.7.1-beta.1.zip"
+echo "BUILD_OK: $OUT/AIOIINABridge-v0.7.1-beta.1.zip"
 echo "NOT_INSTALLED; ad-hoc signed only, not notarized. Test on Mac before deployment."
