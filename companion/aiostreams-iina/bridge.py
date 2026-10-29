@@ -26,7 +26,7 @@ import urllib.request
 import callback_session
 import identity_context
 
-VERSION = "0.7.2-beta.1"
+VERSION = "0.7.3-beta.1"
 SCHEME = "aios-iina"
 BETA_SCHEME = "aios-iina-beta"
 MAX_URL_CHARS = 100000
@@ -89,6 +89,11 @@ def normalize_legacy_hls_title_marker(media):
     percent-encoded paths, authorization parameters or valid signed URLs.
     """
     parts = urllib.parse.urlsplit(media)
+    # AIO custom-link substitution may decode %23 into a real # before this
+    # function sees the nested media URL. IINA can then encode it again as a
+    # literal path suffix, which fails on CDN HLS endpoints.
+    if parts.path.lower().endswith(".m3u8") and parts.fragment.lower().startswith("aios_title="):
+        return urllib.parse.urlunsplit(parts._replace(fragment=""))
     marker = re.search(r"(?i)(?<=\.m3u8)%23aios_title=[^/]+$", parts.path)
     if marker is None:
         return media
@@ -653,13 +658,22 @@ def self_test():
     })
     assert parse_link(parsed_legacy)[0] == legacy_clean
     assert cli_args(parse_link(parsed_legacy)[0], "City S01E03", 0, [])[-1] == legacy_clean
+    # Encoded only once in the outer custom link: parse_qsl() decodes %23 to
+    # a literal #aios_title fragment. This was missed by v0.7.2.
+    once_encoded_outer = SCHEME + "://play?url=" + legacy_bad + "&title=City"
+    assert parse_link(once_encoded_outer)[0] == legacy_clean
+    fragment_bad = legacy_clean + "#aios_title=City%20of%20Splendour"
+    assert normalize_legacy_hls_title_marker(fragment_bad) == legacy_clean
     signed_query = "?token=abc%26def&x=2%2F5"
+    assert normalize_legacy_hls_title_marker(legacy_clean + signed_query + "#aios_title=City") == legacy_clean + signed_query
     assert normalize_legacy_hls_title_marker(legacy_bad + signed_query) == legacy_clean + signed_query
     for unchanged in (
         "https://a.example/video/index.m3u8%23other=value",
         "https://a.example/video/index.m3u8%2523aios_title=value",
         "https://a.example/video/movie.mp4%23aios_title=value",
         "https://a.example/video/index.m3u8?token=secret%26a",
+        "https://a.example/video/index.m3u8#unrelated=fragment",
+        "https://a.example/video/movie.mp4#aios_title=Original",
     ):
         assert normalize_legacy_hls_title_marker(unchanged) == unchanged
     assert safe_player_title("Example\nSeason\t2") == "Example Season 2"
