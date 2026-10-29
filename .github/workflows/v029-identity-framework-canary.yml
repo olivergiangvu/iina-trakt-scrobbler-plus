@@ -1,0 +1,44 @@
+name: Build Trakt+ v0.2.9-beta.6 Identity Framework Canary
+on:
+  push:
+    branches: ['feat/v029-identity-framework']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  canary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validate identity framework and full regression suite
+        shell: bash
+        run: |
+          set -euo pipefail
+          node - <<'JS'
+          const m=require('./Info.json');
+          if(m.version!=='0.2.9-beta.6'||m.ghVersion!==34)process.exit(1);
+          JS
+          for f in main.js trakt.js trusted-series-aliases.js playback-identity.js; do node --check "$f"; done
+          for t in tests/*.js; do node "$t"; done
+      - name: Package safe Mac canary
+        shell: bash
+        run: |
+          set -euo pipefail
+          STAGE="$(./scripts/stage-plugin.sh)"
+          PACKAGE="$GITHUB_WORKSPACE/Trakt-Plus-v0.2.9-beta.6-identity-framework.iinaplgz"
+          (cd "$STAGE" && zip -q -r "$PACKAGE" .)
+          unzip -t "$PACKAGE" >/dev/null
+          unzip -Z1 "$PACKAGE" | grep -Fxq 'trusted-series-aliases.js'
+          unzip -p "$PACKAGE" Info.json | node -e 'let x="";process.stdin.on("data",v=>x+=v).on("end",()=>{const m=JSON.parse(x);if(m.version!=="0.2.9-beta.6"||m.ghVersion!==34)process.exit(1)})'
+          sha256sum "$PACKAGE" > SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: IINA-Trakt-Plus-v0.2.9-beta.6-identity-framework
+          path: |
+            Trakt-Plus-v0.2.9-beta.6-identity-framework.iinaplgz
+            SHA256SUMS.txt
+          retention-days: 14
+          if-no-files-found: error
