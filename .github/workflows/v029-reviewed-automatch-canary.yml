@@ -1,0 +1,44 @@
+name: Build Trakt+ 0.2.9-beta.5 Cross-Catalog AutoMatch Canary
+on:
+  push:
+    branches: ['fix/v029-verified-external-title-registry']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  canary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify version, modules and regression suite
+        shell: bash
+        run: |
+          set -euo pipefail
+          node - <<'JS'
+          const m=require('./Info.json');
+          if(m.version!=='0.2.9-beta.5'||m.ghVersion!==33)process.exit(1);
+          JS
+          for f in main.js trakt.js trusted-series-aliases.js playback-identity.js; do node --check "$f"; done
+          for test in tests/*.js; do echo "$test"; node "$test"; done
+      - name: Package safe Mac canary
+        shell: bash
+        run: |
+          set -euo pipefail
+          DIR="$(./scripts/stage-plugin.sh)"
+          FILE="$GITHUB_WORKSPACE/Trakt-Plus-v0.2.9-beta.5-reviewed-automatch.iinaplgz"
+          (cd "$DIR" && zip -q -r "$FILE" .)
+          unzip -t "$FILE" >/dev/null
+          unzip -Z1 "$FILE" | grep -Fxq 'trusted-series-aliases.js'
+          unzip -p "$FILE" Info.json | node -e 'let s="";process.stdin.on("data",v=>s+=v).on("end",()=>{const m=JSON.parse(s);if(m.version!=="0.2.9-beta.5"||m.ghVersion!==33)process.exit(1)})'
+          sha256sum "$FILE" > SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: IINA-Trakt-Plus-v0.2.9-beta.5-reviewed-automatch
+          path: |
+            Trakt-Plus-v0.2.9-beta.5-reviewed-automatch.iinaplgz
+            SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 14
