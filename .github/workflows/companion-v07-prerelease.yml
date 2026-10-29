@@ -1,0 +1,115 @@
+name: Publish Companion v0.7.0-beta.1 Pre-release
+on:
+  push:
+    branches: ['feat/companion-identity-context-v07']
+    paths:
+      - 'companion/aiostreams-iina/**'
+      - '.github/workflows/companion-v07-prerelease.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: companion-v07-prerelease
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Offline security and compatibility tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Python syntax and regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd companion/aiostreams-iina
+          python -B -m py_compile bridge.py callback_session.py identity_context.py test_identity_context.py
+          python -B bridge.py --self-test
+          python -B test_identity_context.py
+          python -B -m unittest discover -s tests -p "test_*.py"
+          bash -n scripts/build-macos.sh
+          sh -n launcher.sh
+      - name: Require disabled-by-default, sanitized identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -Fq 'return data.get("enabled") is True' companion/aiostreams-iina/identity_context.py
+          grep -Fq 'issued_at_ms' companion/aiostreams-iina/identity_context.py
+          grep -Fq 'media_sha256' companion/aiostreams-iina/identity_context.py
+          grep -Fq 'VERSION = "0.7.0-beta.1"' companion/aiostreams-iina/bridge.py
+  package:
+    name: Build and validate signed macOS beta app
+    needs: verify
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: macOS package build
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash companion/aiostreams-iina/scripts/build-macos.sh "$RUNNER_TEMP/companion-release"
+          APP="$RUNNER_TEMP/companion-release/AIOIINABridge-beta.app"
+          PKG="$RUNNER_TEMP/companion-release/AIOIINABridge-v0.7.0-beta.1.zip"
+          test -s "$PKG"
+          test -s "$APP/Contents/Resources/identity_context.py"
+          test -s "$APP/Contents/Resources/callback_session.py"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$APP/Contents/Info.plist" | grep -Fxq 'io.github.olivergiangvu.AIOIINABridge.beta'
+          /usr/libexec/PlistBuddy -c "Print :CFBundleURLTypes:0:CFBundleURLSchemes:0" "$APP/Contents/Info.plist" | grep -Fxq 'aios-iina-beta'
+          /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$APP/Contents/Info.plist" | grep -Fxq '0.7.0'
+          codesign --verify --deep --strict "$APP"
+          unzip -t "$PKG" >/dev/null
+          cp "$PKG" "$GITHUB_WORKSPACE"
+          (cd "$GITHUB_WORKSPACE" && shasum -a 256 AIOIINABridge-v0.7.0-beta.1.zip > SHA256SUMS.txt)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AIOIINABridge-v0.7.0-beta.1-release-candidate
+          path: |
+            AIOIINABridge-v0.7.0-beta.1.zip
+            SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 30
+
+  prerelease:
+    name: Publish verified GitHub pre-release
+    needs: package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: AIOIINABridge-v0.7.0-beta.1-release-candidate
+          path: dist
+      - name: Verify checksums, notes and immutable version tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd dist
+          sha256sum --check SHA256SUMS.txt
+          if gh release view companion-v0.7.0-beta.1 --repo "$GH_REPO" >/dev/null 2>&1; then
+            echo "Release already exists: refusing to modify immutable beta artifact" >&2
+            exit 1
+          fi
+      - name: Publish only Companion files as pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release create companion-v0.7.0-beta.1 \
+            "dist/AIOIINABridge-v0.7.0-beta.1.zip" \
+            "dist/SHA256SUMS.txt" \
+            --repo "$GH_REPO" \
+            --target "$GITHUB_SHA" \
+            --title "AIO-IINA Companion v0.7.0-beta.1 — Identity Context" \
+            --notes-file companion/aiostreams-iina/RELEASE_NOTES_v0.7.0-beta.1.md \
+            --prerelease
