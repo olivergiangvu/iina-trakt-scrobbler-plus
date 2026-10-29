@@ -27,9 +27,9 @@ NEW="$TMP/build/AIOIINABridge.app"
 codesign --verify --deep --strict --verbose=2 "$NEW"
 PLIST="$NEW/Contents/Info.plist"
 [ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$PLIST")" = "io.github.olivergiangvu.AIOIINABridge" ]
-[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$PLIST")" = "0.7.1" ]
+[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$PLIST")" = "0.7.2" ]
 [ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleURLTypes:0:CFBundleURLSchemes:0' "$PLIST")" = "aios-iina" ]
-echo "PASS: signed 0.7.1 single-app build and tests"
+echo "PASS: signed 0.7.2 single-app build and tests"
 
 # Request permission before making any changes to installed apps.
 if [ -e "$OLD_SYSTEM" ]; then sudo -v; fi
