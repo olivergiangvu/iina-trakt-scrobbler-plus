@@ -84,5 +84,7 @@ jobs:
         run: node tests/hls-reviewed-identity.js
       - name: Shared identity framework
         run: node tests/identity-framework.js
+      - name: Learned Trakt identity persists across episodes
+        run: node tests/learned-trakt-identity.js
       - name: Strict show identity and cached remake regression
         run: node tests/night-manager-show-identity.js
