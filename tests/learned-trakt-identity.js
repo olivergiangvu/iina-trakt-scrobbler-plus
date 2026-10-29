@@ -19,7 +19,8 @@ function boot(store) {
     calls.push(method+" "+url.pathname);
     assert.equal(method,"GET","No scrobble writes in identity verification");
     let body={};
-    if(url.pathname==="/shows/555001"||url.pathname==="/shows/tt12345678")body=canonical;
+    if(url.pathname==="/search/show")body=[];
+    else if(url.pathname==="/shows/555001"||url.pathname==="/shows/tt12345678")body=canonical;
     else if(/^\/shows\/555001\/seasons\/1\/episodes\/[23]$/.test(url.pathname)){
       const n=Number(url.pathname.split("/").pop());
       body={season:1,number:n,title:"Episode "+n};
