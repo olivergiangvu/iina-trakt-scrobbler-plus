@@ -94,98 +94,121 @@ For genuinely zero-touch matching of **previously unseen** aliases:
   aliases, and synchronize only approved mappings between plugins.
 
 
-## Proposed v2: AIOStreams first-party launch context + TheTVDB discovery
+## Proposed v2 (corrected): extend the EXISTING AIO-IINA Companion
 
-### What is actually present in the upstream custom external-player link (2026-10-29)
-Source: `Viren070/AIOStreams`:
-- `packages/web/src/lib/playback/player-choice.ts`
-- `packages/web/src/lib/playback/play.ts`
-- `packages/web/src/lib/playback/external-return.ts`
-- `packages/web/src/lib/playback/now-playing.ts`
-- `packages/web/src/lib/queries.ts`
+### Existing production components — do not duplicate
+The user already has **AIOIINABridge.app v0.5.1** installed as the macOS
+Custom Link helper for IINA. Do not design another independent handoff app,
+new daemon, new local proxy or a second Trakt writer.
 
-**Current supported Custom Link tokens:** `{url}`, `{encodedUrl}`, `{scheme}`,
-`{filename}`, `{subtitles}`, `{title}`, `{position}`, `{positionMs}`,
-`{returnUrl}`. **No** `{imdb}`, `{tmdb}`, `{tvdb}`, `{seriesId}`, `{episode}`,
-or arbitrary formatter `{metadata.*}` expansion in the external player template.
-AIOStreams Custom Formatter placeholders are a separate template namespace.
+The exact **current production** AIOStreams Custom Link is:
 
-**Key discovery:** AIOStreams' `externalReturnUrl()` includes
-`played=item.Id` and `source=source.Id` in a first-party callback URL.
-These are opaque, internal **AIOStreams/Jellyfin IDs** — **not IMDb/TVDB IDs**.
-They can identify a media-server item and selected version *after authenticated
-lookup*; they are not authenticated proof by themselves.
+`aios-iina://play?url={encodedUrl}&title={title}&position={position}&sub={subtitles}&context={returnUrl}`
 
-The AIOStreams web app already reads `item.SeriesId` and uses
-`show.ProviderIds.Imdb` for episodes in `now-playing.ts`. Item lookup uses
-`GET /Items?userId=...&Ids=<item.Id>&Fields=...` via an authenticated
-Jellyfin client (queries.ts). A launch context could retrieve that exact
-episode item plus its parent show and cross-provider IDs from AIOStreams,
-instead of re-searching by a localized title.
+The existing Companion handles this link and launches official IINA through
+`iina-cli`, with the original signed playback URL unmodified,
+`--mpv-force-media-title`, `--mpv-start`, and VI/EN subtitle priority.
+Its existing source lives **in this same Trakt+ repository, on branch
+`beta/aiostreams-xcallback-v0.6`**, rather than in the root plugin folder:
+- `companion/aiostreams-iina/bridge.py` (v0.5.1 launch logic);
+- `companion/aiostreams-iina/README.md`;
+- `companion/aiostreams-iina/callback_session.py` (v0.6 beta only, not assumed deployed);
+- `docs/proposals/aio-iina-xcallback-v0.6.md` (opt-in callback).
 
-### Recommended integration
-1. Use a custom Mac URL handler or a small locally installed handoff helper,
-   not a raw `iina://weblink` query parameter IINA might discard:
-   `aios-iina://open?stream={encodedUrl}&title={title}&filename={filename}&position={position}&context={returnUrl}`.
-   This is a **proposed** template, not usable until the helper is installed.
-2. Parse only **allowlisted AIOStreams origin URLs**, extract the internal
-   `played` and `source` IDs; do not trust query parameters as metadata proof.
-3. Resolve the item through the user's *authenticated* AIOStreams media server;
-   verify its `Type=Episode`, `SeriesId`, `ParentIndexNumber`,
-   `IndexNumber`, parent `ProviderIds` and matching `MediaSourceId`.
-   Provider IDs may be absent; do not invent missing IDs.
-4. Supply a versioned launch context (or short-lived, locally signed identity
-   envelope) to IINA plugins. Include show IDs, S/E, origin, authoritative
-   source and expiry; omit playback credentials and raw stream URL from
-   persistent identity cache.
-5. Both plugins validate externally supplied IDs again against Trakt/TMDb
-   before scrobbling/showing verified metadata; stale, contradictory or
-   cross-user contexts **fail closed**.
-6. A future upstream contribution could add direct, whitelisted
-   `{itemId}`, `{seriesId}`, `{imdb}`, `{tmdb}`, `{tvdb}`, `{season}` and
-   `{episode}` placeholders to AIOStreams' playerLink. AIOStreams' current
-   source code does NOT implement these tokens.
+**Already implemented in Companion**:
+- `parse_link()` reads `url/title/position/sub/context`;
+- `return_context_info()` reads first-party `{returnUrl}` browser query/fragment
+  and extracts opaque `played` (AIO/Jellyfin Item ID) and `source` (MediaSource ID);
+- `selected_source_subtitles()` already uses these to perform a bounded,
+  same-origin GET to `/Items/{item}/PlaybackInfo?MediaSourceId={source}`,
+  validates subtitle URL/source associations, then launches IINA;
+- raw stream URLs and subtitle credentials must never enter logs or
+  persistent identity mapping.
 
-### TheTVDB fallback for Asian / TVB titles
-TheTVDB series 483239 displays **璀璨之城** with alias **City of Splendour**;
-Trakt has **This City Never Sleeps** show 289996 (IMDb tt39443161,
-TMDb 295002), but Trakt alias list is empty. This makes TVDB a valuable
-**discovery** source, not automatically the final authority to scrobble.
+**Important limitation verified in current source**: `return_context_info()` only
+accepts HTTP(S) browser return URLs, although `parse_link()` also accepts
+`aiostreams://return/...` (desktop callbacks). Thus do NOT claim the existing
+PlaybackInfo identity pathway already works for every AIO desktop launch.
+The v0.6 callback beta and the installed v0.5.1 are distinct components.
 
-Recommended chain:
-`query alias/translation (TVDB) → candidate TVDB series →
-cross-check TVDB remote IMDb/TMDb IDs with Trakt/TMDb →
-confirm country/year and S/E order → verified identity`.
-Respect TVDB broadcast vs DVD/absolute episode orders: do not blindly map
-S01E02 between all catalogs.
+### AIOStreams tokens: existing vs proposed
+Upstream Custom Link currently expands:
+`{url}`, `{encodedUrl}`, `{scheme}`, `{filename}`, `{subtitles}`,
+`{title}`, `{position}`, `{positionMs}`, `{returnUrl}`.
+There is currently **no built-in** `{imdb}`, `{tmdb}`, `{tvdb}`,
+`{seriesId}`, `{season}`, or `{episode}`
+token in `packages/web/src/lib/playback/player-choice.ts`.
 
-AIOStreams already exposes `TVDB_API_KEY`, `ID_MAPPINGS_ENABLED` (default
-true, Wikidata-fetcher CSV), `TITLE_CONFLICTS_ENABLED` and TMDb; prefer one
-server-side TVDB adapter/verified identity broker rather than a separate key
-in each IINA plugin. TVDB v4 needs legitimate project API credentials and
-has licensing/attribution requirements. Do not scrape HTML as a substitute.
+### Integration plan — evolve bridge.py, preserve Custom Link
+1. Keep `aios-iina://play` **unchanged**. Extend Companion's existing
+   context and selected-source handling; avoid another Mac app, second URL scheme
+   in production, or another playback launcher.
+2. Treat `{returnUrl}` `played/source` as *opaque lookup keys*,
+   **not trusted IDs proving series identity**. Verify allowed AIO Web origin,
+   match the selected MediaSourceId, and support Desktop callback format only
+   with a separately tested authenticated item-lookup path.
+3. With an authorized, user-scoped AIO/Jellyfin session, query the exact item
+   (`/Items?Ids=<played>&Fields=...`) and its `SeriesId` parent show. Check
+   `Type=Episode`, `ParentIndexNumber`, `IndexNumber`, selected source
+   and available `ProviderIds` (IMDb/TMDb/TVDB). The existing public
+   PlaybackInfo GET is **not** proof that authenticated /Items lookup works:
+   investigate permission and token source separately. Do not embed AIO
+   admin/Jellyfin API keys into Custom Link or logs.
+4. Add a **short-lived sanitized identity envelope** on Mac with schema version,
+   verified source/parent show IDs, year, S/E, provenance and expiry. Coordinate
+   with both IINA plugins using a shared **read-only local sidecar** or an
+   existing beta callback session journal that correlates exact URL SHA-256,
+   launch ID and expiry. File mode 0600, private directory 0700, atomic writes.
+   Never persist the raw signed media URL/return URL/tokens in this identity
+   envelope. `callback_session.py` in v0.6 is *beta-only*, so integration
+   must not assume it is already available with v0.5.1.
+5. Trakt+ and Episode Info+ each **independently re-check** IMDb/TMDb/Trakt
+   identity, year, S/E and episode ordering against provider APIs. The
+   Companion is an *identity context producer*, never a Trakt writer.
+6. If item metadata is unavailable, preserve existing playback/subtitle/resume
+   behavior and fall back in order to verified provider aliases, TVDB candidate
+   discovery, learned user-confirmed alias mapping and Correct Match.
+7. Keep the x-callback (IINA -> AIO resume) as a separate, opt-in v0.6
+   feature. Do not turn on EOF->Watched or create another Trakt writer as part
+   of identity improvement.
 
-### Security and rollout
-- Never log or persist signed stream URLs, auth tokens, return URLs containing
-  credentials, or the AIOStreams media-server admin API key.
-- The Custom Link `{returnUrl}` gives *item identifiers* only; the helper
-  must authenticate with a scoped user session and cross-check both item and
-  selected version. An admin AIOStreams API key is broadly privileged and
-  should not be embedded in launch URLs or distributed to every Mac client.
-- A Custom Link-based helper must be registered as a macOS protocol handler.
-  The current `iina://weblink?url=...` format alone does not guarantee that
-  unknown query fields reach either IINA plugin.
-- When playback starts outside AIOStreams (raw `index.m3u8`), this handoff
-  context is unavailable; keep TVDB discovery / user-confirmed learned aliases
-  as safe fallbacks.
-- Keep PRs in draft and the working beta.5/beta.4 installed until an actual Mac
-  test demonstrates first-party item-id context and non-ghost remote scrobble.
+### TheTVDB: best new discovery layer for TVB/Asian alternate titles
+TheTVDB 483239 independently associates the alias `City of Splendour`
+with 璀璨之城, whose Trakt catalog identity is
+`This City Never Sleeps` 289996 (IMDb tt39443161, TMDb 295002).
+Trakt's native alias list is empty, and its player-title search omitted the
+correct result. TVDB is a strong **candidate discovery** source when
+AIOStreams cannot pass an existing provider ID. It is not a replacement
+for IMDb/TMDb/Trakt identity and exact S/E verification.
 
-References:
+Prioritize exposing TVDB evidence from AIOStreams' existing metadata/
+ID-mapping configuration when available. If an additional TVDB API adapter is
+necessary, centralize its credentials and observe TheTVDB licensing, terms,
+attribution and API limits. Do **not** install independent TVDB API keys in
+both IINA plugins by default. Check aired vs DVD/absolute episode order.
+
+### Regression and rollout gates
+- Existing Companion preserves raw stream URL byte-for-byte, subtitle
+  priority VI>EN, title and resume position; no second process/player launch.
+- Browser `{returnUrl}` gets exact item + source; AIO desktop return scheme
+  is tested separately, never treated as though already implemented.
+- Untrusted origin, wrong item/source, absent/contradictory ProviderIds,
+  mismatched year/episode, expired context and multi-window concurrency
+  must **fail closed** for identity while playback continues.
+- HLS `index.m3u8` and tokenized streams remain playable.
+- Both plugins see **the same short-lived sanitized identity**, independently
+  verify it and cannot accidentally scrobble unrelated movies/series.
+- Keep production `AIOIINABridge.app` (`aios-iina://`) untouched.
+  Build/test side-by-side beta `AIOIINABridge-beta.app`
+  (`aios-iina-beta://`) in the existing Companion source branch.
+- No AIOStreams image changes, new Docker service, stable release, or
+  HomeDocker Trakt Bridge changes until explicit integration testing proves
+  the handoff and non-duplicate scrobble behavior.
+
+### Exact source references
+- https://github.com/olivergiangvu/iina-trakt-scrobbler-plus/blob/beta/aiostreams-xcallback-v0.6/companion/aiostreams-iina/bridge.py
+- https://github.com/olivergiangvu/iina-trakt-scrobbler-plus/blob/beta/aiostreams-xcallback-v0.6/companion/aiostreams-iina/callback_session.py
+- https://github.com/olivergiangvu/iina-trakt-scrobbler-plus/blob/beta/aiostreams-xcallback-v0.6/companion/aiostreams-iina/README.md
 - https://github.com/Viren070/AIOStreams/blob/main/packages/web/src/lib/playback/player-choice.ts
 - https://github.com/Viren070/AIOStreams/blob/main/packages/web/src/lib/playback/external-return.ts
 - https://github.com/Viren070/AIOStreams/blob/main/packages/web/src/lib/playback/now-playing.ts
-- https://docs.aiostreams.viren070.me/reference/addon-protocol/metadata/
-- https://docs.aiostreams.viren070.me/configuration/environment-variables/
-- https://www.thetvdb.com/series/483239
-- https://thetvdb.com/api-information
