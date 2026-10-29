@@ -1,0 +1,50 @@
+name: Companion v0.7 Identity Context Canary
+on:
+  push:
+    branches: ['feat/companion-identity-context-v07']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  identity-offline:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Check Python syntax and existing Companion launch path
+        run: |
+          set -euo pipefail
+          cd companion/aiostreams-iina
+          python -B -m py_compile bridge.py callback_session.py identity_context.py test_identity_context.py
+          python -B bridge.py --self-test
+          python -B test_identity_context.py
+      - name: Require only read-only identity API methods
+        run: |
+          set -euo pipefail
+          ! grep -E 'urlopen\(.*data=|method="POST"|method="DELETE"' companion/aiostreams-iina/identity_context.py
+  mac-build:
+    needs: identity-offline
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Package isolated beta app
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash companion/aiostreams-iina/scripts/build-macos.sh "$RUNNER_TEMP/identity"
+          test -f "$RUNNER_TEMP/identity/AIOIINABridge-v0.7.0-beta.1.zip"
+          unzip -l "$RUNNER_TEMP/identity/AIOIINABridge-v0.7.0-beta.1.zip" | grep -q 'identity_context.py'
+          shasum -a 256 "$RUNNER_TEMP/identity/AIOIINABridge-v0.7.0-beta.1.zip" | awk '{print $1 "  AIOIINABridge-v0.7.0-beta.1.zip"}' > SHA256SUMS.txt
+          cp "$RUNNER_TEMP/identity/AIOIINABridge-v0.7.0-beta.1.zip" .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AIOIINABridge-v0.7.0-beta.1-identity-context
+          path: |
+            AIOIINABridge-v0.7.0-beta.1.zip
+            SHA256SUMS.txt
+          retention-days: 14
+          if-no-files-found: error

@@ -100,3 +100,95 @@ continue unchanged.
 ### v0.6.0-beta.2 callback return fix
 
 Browser callback validation now supports AIO hosted at `/` or a safe reverse-proxy prefix while requiring the exact approved origin and `#/...` hash-route markers. The Companion logs redacted `AIO_CALLBACK_SESSION=created|not-created`, and its Python helper records `AIO_CALLBACK_RETURN=sent|failed|...` in `~/Library/Logs/AIO-IINA-Bridge.log`. IINA Trakt+ opt-in observer records `AIO_CALLBACK_OBSERVER=session-matched|...` in its existing plugin debug log. These are diagnostics for the **IINA → AIO** return leg; none contains stream URLs or OAuth data. No automatic `finished=1` or Watched events are enabled. Build v0.6.0-beta.2 side-by-side with stable, test before deployment.
+
+## v0.7 identity-context Canary — extends existing Companion (off by default)
+
+This extends **the already installed AIOIINABridge.app**, not a new helper. It
+retains the working production Custom Link exactly:
+
+```text
+aios-iina://play?url={encodedUrl}&title={title}&position={position}&sub={subtitles}&context={returnUrl}
+```
+
+Source branch: `feat/companion-identity-context-v07`. The **side-by-side
+test app** uses `aios-iina-beta://` as earlier beta builds do, has a distinct
+bundle identifier, and does not replace production v0.5.1. It contains
+`identity_context.py`, which performs optional **read-only**, authenticated
+identity lookup **after launching IINA**, so network failures do not prevent
+video, subtitles or resume.
+
+### What identity-context can prove
+
+With a trusted AIOStreams browser return URL, the Companion extracts opaque
+`played` and `source` IDs. It then queries the exact selected
+`/Items?Ids=<played>&Fields=ProviderIds,ParentId`, parent `SeriesId`,
+and `/Items/<played>/PlaybackInfo?MediaSourceId=<source>` using a **user
+session token**, never an AIO admin token. It verifies:
+- episode vs series, matching item/parent IDs and source version;
+- season and episode from the AIO item, including against S/E in IINA title;
+- canonical series year and the parent show's IMDb/TMDb/TVDB ProviderIds.
+
+Only verified results become a **5-minute local identity envelope** at:
+
+```text
+~/Library/Application Support/AIO-IINA-Bridge/identity/identity-<random>.json
+```
+
+Files are 0600 in a 0700 directory. Each includes the exact original playback
+URL **SHA-256 fingerprint**, show IDs, S/E, provenance, issue and expiry. No
+stream or subtitle URL, return URL, session token, or Jellyfin API key is
+persisted. The original IINA launch URL is untouched.
+
+### Opt-in configuration (NOT required for playback)
+
+The safe default is **disabled**. For a Mac Canary, a configuration file
+`~/Library/Application Support/AIO-IINA-Bridge/identity-settings.json`
+must exist with permissions 0600:
+
+```json
+{
+  "enabled": true,
+  "origin": "https://YOUR-TRUSTED-AIO-ORIGIN"
+}
+```
+
+The exact HTTPS origin must also be in the existing
+`~/Library/Application Support/AIO-IINA-Bridge/allowed-origins.txt` file,
+which the companion callback branch already supports. No wildcard origins.
+
+The optional user-scoped Jellyfin token is read **at runtime** from macOS
+Keychain as a Generic Password with service `AIO-IINA-Identity-Token` and
+Account equal to the **exact HTTPS origin**. Provision it through Keychain
+Access or a secure interactive setup; do not paste it in shell commands,
+Custom Links, repository files or issue logs. Confirm the associated AIO user
+has permission to GET both the episode item and parent series and its chosen
+PlaybackInfo. The current source has not proven that the deployed AIO
+instance supports these reads with a user token.
+
+For authentication errors, absent item/provider IDs, mismatched episode,
+source, year, or unapproved return origins, **no identity file is written**.
+The player still works. The existing Companion's subtitle lookup is
+independent of this optional identity step.
+
+### Current implementation boundary
+
+**This Canary produces a sanitized identity envelope only.** Trakt+ and
+Episode Info+ are not yet wired to consume the new envelope. A real,
+end-to-end verified IINA recognition still requires read-only sidecar
+consumers, correlation with the exact loaded media URL fingerprint, TTL,
+and fresh verification on each provider. Do **not** describe this first
+Companion build as end-to-end AutoMatch or install over the stable app.
+
+Desktop `aiostreams://return/` is not yet supported for identity fetching;
+without an HTTPS origin and authenticated API access it fails closed.
+TheTVDB remains a fallback for missing parent show ProviderIds and TVB
+alternate-title discovery — it is **not** a substitute for exact IDs/S/E.
+
+Run in source checkout:
+```bash
+python3 companion/aiostreams-iina/bridge.py --self-test
+python3 companion/aiostreams-iina/test_identity_context.py
+```
+
+No new Docker container, HomeDocker Trakt Bridge change, AIOStreams image
+patch, Trakt writer or background service is required.
