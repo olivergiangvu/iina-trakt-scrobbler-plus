@@ -63,8 +63,26 @@ def check():
                 token="mock-user-session-token", fetch=fixture) is None
             assert m.obtain_identity(MEDIA, TITLE, RETURN.replace("https:", "http:"),
                 token="mock-user-session-token", fetch=fixture) is None
-            assert m.obtain_identity(MEDIA, TITLE, "aiostreams://return/12345678?played=12345678&source=abcdef12",
+            desktop = "aiostreams://return/12345678?played=12345678&source=abcdef12"
+            desktop_proof = m.obtain_identity(MEDIA, TITLE, desktop,
+                token="mock-user-session-token", fetch=fixture)
+            assert desktop_proof is not None
+            assert desktop_proof["origin"] == "https://aio.example"
+            assert desktop_proof["ids"] == proof["ids"]
+            assert m.obtain_identity(MEDIA, TITLE, desktop.replace("return", "evil"),
                 token="mock-user-session-token", fetch=fixture) is None
+            for bad_origin in (
+                "http://aio.example", "https://evil.example/aio",
+                "https://user:pass@evil.example", "https://aio.example/#fragment"
+            ):
+                cfg.write_text(json.dumps({"enabled": True, "origin": bad_origin}))
+                assert m.obtain_identity(MEDIA, TITLE, desktop,
+                    token="mock-user-session-token", fetch=fixture) is None
+            cfg.write_text('{"enabled":true,"origin":"https://aio.example"}')
+            cfg.write_text('{"enabled":false,"origin":"https://aio.example"}')
+            assert m.obtain_identity(MEDIA, TITLE, desktop,
+                token="mock-user-session-token", fetch=fixture) is None
+            cfg.write_text('{"enabled":true,"origin":"https://aio.example"}')
             # Other show, inconsistent canonical IDs or missing selected source.
             def wrong_series(origin, route, token):
                 d = fixture(origin, route, token)
