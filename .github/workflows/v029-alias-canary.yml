@@ -1,0 +1,44 @@
+name: Build v0.2.9-beta.4 Alias Canary
+on:
+  push:
+    branches: ['fix/v029-verified-trakt-alias-lookup']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  canary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Test syntax and matching safety
+        shell: bash
+        run: |
+          set -euo pipefail
+          node - <<'JS'
+          const m=require('./Info.json'),fs=require('node:fs');
+          if(m.version!=='0.2.9-beta.4'||m.ghVersion!==32)process.exit(1);
+          if(!fs.readFileSync('main.js','utf8').includes('var PLUGIN_VERSION = "0.2.9-beta.4";'))process.exit(2);
+          JS
+          for f in main.js trakt.js playback-identity.js parser.js monitor.js; do node --check "$f"; done
+          for t in tests/*.js; do node "$t"; done
+      - name: Create nonrelease canary package
+        shell: bash
+        run: |
+          set -euo pipefail
+          STAGE="$(./scripts/stage-plugin.sh)"
+          PKG="$GITHUB_WORKSPACE/Trakt-Scrobbler-Plus-v0.2.9-beta.4-alias-canary.iinaplgz"
+          (cd "$STAGE" && zip -q -r "$PKG" .)
+          unzip -t "$PKG" >/dev/null
+          unzip -p "$PKG" Info.json | node -e 'let s="";process.stdin.on("data",x=>s+=x).on("end",()=>{const m=JSON.parse(s);if(m.version!=="0.2.9-beta.4"||m.ghVersion!==32)process.exit(1)})'
+          sha256sum "$PKG" > SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: IINA-Trakt-Plus-v0.2.9-beta.4-alias-canary
+          path: |
+            Trakt-Scrobbler-Plus-v0.2.9-beta.4-alias-canary.iinaplgz
+            SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 14
