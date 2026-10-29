@@ -26,7 +26,7 @@ import urllib.request
 import callback_session
 import identity_context
 
-VERSION = "0.7.0-beta.1"
+VERSION = "0.7.1-beta.1"
 SCHEME = "aios-iina"
 BETA_SCHEME = "aios-iina-beta"
 MAX_URL_CHARS = 100000
