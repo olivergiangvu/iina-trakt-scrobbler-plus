@@ -1,0 +1,44 @@
+name: Build v0.2.9-beta.3 HLS Parser Canary
+on:
+  push:
+    branches: ['fix/v029-hls-player-title-separators']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  canary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify version, syntax, and complete regression suite
+        shell: bash
+        run: |
+          set -euo pipefail
+          node - <<'NODE'
+          const a=require('./Info.json');
+          if(a.version!=='0.2.9-beta.3'||a.ghVersion!==31)process.exit(1);
+          if(!require('fs').readFileSync('main.js','utf8').includes('var PLUGIN_VERSION = "0.2.9-beta.3";'))process.exit(2);
+          NODE
+          for f in main.js trakt.js playback-identity.js parser.js stream-source.js monitor.js; do node --check "$f"; done
+          for t in tests/*.js; do node "$t"; done
+      - name: Package IINA canary without release
+        shell: bash
+        run: |
+          set -euo pipefail
+          STAGE="$(./scripts/stage-plugin.sh)"
+          PKG="$GITHUB_WORKSPACE/Trakt-Scrobbler-Plus-v0.2.9-beta.3-hls-canary.iinaplgz"
+          (cd "$STAGE" && zip -q -r "$PKG" .)
+          unzip -t "$PKG" >/dev/null
+          unzip -p "$PKG" Info.json | node -e 'let t="";process.stdin.on("data",b=>t+=b).on("end",()=>{let a=JSON.parse(t);if(a.ghVersion!==31||a.version!=="0.2.9-beta.3")process.exit(1)})'
+          sha256sum "$PKG" > SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: IINA-Trakt-Plus-v0.2.9-beta.3-hls-canary
+          path: |
+            Trakt-Scrobbler-Plus-v0.2.9-beta.3-hls-canary.iinaplgz
+            SHA256SUMS.txt
+          retention-days: 14
+          if-no-files-found: error
