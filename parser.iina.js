@@ -374,6 +374,14 @@ var require_parser = __commonJS({
       var fallback = heuristicParseNameLike(value);
       var rawGuess = tryGuessitParse(value);
       var normalized = normalizeGuessitResult(rawGuess, fallback);
+      // Prefer explicit SxxExx over Guessit treating a show name's "Season"
+      // followed by its release year as a 4-digit season number.
+      var explicit = /(?:^|[._ -])S\d{1,2}\s*E\d{1,3}\b/i.test(getPathFromUrl(value));
+      if (explicit && fallback && fallback.kind === "episode" &&
+          normalized && normalized.kind === "episode" &&
+          (normalized.season !== fallback.season || normalized.episode !== fallback.episode)) {
+        return fallback;
+      }
       if (normalized) return normalized;
       return fallback;
     }
