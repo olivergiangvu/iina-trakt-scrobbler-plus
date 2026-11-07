@@ -402,6 +402,16 @@ function parseNameLikeWithGuessit(value) {
   var rawGuess = tryGuessitParse(value);
   var normalized = normalizeGuessitResult(rawGuess, fallback);
 
+  // Guessit may misread a show title containing "Season" followed by a
+  // release year as season 2026, even when S01E01 is explicit in the file.
+  // Use the unambiguous SxxExx marker over a conflicting Guessit result.
+  var explicit = /(?:^|[._ -])S\d{1,2}\s*E\d{1,3}\b/i.test(getPathFromUrl(value));
+  if (explicit && fallback && fallback.kind === "episode" &&
+      normalized && normalized.kind === "episode" &&
+      (normalized.season !== fallback.season || normalized.episode !== fallback.episode)) {
+    return fallback;
+  }
+
   if (normalized) return normalized;
   return fallback;
 }

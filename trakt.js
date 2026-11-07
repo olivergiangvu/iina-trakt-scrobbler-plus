@@ -1,5 +1,6 @@
 var traktKeys = require("./trakt_keys.js");
 var apiGateModule = require("./trakt-api-gate.js");
+var trustedSeriesAliases = require("./trusted-series-aliases.js");
 
 var API_ROOT = "https://api.trakt.tv";
 var DEVICE_CODE_PATH = "/oauth/device/code";
@@ -8,6 +9,7 @@ var TOKEN_PATH = "/oauth/token";
 var USER_SETTINGS_PATH = "/users/settings";
 var TOKEN_FALLBACK_PATH = "@data/trakt-token.json";
 var CACHE_PATH = "@data/trakt-cache.json";
+var LEARNED_MAPPING_PATH = "@data/verified-title-mappings.json";
 var KEYCHAIN_SERVICE = "io.github.olivergiangvu.iinatraktscrobblerplus";
 var KEYCHAIN_ACCOUNT = "trakt-oauth";
 var AUTH_COOLDOWN_MS = 30000;
@@ -1125,19 +1127,101 @@ function readCachedTraktId(value) {
 	return Number(value || 0);
 }
 
-function isVerifiedEpisodeCacheEntry(value) {
-	return !!(
-		value &&
-		typeof value === "object" &&
-		value.verified === true &&
-		Number(value.trakt || 0) > 0
-	);
+// v1's {trakt, verified:true} only proved that S/E existed on some show.
+// It did not prove show title, production year, or external identity.
+var EPISODE_IDENTITY_CACHE_VERSION = 2;
+
+function episodeExpectedYear(mediaInfo) {
+	var year = Number(mediaInfo && mediaInfo.year || 0);
+	return Number.isInteger(year) && year >= 1900 && year <= 2100 ? year : 0;
 }
 
-function createVerifiedEpisodeCacheEntry(traktId) {
+function episodeShowTitleKey(mediaInfo) {
+	return normalizeTitle(mediaInfo && (mediaInfo.showTitle || mediaInfo.title) || "");
+}
+
+function loadUserIdentityMappings() {
+  try {
+    return trustedSeriesAliases.read(
+      runtime.file && runtime.file.exists(LEARNED_MAPPING_PATH)
+        ? runtime.file.read(LEARNED_MAPPING_PATH) : "");
+  } catch (e) { return []; }
+}
+
+async function learnConfirmedTraktShow(mediaInfo, traktId) {
+  var origin=String(mediaInfo && mediaInfo.sourceHost || "");
+  if(!origin||!runtime.file||!runtime.file.write)return;
+  var show=await fetchShowByReference(traktId);
+  if(!show||!show.ids||Number(show.ids.trakt)!==Number(traktId)||
+     !/^tt\d{6,10}$/i.test(String(show.ids.imdb||""))||
+     !Number(show.ids.tmdb)||!Number.isInteger(Number(show.year))||
+     trustedSeriesAliases.norm(show.title)===
+       trustedSeriesAliases.norm(mediaInfo.showTitle||mediaInfo.title))return;
+  var rows=trustedSeriesAliases.learn(loadUserIdentityMappings(),{
+    kind:"episode",alias:mediaInfo.showTitle||mediaInfo.title,
+    canonicalTitle:show.title,year:Number(show.year),imdb:show.ids.imdb,
+    tmdb:Number(show.ids.tmdb),trakt:Number(show.ids.trakt),
+    originHost:origin,evidence:"user-confirmed Trakt Correct Match"
+  });
+  runtime.file.write(LEARNED_MAPPING_PATH,trustedSeriesAliases.encode(rows));
+  log("Remembered verified Trakt series alias for host "+origin);
+}
+
+function isVerifiedEpisodeCacheEntry(value, mediaInfo) {
+	if (!value || typeof value !== "object" || value.verified !== true ||
+		Number(value.trakt || 0) <= 0 ||
+		value.identityVersion !== EPISODE_IDENTITY_CACHE_VERSION ||
+		value.titleKey !== episodeShowTitleKey(mediaInfo)) return false;
+	var year = episodeExpectedYear(mediaInfo);
+	if (year && value.source !== "manual" && Number(value.showYear || 0) !== year)
+		return false;
+	if (value.source === "manual" && value.originHost &&
+		value.originHost !== String(mediaInfo && mediaInfo.sourceHost || "")) return false;
+	// Invalidate stale reviewed entries if their registry proof disappears.
+	if (value.source === "reviewed-alias" || value.source === "learned-alias") {
+		var reviewed = trustedSeriesAliases.find(
+			mediaInfo && (mediaInfo.showTitle || mediaInfo.title), year, "episode",
+			loadUserIdentityMappings(), "https://"+String(mediaInfo && mediaInfo.sourceHost || ""));
+		if (!reviewed || (reviewed.trakt>0 && Number(value.trakt)!==reviewed.trakt) ||
+			String(value.imdb || "").toLowerCase() !== reviewed.imdb ||
+			(value.source === "learned-alias" &&
+			 (reviewed.source!=="user-confirmed" ||
+			  value.originHost!==String(mediaInfo && mediaInfo.sourceHost || ""))))return false;
+	}
+	// If this identity was proven by ONE episode among multiple same-name
+	// shows, it cannot identify an unrelated episode of the same title/year.
+	if (value.source === "episode-title" || value.source === "episode-position") {
+		if (Number(value.season) !== Number(mediaInfo && mediaInfo.season) ||
+			Number(value.episode) !== Number(mediaInfo && mediaInfo.episode))
+			return false;
+		if (value.source === "episode-title" &&
+			value.episodeTitleKey !== normalizeTitle(mediaInfo && mediaInfo.episodeTitle))
+			return false;
+	}
+	var imdb = String(mediaInfo && mediaInfo.imdb || "").toLowerCase();
+	if (/^tt\d{6,10}$/.test(imdb) && value.source !== "manual" &&
+		String(value.imdb || "").toLowerCase() !== imdb) return false;
+	return ["manual", "imdb", "title-year", "unique-title", "episode-title", "episode-position", "trakt-alias", "reviewed-alias", "learned-alias"].includes(value.source);
+}
+
+function createVerifiedEpisodeCacheEntry(traktId, mediaInfo, show, source) {
+	var ids = show && show.ids || {};
 	return {
 		trakt: Number(traktId || 0),
 		verified: true,
+		identityVersion: EPISODE_IDENTITY_CACHE_VERSION,
+		source: String(source || "manual"),
+		titleKey: episodeShowTitleKey(mediaInfo),
+		showYear: Number(show && show.year || 0),
+		imdb: String(ids.imdb || (source === "imdb" && mediaInfo && mediaInfo.imdb) || "").toLowerCase(),
+		season: source === "episode-title" || source === "episode-position"
+			? Number(mediaInfo && mediaInfo.season) : null,
+		episode: source === "episode-title" || source === "episode-position"
+			? Number(mediaInfo && mediaInfo.episode) : null,
+		episodeTitleKey: source === "episode-title"
+			? normalizeTitle(mediaInfo && mediaInfo.episodeTitle) : "",
+		originHost: source === "learned-alias" || source === "manual"
+			? String(mediaInfo && mediaInfo.sourceHost || "") : ""
 	};
 }
 
@@ -1263,6 +1347,17 @@ async function fetchShowByReference(reference) {
 	}
 
 	return response.body || null;
+}
+
+// A search score can nominate a show, but only Trakt's own aliases can
+// prove that a differently titled result uses the player's exact show name.
+async function fetchShowAliases(showReference) {
+	var response = await authedRequest("GET",
+		"/shows/" + traktReferenceSegment(showReference) + "/aliases");
+	if (response.statusCode === 404) return [];
+	if (response.statusCode >= 400) throw new Error(
+		"Trakt alias lookup failed with status " + response.statusCode);
+	return Array.isArray(response.body) ? response.body : [];
 }
 
 async function fetchEpisodeForShow(showReference, season, episode) {
@@ -1540,7 +1635,7 @@ async function resolveAiosEpisodeIds(mediaInfo, bucket, key) {
   var cached = bucket[key];
   if (cached && cached.aiosExact === true && cached.verified === true &&
       cached.titleKey === normalizedTitle && Number(cached.trakt) > 0 &&
-      (!cached.aliasVerified ||
+      (!(cached.aliasVerified || cached.exactEpisodeTitleVerified) ||
        (cached.episodeKey === episodeKey && Number(cached.year || 0) === year)))
     return {trakt:Number(cached.trakt)};
 
@@ -1565,9 +1660,33 @@ async function resolveAiosEpisodeIds(mediaInfo, bucket, key) {
     return {trakt:ids[0]};
   }
   if (ids.length > 1) {
-    log("AIOStreams exact title ambiguous; Manual Match required for " +
-      episodeIdentityLabel(mediaInfo));
-    return null;
+    // An exact title is not an identity: e.g. multiple 2023 TV series share
+    // "The Diplomat". Distinguish them by an independently fetched episode
+    // TITLE at the EXACT requested season/episode. Never guess by ranking.
+    // A full search page may hide further same-title candidates.
+    if (!episodeKey || ids.length > 8 ||
+        !Array.isArray(results) || results.length >= 20) {
+      log("AIOStreams duplicate exact show titles require a nontruncated search and episode title.");
+      return null;
+    }
+    var exactEpisodeIds=[];
+    for (var idIndex=0; idIndex<ids.length; idIndex++) {
+      var checkedExact=await verifyEpisodeCandidate(ids[idIndex],mediaInfo);
+      if (checkedExact && checkedExact.episode &&
+          titleIdentityMatches(mediaInfo.episodeTitle,checkedExact.episode.title))
+        exactEpisodeIds.push(ids[idIndex]);
+    }
+    if (exactEpisodeIds.length!==1) {
+      log("AIOStreams exact-title duplicate disambiguation rejected: episode-title matches="+
+        exactEpisodeIds.length+" for "+episodeIdentityLabel(mediaInfo));
+      return null;
+    }
+    bucket[key]={trakt:exactEpisodeIds[0],verified:true,aiosExact:true,
+      exactEpisodeTitleVerified:true,titleKey:normalizedTitle,
+      episodeKey:episodeKey,year:year};
+    saveSearchCache();
+    log("AIOStreams same-title series uniquely verified by exact S/E and episode title.");
+    return {trakt:exactEpisodeIds[0]};
   }
 
   // TheTVDB/AIOStreams may name the Netflix show "The Diplomat (US)"
@@ -1672,133 +1791,177 @@ async function resolveAiosMovieIds(mediaInfo, bucket, key) {
 
 async function resolveEpisodeIds(mediaInfo, bucket, key) {
 	if (mediaInfo.unresolvedShow) {
-		log("MediaFusion episode route has season/episode but no trusted show identity; manual correction required.");
+		log("MediaFusion episode has no trusted show identity; manual correction required.");
 		return null;
 	}
 	var explicit = Number(mediaInfo.manualTraktId || 0);
 	if (Number.isInteger(explicit) && explicit > 0) {
-		if (isVerifiedEpisodeCacheEntry(bucket[key]) &&
+		if (isVerifiedEpisodeCacheEntry(bucket[key], mediaInfo) &&
 			readCachedTraktId(bucket[key]) === explicit) return {trakt:explicit};
-		var checked = await verifyEpisodeCandidate(explicit, mediaInfo);
-		if (!checked) return null;
-		bucket[key] = createVerifiedEpisodeCacheEntry(explicit);
+		// An explicit user/confirmed pack ID is trusted, but the episode must exist.
+		var manualCheck = await verifyEpisodeCandidate(explicit, mediaInfo);
+		if (!manualCheck) return null;
+		bucket[key] = createVerifiedEpisodeCacheEntry(explicit, mediaInfo, null, "manual");
 		saveSearchCache();
 		return {trakt:explicit};
 	}
+
 	var cached = bucket[key];
 	var cachedId = readCachedTraktId(cached);
-
-	if (cached === 0 || cached === -1 || cachedId === -1) {
-		return null;
-	}
-
+	if (cached === 0 || cached === -1 || cachedId === -1) return null;
 	if (cachedId > 0) {
-		if (isVerifiedEpisodeCacheEntry(cached)) {
-			return { trakt: cachedId };
-		}
-
-		log(
-			"Trakt episode cache hit requires verification: show=" +
-				cachedId +
-				" for " +
-				episodeIdentityLabel(mediaInfo),
-		);
-		if (await verifyEpisodeCandidate(cachedId, mediaInfo)) {
-			bucket[key] = createVerifiedEpisodeCacheEntry(cachedId);
-			saveSearchCache();
-			return { trakt: cachedId };
-		}
-
+		if (isVerifiedEpisodeCacheEntry(cached, mediaInfo)) return {trakt:cachedId};
+		// Old "verified" records (and v2 identity conflicts) are NOT trusted:
+		// an unrelated show may have the same S/E, as Night Manager 2016/2023.
 		delete bucket[key];
 		saveSearchCache();
-		log(
-			"Trakt episode cache entry invalidated for " +
-				episodeIdentityLabel(mediaInfo),
-		);
+		log("Trakt episode cache entry invalidated for " + episodeIdentityLabel(mediaInfo));
 	}
 
+	// A reviewed cross-provider alias can supply identity for an opaque
+	// HLS manifest, but ALL external IDs and this exact episode are checked.
+	var catalog = trustedSeriesAliases.find(mediaInfo.showTitle || mediaInfo.title,
+		episodeExpectedYear(mediaInfo), "episode",loadUserIdentityMappings(),
+		"https://"+String(mediaInfo.sourceHost||""));
+	if (catalog) {
+		var catalogShow = await fetchShowByReference(catalog.imdb);
+		if (!catalogShow || !catalogShow.ids ||
+			(catalog.trakt>0 && Number(catalogShow.ids.trakt) !== catalog.trakt) ||
+			Number(catalogShow.ids.tmdb) !== catalog.tmdb ||
+			String(catalogShow.ids.imdb || "").toLowerCase() !== catalog.imdb ||
+			Number(catalogShow.year) !== catalog.year) {
+			log("Reviewed alias identity mismatch on Trakt; manual confirmation required.");
+			return null;
+		}
+		var catalogEpisode = await verifyEpisodeCandidate(Number(catalogShow.ids.trakt), mediaInfo);
+		if (!catalogEpisode) return null;
+		bucket[key] = createVerifiedEpisodeCacheEntry(Number(catalogShow.ids.trakt),
+			mediaInfo, catalogShow, catalog.source==="user-confirmed" ? "learned-alias":"reviewed-alias");
+		saveSearchCache();
+		log("Cross-catalog alias verified: " + episodeIdentityLabel(mediaInfo) +
+			" show=" + Number(catalogShow.ids.trakt));
+		return {trakt:Number(catalogShow.ids.trakt)};
+	}
 	var imdb = String(mediaInfo.imdb || "").trim().toLowerCase();
 	if (/^tt\d{6,10}$/.test(imdb)) {
-		// Trakt accepts IMDb identities on its show detail endpoint.
 		var identifiedShow = await fetchShowByReference(imdb);
 		if (identifiedShow && identifiedShow.ids && identifiedShow.ids.trakt) {
+			var actualYear = episodeExpectedYear(mediaInfo);
+			if (actualYear && identifiedShow.year && Number(identifiedShow.year) !== actualYear) {
+				log("Trakt IMDb show year conflicts with playback; Manual Match required.");
+				return null;
+			}
 			var direct = await verifyEpisodeCandidate(identifiedShow.ids.trakt, mediaInfo);
 			if (!direct) {
-				// An explicit ID + invalid episode must not fall back to a guessed show.
 				log("Trakt IMDb identity has no matching episode: " + episodeIdentityLabel(mediaInfo));
 				bucket[key] = -1;
 				saveSearchCache();
 				return null;
 			}
-			bucket[key] = createVerifiedEpisodeCacheEntry(direct.trakt);
+			bucket[key] = createVerifiedEpisodeCacheEntry(direct.trakt, mediaInfo, identifiedShow, "imdb");
 			saveSearchCache();
 			log("Trakt resolved show by IMDb reference " + imdb);
-			return { trakt: direct.trakt };
+			return {trakt:direct.trakt};
 		}
-	}
-
-	var title = mediaInfo.showTitle || mediaInfo.title;
-	var year = mediaInfo.year || "";
-	var results = await search(title, "show", year || undefined, 5);
-
-	if ((!results || !results.length) && year) {
-		results = await search(title, "show", undefined, 5);
-	}
-
-	if (!results || !results.length) {
-		bucket[key] = -1;
-		saveSearchCache();
+		// A supplied external ID must not silently fall back to a title guess.
+		log("Trakt IMDb identity could not be resolved; Manual Match required.");
 		return null;
 	}
 
-	log(
-		"Trakt show search candidates for " +
-			episodeIdentityLabel(mediaInfo) +
-			": " +
-			results.map(summarizeSearchCandidate).join(" | "),
-	);
+	var title = mediaInfo.showTitle || mediaInfo.title;
+	var year = episodeExpectedYear(mediaInfo);
+	// A bounded, non-truncated page is required to assess ambiguity. Trakt's
+	// relevance score and the years= query alone are not identity proof.
+	var results = await search(title, "show", year || undefined, 20);
+	if ((!results || !results.length) && year)
+		results = await search(title, "show", undefined, 20);
+	if (!Array.isArray(results) || !results.length || results.length >= 20) {
+		log("Trakt show search empty or truncated; Correct Match required.");
+		return null;
+	}
 
-	var verified = [];
+	log("Trakt show search candidates for " + episodeIdentityLabel(mediaInfo) +
+		": " + results.map(summarizeSearchCandidate).join(" | "));
+
+	var eligible = [];
+	var seen = Object.create(null), possibleAliases = [];
 	for (var index = 0; index < results.length; index += 1) {
 		var candidate = results[index] || {};
 		var show = candidate.show;
 		var score = Number(candidate.score || 0);
-		if (
-			score < SEARCH_SCORE_THRESHOLD ||
-			!show ||
-			!show.ids ||
-			!show.ids.trakt
-		) {
-			continue;
-		}
-
-		var match = await verifyEpisodeCandidate(
-			show.ids.trakt,
-			mediaInfo,
-		);
-		if (!match) {
-			continue;
-		}
-
-		verified.push(match);
-		if (match.titleMatched) {
-			bucket[key] = createVerifiedEpisodeCacheEntry(match.trakt);
-			saveSearchCache();
-			return { trakt: match.trakt };
+		var id = Number(show && show.ids && show.ids.trakt || 0);
+		if (!id || seen[id] || score < SEARCH_SCORE_THRESHOLD) continue;
+		// Hard filter: never accept a 2023 remake for a known 2016 release.
+		if (year && Number(show.year || 0) !== year) continue;
+		seen[id] = true;
+		if (titleIdentityMatches(title, show.title)) {
+			eligible.push({id:id,show:show,alias:false});
+		} else {
+			possibleAliases.push({id:id,show:show});
 		}
 	}
 
-	if (verified.length) {
-		bucket[key] = createVerifiedEpisodeCacheEntry(verified[0].trakt);
-		saveSearchCache();
-		return { trakt: verified[0].trakt };
+	// The Trakt show search includes aliases, but its result payload contains
+	// only canonical titles. A distinct title can only be accepted if the
+	// provider itself attests the player's complete title as an EXACT alias.
+	// Keep this bounded; missing/blocked/overlarge alias lookups fail closed.
+	if (possibleAliases.length > 0 && possibleAliases.length <= 8) {
+		for (var a=0; a<possibleAliases.length; a++) {
+			var item=possibleAliases[a];
+			var aliases=await fetchShowAliases(item.id);
+			if (aliases.length > 100) {
+				log("Trakt aliases list too long; manual match required.");
+				return null;
+			}
+			if (aliases.some(function(alias) {
+				return titleIdentityMatches(title,alias && alias.title);
+			})) {
+				eligible.push({id:item.id,show:item.show,alias:true});
+			}
+		}
+	} else if (possibleAliases.length > 8) {
+		log("Trakt title alias search too ambiguous; manual match required.");
+		return null;
 	}
 
-	bucket[key] = -1;
+	var verified = [];
+	for (var itemIndex = 0; itemIndex < eligible.length; itemIndex += 1) {
+		var entry = eligible[itemIndex];
+		var match = await verifyEpisodeCandidate(entry.id, mediaInfo);
+		if (match) verified.push({match:match,show:entry.show,alias:entry.alias});
+	}
+
+	var selected = null, source = "";
+	if (verified.length === 1) {
+		selected = verified[0];
+		// Multiple eligible same-name shows: one matching S/E does not prove
+		// show-wide identity. Only cache this specific episode in that case.
+		source = eligible.length > 1 ? "episode-position" :
+			(verified[0].alias ? "trakt-alias" : (year ? "title-year" : "unique-title"));
+	} else if (verified.length > 1) {
+		// Episode titles like "Episode 3" are generic labels, not evidence.
+		var episodeTitle = normalizeTitle(mediaInfo.episodeTitle);
+		var hasDistinctiveTitle = episodeTitle &&
+			!/^episode\s*\d+$/.test(episodeTitle) &&
+			!/^ep\s*\d+$/.test(episodeTitle);
+		var exact = hasDistinctiveTitle
+			? verified.filter(function(v) { return v.match.titleMatched; }) : [];
+		if (exact.length === 1) {
+			selected = exact[0];
+			source = "episode-title";
+		}
+	}
+	if (!selected) {
+		log("Trakt show identity ambiguous or unmatched; Correct Match required: " +
+			episodeIdentityLabel(mediaInfo) + " candidates=" + verified.length);
+		return null;
+	}
+
+	bucket[key] = createVerifiedEpisodeCacheEntry(selected.match.trakt,
+		mediaInfo, selected.show, source);
 	saveSearchCache();
-	return null;
+	return {trakt:selected.match.trakt};
 }
-
 async function searchCorrectionCandidates(mediaInfo, query, limit) {
 	if (!mediaInfo || !mediaInfo.type) {
 		return [];
@@ -1984,7 +2147,7 @@ async function applyMatchOverride(mediaInfo, candidate) {
 			);
 		}
 
-		bucket[key] = createVerifiedEpisodeCacheEntry(traktId);
+		bucket[key] = createVerifiedEpisodeCacheEntry(traktId, mediaInfo, null, "manual");
 	} else if (mediaInfo.type === "movie") {
 		bucket[key] = { trakt: traktId, manual: true };
 	} else {
@@ -1992,6 +2155,10 @@ async function applyMatchOverride(mediaInfo, candidate) {
 	}
 
 	saveSearchCache();
+	if(mediaInfo.type==="episode") {
+		try { await learnConfirmedTraktShow(mediaInfo,traktId); }
+		catch(e) { log("Trakt confirmed alias not saved: "+String(e&&e.message||e)); }
+	}
 	return { trakt: traktId };
 }
 

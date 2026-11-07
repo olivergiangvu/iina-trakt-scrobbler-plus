@@ -1,8 +1,10 @@
 # Trakt Scrobbler Plus for IINA
 
+**Identity safety canary:** `v0.2.9-beta.2` is available as a GitHub Actions artifact for Mac testing from [draft PR #15](https://github.com/olivergiangvu/iina-trakt-scrobbler-plus/pull/15). It is not a GitHub Release and does not replace stable `v0.2.8`. See [canary test notes](docs/releases/v0.2.9-beta.2.md).
+
 An enhanced fork of [i3p9/iina-trakt-scrobbler](https://github.com/i3p9/iina-trakt-scrobbler) with initial support for **Remux / AIOStreams streaming URLs**.
 
-**Current Stable: v0.2.8.** Promoted from the Light/Dark native-glass parity beta after macOS user validation alongside Episode Info Plus v1.3.3. Reuses semantic glass colors, keeps the IINA-native transparent sidebar, and softens credential/code panel opacity without altering Trakt matching, network, playback, queue, OAuth or scrobbling. See [v0.2.8 release notes](docs/releases/v0.2.8.md). Previous Stable v0.2.7 is available for rollback. Promoted from the Mac-tested v0.2.7-beta.2 canary: safe country-suffix series matching (**The Diplomat (US) S01E06** → Trakt's *The Diplomat*) and movie-only AIOStreams fragment identification (**Poetic Justice (1993)**). Both were verified to scrobble correctly on the user's IINA 1.5.0 setup. v0.2.6's Yastream HLS episode matching and Manual S/E correction, as well as Comet/IMDb matching, Resume Protection, and batched logging, remain intact. No custom IINA build, Episode Info+ change, or HomeDocker/Trakt Bridge change.
+**Current Stable: v0.2.9.** Promoted from v0.2.9-beta.6 after CI and Mac/IINA validation of the updated playback identity and strict Trakt episode matching, including the real The Season (2026) case. The Guessit parser now obeys an explicit `S01E01` marker rather than misreading a show title's `Season 2026` as the season number; a manual Trakt match subsequently allowed independent auto-verification of `S01E02` without rematching. Resume Protection, strict show/episode proof, local stop journal and queue safeguards remain in place. See [v0.2.9 release notes](docs/releases/v0.2.9.md). **Previous Stable: v0.2.8.** Promoted from the Light/Dark native-glass parity beta after macOS user validation alongside Episode Info Plus v1.3.3. Reuses semantic glass colors, keeps the IINA-native transparent sidebar, and softens credential/code panel opacity without altering Trakt matching, network, playback, queue, OAuth or scrobbling. See [v0.2.8 release notes](docs/releases/v0.2.8.md). Previous Stable v0.2.7 is available for rollback. Promoted from the Mac-tested v0.2.7-beta.2 canary: safe country-suffix series matching (**The Diplomat (US) S01E06** → Trakt's *The Diplomat*) and movie-only AIOStreams fragment identification (**Poetic Justice (1993)**). Both were verified to scrobble correctly on the user's IINA 1.5.0 setup. v0.2.6's Yastream HLS episode matching and Manual S/E correction, as well as Comet/IMDb matching, Resume Protection, and batched logging, remain intact. No custom IINA build, Episode Info+ change, or HomeDocker/Trakt Bridge change.
 
 ## Install directly from IINA (recommended)
 
@@ -336,3 +338,27 @@ Trakt target separately. This could split identity and resume tracking.
   Resume Protection and Trakt Bridge configuration are unchanged.
 
 Beta.3 is a canary. The stable release stays v0.2.4.
+
+## v0.2.9-beta.1 Canary — The Diplomat same-title disambiguation
+
+A field report on v0.2.8 exposed `The Diplomat · S02E04 · The Other Army` through
+`#aios_title`, but Trakt+ displayed AIOStreams Title (checking) and Resume Protection
+blocked outgoing updates. The title alone is shared across distinct TV series
+(including two 2023 productions). The existing resolver stopped after finding
+multiple exact-title search hits without comparing the individual episodes.
+
+The canary now checks the exact requested S/E on up to eight identically
+titled candidates and requires exactly ONE independently verified matching
+episode title before allowing a Trakt ID through. A truncated search page,
+missing episode title or multiple valid matches still fails closed and
+requires Correct Match; no speculative scrobbles. The verification cache
+is episode-title aware for this multi-series path.
+
+The resume preflight now differentiates **unverified show identity** from
+**Trakt HTTP/network errors** instead of calling every failure a generic
+resume outage. A successful read-only preflight immediately marks the
+AIOStreams title Trakt-exact in sidebar Match Source.
+
+This update does not alter the IINA Custom Link, upstream stream routing,
+HomeDocker, or the Trakt Bridge. `v0.2.8` stays Latest Stable while the
+IINA v0.2.9-beta.1 prerelease receives field tests.

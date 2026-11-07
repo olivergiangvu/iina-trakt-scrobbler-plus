@@ -64,3 +64,24 @@ assert.equal(conflicted.parsed.season,2);
 assert.equal(conflicted.parsed.episode,8);
 
 console.log("playback identity tests passed");
+const hls = plugin.identify({
+  url:"https://a.kvp726.com/tokenized/hls/index.m3u8",
+  path:"https://a.kvp726.com/tokenized/hls/index.m3u8",
+  filename:"index.m3u8",
+  mediaTitle:"City of Splendour · S01E01 · Episode 1",
+  title:"City of Splendour · S01E01 · Episode 1",
+  metadataTitle:""
+}, parser, stream);
+assert.equal(hls.source, "mpv-media-title");
+assert.equal(hls.parsed.kind, "episode");
+assert.equal(hls.parsed.showTitle.toLowerCase(), "city of splendour");
+assert.equal(hls.parsed.season, 1);
+assert.equal(hls.parsed.episode, 1);
+assert.equal(hls.parsed.episodeTitle.toLowerCase(), "episode 1");
+// The generic HLS manifest itself must not become a movie identity.
+const noHlsTitle = plugin.identify({
+  url:"https://a.kvp726.com/tokenized/hls/index.m3u8",
+  filename:"index.m3u8",
+  mediaTitle:"index.m3u8", metadataTitle:""
+}, parser, stream);
+assert.equal(noHlsTitle.parsed, null);

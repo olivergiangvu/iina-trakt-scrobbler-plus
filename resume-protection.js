@@ -14,8 +14,19 @@ function create() {
   var state={status:"checking",resumePercent:null,message:"Checking Trakt resume before sending playback…"};
   function update(result){
     if(!result || result.status!=="ok"){
-      state={status:"unavailable",resumePercent:null,
-        message:"Trakt resume could not be checked; outgoing scrobble blocked."};
+      var reason=String(result&&result.reason||"");
+      if(reason==="unverified-id"||reason==="missing-media"){
+        state={status:"needs-match",reason:"unverified-id",resumePercent:null,
+          message:"Show/episode is not uniquely verified on Trakt. Use Correct Match; scrobbling stays blocked."};
+      } else {
+        var http=/^Trakt resume GET ([1-5][0-9]{2})$/.exec(reason);
+        state={status:"unavailable",reason:http?"http-"+http[1]:"resume-check-failed",
+          resumePercent:null,
+          message:http?
+            "Trakt resume endpoint returned HTTP "+http[1]+
+              ". No progress sent; retry the resume check.":
+            "Trakt resume lookup unavailable; no progress sent. Retry the check."};
+      }
       return state;
     }
     var p=result.progress;

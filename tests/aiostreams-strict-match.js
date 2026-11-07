@@ -27,6 +27,8 @@ function setup(searchItems) {
           body={title:"A Second Chance At Love",season:1,number:10};
         else if(url.pathname==="/shows/222/seasons/1/episodes/9")
           body={title:"Other episode",season:1,number:9};
+        else if(url.pathname==="/shows/333/seasons/1/episodes/10")
+          body={title:"A Second Chance At Love",season:1,number:10};
         else throw Error("Unexpected API request "+url.pathname);
         return {status:0,stderr:"",stdout:JSON.stringify(body)+
           "\n__IINA_TRAKT_STATUS__:200"};
@@ -65,6 +67,8 @@ const info={type:"episode",title:"OK! Let's Get Divorced",
     ...matched.show,ids:{trakt:333}}}]);
   assert.equal(await duplicate.trakt.getTraktIds(info),null,
     "multiple same-title series without explicit IDs are ambiguous");
-  assert.deepEqual(duplicate.calls,["/search/show"]);
+  assert.ok(duplicate.calls.includes("/shows/222/seasons/1/episodes/10"));
+  assert.ok(duplicate.calls.includes("/shows/333/seasons/1/episodes/10"),
+    "two same-title shows with the same episode title still require manual match");
   console.log("AIOStreams strict exact-title/unique series/S-E Trakt resolver PASS");
 })().catch(e=>{console.error(e);process.exitCode=1;});

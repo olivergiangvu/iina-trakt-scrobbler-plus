@@ -19,6 +19,16 @@ function isOpaque(value) {
   return false;
 }
 
+// IINA presents some HLS streams as "Show · S01E01 · Episode 1"
+// while the real file is only index.m3u8. Convert ONLY this anchored,
+// structured episode label; never infer an identity from an opaque URL.
+function normalizeEpisodeMediaLabel(text) {
+  var value = String(text || "").trim();
+  var m = /^(.+?)\s+[·•]\s+(S\d{1,3}E\d{1,4})(?:\s+[·•]\s+(.+))?$/i.exec(value);
+  if (!m) return value;
+  return m[1].trim() + " " + m[2] + (m[3] ? " - " + m[3].trim() : "");
+}
+
 function identify(source, parser, streamSource) {
   var hints = source || {};
   var fragment = aiosFragment.inspect(hints);
@@ -63,7 +73,8 @@ function identify(source, parser, streamSource) {
     var name = String(candidates[i][1] || "").trim();
     if (!name || name.length > 500 || isOpaque(name) || seen[name]) continue;
     seen[name] = true;
-    var parsed = parser.parseMediaFromSource(name, name);
+    var normalizedName = normalizeEpisodeMediaLabel(name);
+    var parsed = parser.parseMediaFromSource(normalizedName, normalizedName);
     if (!parsed) continue;
     if (parsed.kind === "episode" && parsed.season >= 0 && parsed.episode > 0 &&
         !isOpaque(parsed.showTitle)) {

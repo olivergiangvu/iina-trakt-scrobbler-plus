@@ -2,7 +2,7 @@ name: Node smoke tests
 
 on:
   push:
-    branches: [main, 'fix/**', 'feature/**']
+    branches: [main, 'fix/**', 'feature/**', 'feat/**']
   pull_request:
 
 permissions:
@@ -46,6 +46,8 @@ jobs:
         run: node tests/aiostreams-movie.js
       - name: AIOStreams exact title and episode verification
         run: node tests/aiostreams-strict-match.js
+      - name: AIOStreams duplicate-title exact S/E and resume preflight
+        run: node tests/aiostreams-duplicate-title-episode.js
       - name: AIOStreams regional alias with strict episode title and year
         run: node tests/aiostreams-country-alias.js
       - name: MediaFusion episode route and manual pack cache regression
@@ -76,3 +78,13 @@ jobs:
         run: node tests/parser-smoke.js
       - name: Trakt resolution tests
         run: node tests/trakt-resolution.js
+      - name: Trakt provider-attested title aliases
+        run: node tests/trakt-verified-alias.js
+      - name: Reviewed cross-provider HLS identity
+        run: node tests/hls-reviewed-identity.js
+      - name: Shared identity framework
+        run: node tests/identity-framework.js
+      - name: Learned Trakt identity persists across episodes
+        run: node tests/learned-trakt-identity.js
+      - name: Strict show identity and cached remake regression
+        run: node tests/night-manager-show-identity.js
