@@ -71,4 +71,18 @@ samples.forEach(function(sample) {
   });
 });
 
+// Real IINA/Trakt+ regression: "Season" is part of the show's name,
+// 2026 is the release year, and S01E01 is the only season/episode marker.
+const yearAfterSeason = parser.parseMediaFromSource("The.Season.2026.S01E01.mkv", "");
+assert.equal(yearAfterSeason.kind, "episode");
+assert.equal(yearAfterSeason.showTitle, "The Season");
+assert.equal(yearAfterSeason.year, 2026);
+assert.equal(yearAfterSeason.season, 1);
+assert.equal(yearAfterSeason.episode, 1);
+
+// Normal explicit episodes still take the Guessit path.
+const routine = parser.parseMediaFromSource("Severance.S02E03.mkv", "");
+assert.equal(routine.season, 2);
+assert.equal(routine.episode, 3);
+
 console.log("parser smoke tests passed");
