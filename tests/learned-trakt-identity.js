@@ -60,12 +60,14 @@ function boot(store) {
  const cache=JSON.parse(store[CACHE]);
  assert.equal(cache.show[Object.keys(cache.show).find(k=>cache.show[k].source==="manual")].episode,2,
    "Manual cache must be tied to exact episode, not blanket show approval");
- cache.show={};store[CACHE]=JSON.stringify(cache);
+ // Reproduce Fired Up! S01E04 after an older title-only lookup cached -1.
+ // A later Correct Match has since supplied strong host-scoped show IDs.
+ cache.show={"alternate crown|":-1};store[CACHE]=JSON.stringify(cache);
  // Fresh module instance loads persisted file rather than cached state.
  const next=boot(store);
  assert.deepEqual(await next.trakt.getTraktIds({...media,episode:3,
   episodeTitle:"Episode 3"}),{trakt:555001},
-  "User confirmed once, next episode should match automatically");
+  "User confirmed once, next episode should match despite older negative cache");
  const away=boot({...store,[CACHE]:JSON.stringify({movie:{},show:{}})});
  assert.equal(await away.trakt.getTraktIds({...media,episode:3,
   episodeTitle:"Episode 3",sourceHost:"other.example"}),null,
