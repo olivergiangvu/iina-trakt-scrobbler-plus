@@ -50,6 +50,11 @@ function boot(store) {
  const savedWithSameTitle=JSON.parse(store[LEARNED]);
  assert(savedWithSameTitle.records.some(row=>row.alias==="Fired Up!" && row.year===2025),
    "Manual confirmation must learn same-normalized-name show with verified year");
+ // Even BEFORE explicit cache clearing, a manually verified episode on one
+ // CDN may not reuse the same-title show ID on another CDN.
+ const changedHost=boot({...store});
+ assert.equal(await changedHost.trakt.getTraktIds({...media,sourceHost:"another.cdn"}),null,
+   "Manual show cache on CDN A must not authorize playback on CDN B");
  // Remove show cache to ensure the NEXT episode truly resolves using the
  // learned registry, not old in-memory/manual v2 cache.
  const cache=JSON.parse(store[CACHE]);
