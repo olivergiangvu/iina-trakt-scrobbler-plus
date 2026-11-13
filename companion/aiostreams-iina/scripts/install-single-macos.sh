@@ -3,6 +3,16 @@
 # Build/test first; replace local apps only after signed app is verified.
 set -euo pipefail
 
+# This replaces the currently active URL-handler application. An explicit
+# argument prevents a documentation copy/paste or diagnostic run from
+# silently removing the user's working Companion.
+if [ "$#" -ne 1 ] || [ "$1" != "--install" ]; then
+  echo "No apps changed. To explicitly replace the active Companion, run:" >&2
+  echo "  bash companion/aiostreams-iina/scripts/install-single-macos.sh --install" >&2
+  echo "First run identity_context.py --preflight and verify a rollback plan." >&2
+  exit 2
+fi
+
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 [ "$(uname -s)" = "Darwin" ] || { echo "ERROR: macOS required" >&2; exit 2; }
 
