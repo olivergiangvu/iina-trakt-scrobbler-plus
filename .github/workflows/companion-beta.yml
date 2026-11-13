@@ -1,6 +1,11 @@
 name: AIO-IINA Companion beta build
 
 on:
+  push:
+    branches: ['fix/aio-iina-single-active-v071']
+    paths:
+      - 'companion/aiostreams-iina/**'
+      - '.github/workflows/companion-beta.yml'
   pull_request:
     paths:
       - 'companion/aiostreams-iina/**'
@@ -8,11 +13,11 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   companion-source:
-    name: Validate v0.7.0-beta.1 source compatibility
+    name: Validate v0.7.3-beta.1 source compatibility
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -23,26 +28,45 @@ jobs:
       - name: Callback origin + at-most-once regression
         run: python3 -m unittest discover -s companion/aiostreams-iina/tests -p "test_*.py"
       - name: Shell syntax
-        run: sh -n companion/aiostreams-iina/launcher.sh && bash -n companion/aiostreams-iina/scripts/build-macos.sh
+        run: sh -n companion/aiostreams-iina/launcher.sh && bash -n companion/aiostreams-iina/scripts/build-macos.sh && bash -n companion/aiostreams-iina/scripts/install-single-macos.sh
 
   companion-macos:
-    name: Package beta macOS URL handler (not publish)
+    name: Package beta macOS URL handler
     runs-on: macos-15
     needs: companion-source
     steps:
       - uses: actions/checkout@v4
-      - name: Build .app from 0.7.0-beta.1 source
+      - name: Build .app from 0.7.3-beta.1 source
         run: bash companion/aiostreams-iina/scripts/build-macos.sh "$RUNNER_TEMP/aio-iina-beta"
       - name: Inspect URL scheme (no app launch)
         run: |
-          /usr/libexec/PlistBuddy -c "Print :CFBundleURLTypes:0:CFBundleURLSchemes:0" "$RUNNER_TEMP/aio-iina-beta/AIOIINABridge-beta.app/Contents/Info.plist" | grep -Fx aios-iina-beta
-          /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$RUNNER_TEMP/aio-iina-beta/AIOIINABridge-beta.app/Contents/Info.plist" | grep -Fx io.github.olivergiangvu.AIOIINABridge.beta
-          /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$RUNNER_TEMP/aio-iina-beta/AIOIINABridge-beta.app/Contents/Info.plist" | grep -Fx '0.7.0'
-          test -s "$RUNNER_TEMP/aio-iina-beta/AIOIINABridge-beta.app/Contents/Resources/callback_session.py"
-          unzip -t "$RUNNER_TEMP/aio-iina-beta/AIOIINABridge-v0.7.0-beta.1.zip" >/dev/null
+          /usr/libexec/PlistBuddy -c "Print :CFBundleURLTypes:0:CFBundleURLSchemes:0" "$RUNNER_TEMP/aio-iina-beta/AIOIINABridge.app/Contents/Info.plist" | grep -Fx aios-iina
+          /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$RUNNER_TEMP/aio-iina-beta/AIOIINABridge.app/Contents/Info.plist" | grep -Fx io.github.olivergiangvu.AIOIINABridge
+          /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$RUNNER_TEMP/aio-iina-beta/AIOIINABridge.app/Contents/Info.plist" | grep -Fx '0.7.3'
+          test -s "$RUNNER_TEMP/aio-iina-beta/AIOIINABridge.app/Contents/Resources/callback_session.py"
+          unzip -t "$RUNNER_TEMP/aio-iina-beta/AIOIINABridge-v0.7.3-beta.1.zip" >/dev/null
       - uses: actions/upload-artifact@v4
         with:
-          name: AIOIINABridge-v0.7.0-beta.1-mac-beta
-          path: ${{ runner.temp }}/aio-iina-beta/AIOIINABridge-v0.7.0-beta.1.zip
+          name: AIOIINABridge-v0.7.3-beta.1-mac-beta
+          path: ${{ runner.temp }}/aio-iina-beta/AIOIINABridge-v0.7.3-beta.1.zip
           if-no-files-found: error
           retention-days: 7
+      - name: Publish directly installable Companion prerelease
+        if: github.event_name == 'push' && github.ref == 'refs/heads/fix/aio-iina-single-active-v071'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG=companion-v0.7.3-beta.1
+          FILE="$RUNNER_TEMP/aio-iina-beta/AIOIINABridge-v0.7.3-beta.1.zip"
+          test -s "$FILE"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "ERROR: already published; beta releases are immutable" >&2
+            exit 1
+          fi
+          ( cd "$(dirname "$FILE")" && shasum -a 256 "$(basename "$FILE")" > SHA256SUMS.txt )
+          gh release create "$TAG" "$FILE" "$RUNNER_TEMP/aio-iina-beta/SHA256SUMS.txt" \
+            --target "$GITHUB_SHA" --title "AIOIINABridge.app v0.7.3-beta.1" \
+            --notes "Single-active macOS Companion beta. Download the signed ZIP from this GitHub prerelease, extract AIOIINABridge.app and replace the existing app. Uses the existing aios-iina:// scheme and AIOStreams Custom Link. Optional read-only authenticated identity handoff to Trakt+ and EP+, with no extra writer or Docker service. Source/previous release remains on GitHub for rollback. Ad-hoc signed, not notarized; this is a field-test beta, not Stable." \
+            --prerelease --latest=false

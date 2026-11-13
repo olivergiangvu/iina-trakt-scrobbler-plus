@@ -4,6 +4,46 @@
 
 This is a source-code migration into the Trakt+ repository. It is **not** a combined executable, a second IINA plugin, a Docker service, a changed AIOStreams image, nor a deployed update. No HomeDocker changes are needed.
 
+## Single active macOS app — v0.7.3 candidate
+
+GitHub source/ref is the only version history. Install **one**
+`~/Applications/AIOIINABridge.app` for both beta testing and stable use,
+always registered on `aios-iina://`. Do not keep a second beta app or change
+the AIOStreams Custom Link to switch channels. Stable promotion changes the
+Git ref/release and version, not the installed app name or URL scheme.
+
+Before changing the active Mac app, check API prerequisites read-only using
+the private config and Keychain user token described below:
+
+```bash
+python3 companion/aiostreams-iina/identity_context.py --preflight
+```
+
+Only after CI, Mac preflight and an explicit choice to replace the current
+Companion, install from the selected candidate source checkout on macOS:
+
+```bash
+bash companion/aiostreams-iina/scripts/install-single-macos.sh --install
+```
+
+The v0.7.3 beta repairs both decoded `#aios_title` fragments and
+percent-encoded `%23aios_title` HLS suffixes. Earlier v0.7.2
+handled only the latter. Both cases retain query bytes.
+
+The v0.7.2 beta also repaired the exact malformed HLS path suffix
+`index.m3u8%23aios_title=...` (legacy encoded title metadata) before opening
+IINA; it does not alter any other signed playback URLs or query bytes.
+
+The installer runs all offline regressions, builds and verifies the signed app,
+then unregisters/removes only the three known older Companion app bundles and
+installs the new single app. A build or test failure leaves existing installs
+untouched. It does not delete Trakt+ / Episode Info+, user preferences, logs,
+callback descriptors, or Keychain credentials. This is still a **beta candidate**
+until live identity API verification and Trakt+/EP+ consumer integration pass.
+
+The historical side-by-side beta instructions below document earlier v0.6/v0.7
+canary releases; they are no longer the active deployment policy.
+
 ## Components
 
 | Component | Own version | Distribution | Responsibility |
@@ -162,8 +202,12 @@ Account equal to the **exact HTTPS origin**. Provision it through Keychain
 Access or a secure interactive setup; do not paste it in shell commands,
 Custom Links, repository files or issue logs. Confirm the associated AIO user
 has permission to GET both the episode item and parent series and its chosen
-PlaybackInfo. The current source has not proven that the deployed AIO
-instance supports these reads with a user token.
+PlaybackInfo. Upstream AIOStreams mounts these endpoints under `/jellyfin`,
+so the Companion now requests `/jellyfin/Items` and
+`/jellyfin/Items/{itemId}/PlaybackInfo`, never the invalid root `/Items` route.
+Actual authenticated access on the deployed instance remains unverified.
+`--preflight` checks enabled private origin, Keychain token presence and
+API reachability without printing the token, source URL or origin.
 
 For authentication errors, absent item/provider IDs, mismatched episode,
 source, year, or unapproved return origins, **no identity file is written**.
@@ -172,17 +216,17 @@ independent of this optional identity step.
 
 ### Current implementation boundary
 
-**This Canary produces a sanitized identity envelope only.** Trakt+ and
-Episode Info+ are not yet wired to consume the new envelope. A real,
-end-to-end verified IINA recognition still requires read-only sidecar
-consumers, correlation with the exact loaded media URL fingerprint, TTL,
-and fresh verification on each provider. Do **not** describe this first
-Companion build as end-to-end AutoMatch or install over the stable app.
+**This Canary produces a sanitized identity envelope only.** Read-only
+consumers are implemented on draft Trakt+ PR #24 and EP+ PR #19. However,
+producer and consumers have not yet been validated together on the Mac.
+They still require exact playback URL SHA-256, short TTL, remote IDs, year,
+S/E and runtime verification. Do **not** call this proven end-to-end AutoMatch
+or replace the stable app before Mac acceptance and a rollback plan.
 
-Desktop `aiostreams://return/` is not yet supported for identity fetching;
-without an HTTPS origin and authenticated API access it fails closed.
-TheTVDB remains a fallback for missing parent show ProviderIds and TVB
-alternate-title discovery — it is **not** a substitute for exact IDs/S/E.
+Desktop `aiostreams://return/` is supported when private settings provide
+the approved HTTPS origin, never inferred from a CDN URL. Without API
+authentication it fails closed. TVDB can supplement show metadata but does
+not substitute for checked IMDb/TMDb/year/S/E identity.
 
 Run in source checkout:
 ```bash

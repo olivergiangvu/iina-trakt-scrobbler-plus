@@ -13,6 +13,7 @@ from pathlib import Path
 import re
 import secrets
 import subprocess
+import sys
 import tempfile
 import time
 from urllib.error import HTTPError, URLError
@@ -75,10 +76,15 @@ def keychain_token(origin):
 
 
 def json_get(origin, route, token):
-    """Only same-origin fixed Jellyfin item paths; never follow redirects."""
+    """Only same-origin AIOStreams Jellyfin API item paths; no redirects.
+
+    AIOStreams mounts its Jellyfin-compatible API below /jellyfin (the
+    app's web UI and callback may live at /jellyfin/web or at /). Root
+    /Items is not an AIOStreams API endpoint.
+    """
     if not route.startswith("/Items?") and not route.startswith("/Items/"):
         raise ValueError("non-item route")
-    url = origin + route
+    url = origin + "/jellyfin" + route
     req = Request(url, headers={
         "Accept": "application/json", "X-Emby-Token": token,
         "User-Agent": "AIO-IINA-Identity/0.7-canary",
@@ -120,19 +126,43 @@ def exactly_one_item(payload, expected):
 
 
 def context_info(return_url):
-    """Only explicitly allowlisted HTTPS AIO Web origin; desktop is separate."""
+    """Resolve approved Web/Desktop callback without trusting media URL hosts."""
     if not validated_return_url(return_url):
         return None
     parts = urlsplit(return_url)
-    if parts.scheme != "https":  # no remote bearer tokens over plaintext HTTP
-        return None
     ids = _markers(return_url)
     if not ids:
         return None
     item, source = ids.get("played"), ids.get("source")
     if not ID_RE.fullmatch(item or "") or not ID_RE.fullmatch(source or ""):
         return None
-    return f"{parts.scheme}://{parts.netloc.lower()}", item, source
+
+    if parts.scheme == "https":
+        return f"https://{parts.netloc.lower()}", item, source
+
+    if parts.scheme != "aiostreams" or parts.netloc != "return":
+        return None
+    # Desktop callbacks contain no trusted HTTPS host. Resolve only to a
+    # privately configured, exact HTTPS origin; never infer from media URL.
+    try:
+        if CONFIG_FILE.is_symlink() or CONFIG_FILE.stat().st_mode & 0o077:
+            return None
+        settings = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+        if not isinstance(settings, dict) or settings.get("enabled") is not True:
+            return None
+        origin = settings.get("origin")
+        if not isinstance(origin, str):
+            return None
+        trusted = urlsplit(origin)
+        if (trusted.scheme != "https" or not trusted.hostname
+                or trusted.username is not None or trusted.password is not None
+                or trusted.path or trusted.query or trusted.fragment
+                or origin != f"https://{trusted.netloc.lower()}"):
+            return None
+        _ = trusted.port  # Validate optional port syntax.
+    except (OSError, ValueError, TypeError):
+        return None
+    return origin, item, source
 
 
 def obtain_identity(media, title, return_url, *, token=None, fetch=None, now_ms=None):
@@ -250,3 +280,54 @@ def create_from_launch(media, title, context):
         return persist_identity(result)
     except (OSError, TypeError, ValueError):
         return False
+
+
+def preflight_identity():
+    """Read-only Mac readiness check. Never display credentials or URLs."""
+    print("AIO-IINA identity preflight (read-only; no playback or Trakt writes)")
+    try:
+        if CONFIG_FILE.is_symlink() or CONFIG_FILE.stat().st_mode & 0o077:
+            print("CONFIG: BLOCKED (file must be private: chmod 600)")
+            return 2
+        config = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+        origin = config.get("origin") if isinstance(config, dict) else None
+        if (not isinstance(origin, str) or not origin.startswith("https://")
+                or not config_enabled(origin)):
+            print("CONFIG: BLOCKED (disabled or invalid HTTPS origin)")
+            return 2
+        parsed = urlsplit(origin)
+        if (not parsed.hostname or parsed.username is not None
+                or parsed.password is not None or parsed.path or parsed.query
+                or parsed.fragment or origin != f"https://{parsed.netloc.lower()}"):
+            print("CONFIG: BLOCKED (origin must be exact HTTPS scheme + host)")
+            return 2
+        _ = parsed.port  # Reject malformed ports before using credentials.
+    except (OSError, ValueError, TypeError):
+        print("CONFIG: MISSING or malformed (see identity-settings.json)")
+        return 2
+    print("CONFIG: PASS (enabled, private, HTTPS origin)")
+    token = keychain_token(origin)
+    if not token:
+        print("KEYCHAIN: BLOCKED (no user-scoped AIO token for exact origin)")
+        return 2
+    print("KEYCHAIN: PASS (token present; value hidden)")
+    try:
+        # A deliberately nonexistent item checks the live API/auth route
+        # without resolving a real stream or leaking media identity.
+        payload = json_get(origin, "/Items?Ids=00000000000000000000000000000000", token)
+        if not isinstance(payload, dict) or not isinstance(payload.get("Items"), list):
+            raise ValueError("unexpected shape")
+    except (HTTPError, URLError, OSError, TimeoutError, ValueError,
+            TypeError, UnicodeError, json.JSONDecodeError):
+        print("AIO API: BLOCKED (/jellyfin/Items unavailable or authorization failed)")
+        return 2
+    print("AIO API: PASS (read-only /jellyfin/Items; no media IDs requested)")
+    print("READY FOR LIVE PLAYBACK TEST; item/source identity and IINA URL hash remain unverified")
+    return 0
+
+
+if __name__ == "__main__":
+    if sys.argv[1:] == ["--preflight"]:
+        sys.exit(preflight_identity())
+    print("Usage: python3 identity_context.py --preflight", file=sys.stderr)
+    sys.exit(2)
