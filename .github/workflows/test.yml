@@ -16,6 +16,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - name: AIO authenticated sidecar signature/TTL/source provenance
+        run: node tests/aio-identity-sidecar.js && node tests/aio-sidecar-integration.js
       - name: Shared Glass Light/Dark parity contract
         run: node tests/glass-parity.js
       - name: Stream URL tests
