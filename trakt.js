@@ -1136,6 +1136,23 @@ function episodeExpectedYear(mediaInfo) {
 	return Number.isInteger(year) && year >= 1900 && year <= 2100 ? year : 0;
 }
 
+// A yearless, same-title series can be distinguished by the actual length of
+// its exact S/E, provided the episode endpoints supply authoritative runtime
+// and exactly one candidate fits closely. The player's duration is never a
+// reason to infer the current release year or trust the shared CDN hostname.
+function uniqueEpisodeRuntimeMatch(verified, mediaInfo) {
+  var duration = Number(mediaInfo && mediaInfo.durationSeconds || 0);
+  if (!(duration > 0) || !Number.isFinite(duration) ||
+      !Array.isArray(verified) || verified.length < 2 || verified.length > 8 ||
+      verified.some(function(v) {return !(Number(v.match && v.match.episode && v.match.episode.runtime) > 0);}))
+    return null;
+  var close = verified.filter(function(v) {
+    var expected = Number(v.match.episode.runtime) * 60;
+    return Math.abs(duration - expected) <= Math.max(150, expected * 0.10);
+  });
+  return close.length === 1 ? close[0] : null;
+}
+
 function episodeShowTitleKey(mediaInfo) {
 	return normalizeTitle(mediaInfo && (mediaInfo.showTitle || mediaInfo.title) || "");
 }
@@ -1176,6 +1193,14 @@ function isVerifiedEpisodeCacheEntry(value, mediaInfo) {
 		return false;
 	if (value.source === "manual" &&
 		String(value.originHost || "") !== String(mediaInfo && mediaInfo.sourceHost || "")) return false;
+	if (value.source === "episode-runtime") {
+		var originalSeconds = Number(value.runtimeSeconds || 0);
+		var playbackSeconds = Number(mediaInfo && mediaInfo.durationSeconds || 0);
+		if (!(originalSeconds > 0) || !(playbackSeconds > 0) ||
+			Math.abs(originalSeconds - playbackSeconds) > Math.max(150, originalSeconds * 0.10) ||
+			String(value.originHost || "") !== String(mediaInfo && mediaInfo.sourceHost || ""))
+			return false;
+	}
 	// Invalidate stale reviewed entries if their registry proof disappears.
 	if (value.source === "reviewed-alias" || value.source === "learned-alias") {
 		var reviewed = trustedSeriesAliases.find(
@@ -1191,7 +1216,7 @@ function isVerifiedEpisodeCacheEntry(value, mediaInfo) {
 	// episode on a shared CDN. Revalidate the next S/E from Trakt first.
 	// If this identity was proven by ONE episode among multiple same-name
 	// shows, it cannot identify an unrelated episode of the same title/year.
-	if (["manual","learned-alias","reviewed-alias","episode-title","episode-position"].includes(value.source)) {
+	if (["manual","learned-alias","reviewed-alias","episode-title","episode-position","episode-runtime"].includes(value.source)) {
 		if (Number(value.season) !== Number(mediaInfo && mediaInfo.season) ||
 			Number(value.episode) !== Number(mediaInfo && mediaInfo.episode))
 			return false;
@@ -1202,7 +1227,7 @@ function isVerifiedEpisodeCacheEntry(value, mediaInfo) {
 	var imdb = String(mediaInfo && mediaInfo.imdb || "").toLowerCase();
 	if (/^tt\d{6,10}$/.test(imdb) && value.source !== "manual" &&
 		String(value.imdb || "").toLowerCase() !== imdb) return false;
-	return ["manual", "imdb", "title-year", "unique-title", "episode-title", "episode-position", "trakt-alias", "reviewed-alias", "learned-alias"].includes(value.source);
+	return ["manual", "imdb", "title-year", "unique-title", "episode-title", "episode-position", "episode-runtime", "trakt-alias", "reviewed-alias", "learned-alias"].includes(value.source);
 }
 
 function createVerifiedEpisodeCacheEntry(traktId, mediaInfo, show, source) {
@@ -1215,14 +1240,16 @@ function createVerifiedEpisodeCacheEntry(traktId, mediaInfo, show, source) {
 		titleKey: episodeShowTitleKey(mediaInfo),
 		showYear: Number(show && show.year || 0),
 		imdb: String(ids.imdb || (source === "imdb" && mediaInfo && mediaInfo.imdb) || "").toLowerCase(),
-		season: ["manual","learned-alias","reviewed-alias","episode-title","episode-position"].includes(source)
+		season: ["manual","learned-alias","reviewed-alias","episode-title","episode-position","episode-runtime"].includes(source)
 			? Number(mediaInfo && mediaInfo.season) : null,
-		episode: ["manual","learned-alias","reviewed-alias","episode-title","episode-position"].includes(source)
+		episode: ["manual","learned-alias","reviewed-alias","episode-title","episode-position","episode-runtime"].includes(source)
 			? Number(mediaInfo && mediaInfo.episode) : null,
 		episodeTitleKey: source === "episode-title"
 			? normalizeTitle(mediaInfo && mediaInfo.episodeTitle) : "",
-		originHost: source === "learned-alias" || source === "manual"
-			? String(mediaInfo && mediaInfo.sourceHost || "") : ""
+		originHost: ["learned-alias", "manual", "episode-runtime"].includes(source)
+			? String(mediaInfo && mediaInfo.sourceHost || "") : "",
+		runtimeSeconds: source === "episode-runtime"
+			? Number(mediaInfo && mediaInfo.durationSeconds || 0) : 0
 	};
 }
 
@@ -1370,6 +1397,7 @@ async function fetchEpisodeForShow(showReference, season, episode) {
 			Number(season) +
 			"/episodes/" +
 			Number(episode),
+		{query:{extended:"full"}},
 	);
 
 	if (response.statusCode === 404) {
@@ -1963,6 +1991,14 @@ async function resolveEpisodeIds(mediaInfo, bucket, key) {
 		if (exact.length === 1) {
 			selected = exact[0];
 			source = "episode-title";
+		}
+		if (!selected) {
+			selected = uniqueEpisodeRuntimeMatch(verified, mediaInfo);
+			if (selected) {
+				source = "episode-runtime";
+				log("Trakt exact-S/E runtime uniquely verified: " + episodeIdentityLabel(mediaInfo) +
+					" show=" + selected.match.trakt);
+			}
 		}
 	}
 	if (!selected) {

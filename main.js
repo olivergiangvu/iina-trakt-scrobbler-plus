@@ -15,7 +15,7 @@ var trakt = require("./trakt.js");
 var trustedSeriesAliases = require("./trusted-series-aliases.js");
 var aioIdentitySidecar = require("./aio-identity-sidecar.js");
 var debugLogBuffer = require("./debug-log-buffer.js");
-var PLUGIN_VERSION = "0.2.9-beta.8";
+var PLUGIN_VERSION = "0.2.9-beta.9";
 var DEBUG_LOG_PATH = "@data/debug.log";
 var MAX_DEBUG_LOG_CHARS = 200000;
 var DEBUG_LOG_FLUSH_INTERVAL_MS = 10000;
@@ -436,6 +436,20 @@ function beginResumeCheck(target) {
       (target.mediaInfo.type==="episode" &&
        /^unknown series$/i.test(String(target.mediaInfo.showTitle||""))) ||
       ["resolving","conflict","rejected"].includes(target.freshState)) return;
+  var playbackSeconds=Number(core.status.duration||0);
+  if(Number.isFinite(playbackSeconds)&&playbackSeconds>=120)
+    target.mediaInfo.durationSeconds=playbackSeconds;
+  // A yearless opaque episode needs its actual IINA duration before runtime
+  // can distinguish two same-name Trakt series. Resume Protection remains
+  // blocked during this wait; no scrobble is ever sent without verification.
+  if(target.mediaInfo.type==="episode"&&!target.mediaInfo.year&&
+     !target.mediaInfo.imdb&&!Number(target.mediaInfo.manualTraktId||0)&&
+     !(Number(target.mediaInfo.durationSeconds||0)>=120)){
+    target.resumeAwaitingDuration=true;
+    queueSidebarRefresh(false);
+    return;
+  }
+  target.resumeAwaitingDuration=false;
   var gate=resumeProtection.create();
   target.resumeGate=gate;
   var inspectedInfo=target.mediaInfo;
@@ -1403,7 +1417,8 @@ function cloneMediaInfo(mediaInfo) {
     identitySource: mediaInfo.identitySource === "aiostreams-title-fragment" ? "aiostreams-title-fragment" : "",
     imdb: mediaInfo.imdb || "",
     tmdb: Number(mediaInfo.tmdb||0),
-    sourceHost: String(mediaInfo.sourceHost||"")
+    sourceHost: String(mediaInfo.sourceHost||""),
+    durationSeconds: Number(mediaInfo.durationSeconds||0)
   };
 }
 
@@ -2295,6 +2310,9 @@ function handleStatusUpdate(reason) {
     refreshPlaybackSidebar(reason);
     return;
   }
+
+  if(currentMedia.resumeAwaitingDuration && currentSnapshot.duration>=120)
+    beginResumeCheck(currentMedia);
 
   var prevSnapshot = playbackState.prevSnapshot;
   if (prevSnapshot && monitor.shouldIgnoreEndRollover(prevSnapshot, currentSnapshot)) {
