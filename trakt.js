@@ -1809,7 +1809,20 @@ async function resolveEpisodeIds(mediaInfo, bucket, key) {
 
 	var cached = bucket[key];
 	var cachedId = readCachedTraktId(cached);
-	if (cached === 0 || cached === -1 || cachedId === -1) return null;
+	// A negative result recorded before a user confirmed a series is not
+	// permanent evidence. Re-check the verified alias registry first; this
+	// lets later S/E recover without treating the shared CDN as identity.
+	if (cached === 0 || cached === -1 || cachedId === -1) {
+		var newlyVerified = trustedSeriesAliases.find(
+			mediaInfo.showTitle || mediaInfo.title,
+			episodeExpectedYear(mediaInfo), "episode", loadUserIdentityMappings(),
+			"https://" + String(mediaInfo.sourceHost || ""));
+		if (!newlyVerified) return null;
+		delete bucket[key];
+		saveSearchCache();
+		cached = undefined;
+		cachedId = 0;
+	}
 	if (cachedId > 0) {
 		if (isVerifiedEpisodeCacheEntry(cached, mediaInfo)) return {trakt:cachedId};
 		// Old "verified" records (and v2 identity conflicts) are NOT trusted:
@@ -2295,7 +2308,7 @@ async function getTraktIds(mediaInfo) {
 	// A verified explicit Trakt ID must override an old negative title cache:
 	// the previous filename or localized title may have been unresolvable.
 	var explicitId=Number(mediaInfo.manualTraktId||0);
-	if ((cached === 0 || cached === -1 || cachedId === -1) && !(explicitId>0)) {
+	if (type !== "episode" && (cached === 0 || cached === -1 || cachedId === -1) && !(explicitId>0)) {
 		return null;
 	}
 	if (type === "episode") {
