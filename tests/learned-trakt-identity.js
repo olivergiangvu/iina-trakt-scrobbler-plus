@@ -41,9 +41,20 @@ function boot(store) {
  assert.equal(saved.records[0].alias,"Alternate Crown");
  assert.equal(saved.records[0].canonicalTitle,"The Real Crown");
  assert.equal(saved.records[0].originHost,"cdn.example");
+ // Opaque titles can normalize identically for different series. Even a
+ // same-title user-confirmed match must be stored (1997 vs 2026).
+ const ambiguous={...media,showTitle:"Fired Up!",title:"Fired Up!",episode:2};
+ canonical.title="Fired Up";
+ await plugin.trakt.applyMatchOverride(ambiguous,555001);
+ canonical.title="The Real Crown";
+ const savedWithSameTitle=JSON.parse(store[LEARNED]);
+ assert(savedWithSameTitle.records.some(row=>row.alias==="Fired Up!" && row.year===2025),
+   "Manual confirmation must learn same-normalized-name show with verified year");
  // Remove show cache to ensure the NEXT episode truly resolves using the
  // learned registry, not old in-memory/manual v2 cache.
  const cache=JSON.parse(store[CACHE]);
+ assert.equal(cache.show[Object.keys(cache.show).find(k=>cache.show[k].source==="manual")].episode,2,
+   "Manual cache must be tied to exact episode, not blanket show approval");
  cache.show={};store[CACHE]=JSON.stringify(cache);
  // Fresh module instance loads persisted file rather than cached state.
  const next=boot(store);
