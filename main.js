@@ -1572,6 +1572,7 @@ function identifyCurrentMedia() {
           String(external.imdb).toLowerCase()!==aiosContext.imdb)||
         (external.tmdb&&aiosContext.tmdb&&
           Number(external.tmdb)!==aiosContext.tmdb)||
+        (Number.isInteger(external.year)&&external.year!==aiosContext.year)||
         (Number.isInteger(external.season)&&external.season!==aiosContext.season)||
         (Number.isInteger(external.episode)&&external.episode!==aiosContext.episode)));
     external=mismatch ? {conflict:true} : {
