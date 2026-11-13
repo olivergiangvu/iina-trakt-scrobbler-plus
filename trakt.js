@@ -1155,8 +1155,7 @@ async function learnConfirmedTraktShow(mediaInfo, traktId) {
   if(!show||!show.ids||Number(show.ids.trakt)!==Number(traktId)||
      !/^tt\d{6,10}$/i.test(String(show.ids.imdb||""))||
      !Number(show.ids.tmdb)||!Number.isInteger(Number(show.year))||
-     trustedSeriesAliases.norm(show.title)===
-       trustedSeriesAliases.norm(mediaInfo.showTitle||mediaInfo.title))return;
+     !String(mediaInfo.showTitle||mediaInfo.title||"").trim())return;
   var rows=trustedSeriesAliases.learn(loadUserIdentityMappings(),{
     kind:"episode",alias:mediaInfo.showTitle||mediaInfo.title,
     canonicalTitle:show.title,year:Number(show.year),imdb:show.ids.imdb,
@@ -1188,9 +1187,11 @@ function isVerifiedEpisodeCacheEntry(value, mediaInfo) {
 			 (reviewed.source!=="user-confirmed" ||
 			  value.originHost!==String(mediaInfo && mediaInfo.sourceHost || ""))))return false;
 	}
+	// Manual/host-scoped alias confirmation proves one S/E, never every
+	// episode on a shared CDN. Revalidate the next S/E from Trakt first.
 	// If this identity was proven by ONE episode among multiple same-name
 	// shows, it cannot identify an unrelated episode of the same title/year.
-	if (value.source === "episode-title" || value.source === "episode-position") {
+	if (["manual","learned-alias","reviewed-alias","episode-title","episode-position"].includes(value.source)) {
 		if (Number(value.season) !== Number(mediaInfo && mediaInfo.season) ||
 			Number(value.episode) !== Number(mediaInfo && mediaInfo.episode))
 			return false;
@@ -1214,9 +1215,9 @@ function createVerifiedEpisodeCacheEntry(traktId, mediaInfo, show, source) {
 		titleKey: episodeShowTitleKey(mediaInfo),
 		showYear: Number(show && show.year || 0),
 		imdb: String(ids.imdb || (source === "imdb" && mediaInfo && mediaInfo.imdb) || "").toLowerCase(),
-		season: source === "episode-title" || source === "episode-position"
+		season: ["manual","learned-alias","reviewed-alias","episode-title","episode-position"].includes(source)
 			? Number(mediaInfo && mediaInfo.season) : null,
-		episode: source === "episode-title" || source === "episode-position"
+		episode: ["manual","learned-alias","reviewed-alias","episode-title","episode-position"].includes(source)
 			? Number(mediaInfo && mediaInfo.episode) : null,
 		episodeTitleKey: source === "episode-title"
 			? normalizeTitle(mediaInfo && mediaInfo.episodeTitle) : "",
