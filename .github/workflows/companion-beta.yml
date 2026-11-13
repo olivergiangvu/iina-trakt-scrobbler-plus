@@ -1,6 +1,11 @@
 name: AIO-IINA Companion beta build
 
 on:
+  push:
+    branches: ['fix/aio-iina-single-active-v071']
+    paths:
+      - 'companion/aiostreams-iina/**'
+      - '.github/workflows/companion-beta.yml'
   pull_request:
     paths:
       - 'companion/aiostreams-iina/**'
@@ -8,7 +13,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   companion-source:
@@ -26,7 +31,7 @@ jobs:
         run: sh -n companion/aiostreams-iina/launcher.sh && bash -n companion/aiostreams-iina/scripts/build-macos.sh && bash -n companion/aiostreams-iina/scripts/install-single-macos.sh
 
   companion-macos:
-    name: Package beta macOS URL handler (not publish)
+    name: Package beta macOS URL handler
     runs-on: macos-15
     needs: companion-source
     steps:
@@ -46,3 +51,22 @@ jobs:
           path: ${{ runner.temp }}/aio-iina-beta/AIOIINABridge-v0.7.3-beta.1.zip
           if-no-files-found: error
           retention-days: 7
+      - name: Publish directly installable Companion prerelease
+        if: github.event_name == 'push' && github.ref == 'refs/heads/fix/aio-iina-single-active-v071'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG=companion-v0.7.3-beta.1
+          FILE="$RUNNER_TEMP/aio-iina-beta/AIOIINABridge-v0.7.3-beta.1.zip"
+          test -s "$FILE"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "ERROR: already published; beta releases are immutable" >&2
+            exit 1
+          fi
+          ( cd "$(dirname "$FILE")" && shasum -a 256 "$(basename "$FILE")" > SHA256SUMS.txt )
+          gh release create "$TAG" "$FILE" "$RUNNER_TEMP/aio-iina-beta/SHA256SUMS.txt" \
+            --target "$GITHUB_SHA" --title "AIOIINABridge.app v0.7.3-beta.1" \
+            --notes "Single-active macOS Companion beta. Download the signed ZIP from this GitHub prerelease, extract AIOIINABridge.app and replace the existing app. Uses the existing aios-iina:// scheme and AIOStreams Custom Link. Optional read-only authenticated identity handoff to Trakt+ and EP+, with no extra writer or Docker service. Source/previous release remains on GitHub for rollback. Ad-hoc signed, not notarized; this is a field-test beta, not Stable." \
+            --prerelease --latest=false
