@@ -6,6 +6,10 @@ var streamSource = require("./stream-source.js");
 function compact(value, max) {
   var v = String(value || "").replace(/[\x00-\x1f\x7f]/g, " ").trim();
   if (/^(https?|magnet):/i.test(v)) return "[URL redacted]";
+  // Signed CDN query tokens can leak through IINA filename (no URL prefix).
+  // Never include the value or any adjacent fragment, even after truncation.
+  if (/(?:^|[?&_*])(?:_?hmac|sign|signature|hdnts|cp|policy|key-pair-id|x-amz-signature)=/i.test(v))
+    return "[signed stream filename redacted]";
   // An IINA "filename" can be a DMM ID + ?h=<torrent-hash>&file=<name>.
   // Redact the full query, including infohash, while preserving safe filename.
   if (/[?&](?:h|hash|infohash|token|file|filename|torrent_name)=/i.test(v)) {
