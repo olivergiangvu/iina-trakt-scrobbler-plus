@@ -16,4 +16,13 @@ assert.equal(obj.player.title,"Strom ozvěny");
 assert.equal(obj.traktTarget,"Gegen den Strom – Abgetaucht in Venezuela");
 assert.deepEqual(obj.mediaFusionRoute,{kind:"episode",season:2,episode:8,
   provider:"torbox",seriesIdentityAvailable:true});
+const cdn=diag.build({title:"Fired Up! S01E04",mediaTitle:"Fired Up! S01E04",
+ filename:"*_hmac=SECRET_HMAC&sign=SECRET_SIGN%2Bopaque&cp=SECRET_CP",
+ url:"https://akm-cdn-play.hitv.ltd/opaque/index.m3u8?hdnts=SECRET_HDNT&sign=SECRET_SIGN"},
+ {kind:"episode",showTitle:"Fired Up!",season:1,episode:4},"","0.2.9");
+const parsed=JSON.parse(cdn);
+assert.equal(parsed.player.filename,"[signed stream filename redacted]");
+assert.deepEqual(parsed.urlShapes[0].queryKeys,["hdnts","sign"]);
+for(const secret of ["SECRET_HMAC","SECRET_SIGN","SECRET_CP","SECRET_HDNT"])
+ assert(!cdn.includes(secret),"HLS signed credential leaked: "+secret);
 console.log("redacted playback diagnostics tests passed");
