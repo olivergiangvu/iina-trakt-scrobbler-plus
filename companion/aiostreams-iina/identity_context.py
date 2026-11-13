@@ -13,6 +13,7 @@ from pathlib import Path
 import re
 import secrets
 import subprocess
+import sys
 import tempfile
 import time
 from urllib.error import HTTPError, URLError
@@ -279,3 +280,54 @@ def create_from_launch(media, title, context):
         return persist_identity(result)
     except (OSError, TypeError, ValueError):
         return False
+
+
+def preflight_identity():
+    """Read-only Mac readiness check. Never display credentials or URLs."""
+    print("AIO-IINA identity preflight (read-only; no playback or Trakt writes)")
+    try:
+        if CONFIG_FILE.is_symlink() or CONFIG_FILE.stat().st_mode & 0o077:
+            print("CONFIG: BLOCKED (file must be private: chmod 600)")
+            return 2
+        config = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+        origin = config.get("origin") if isinstance(config, dict) else None
+        if (not isinstance(origin, str) or not origin.startswith("https://")
+                or not config_enabled(origin)):
+            print("CONFIG: BLOCKED (disabled or invalid HTTPS origin)")
+            return 2
+        parsed = urlsplit(origin)
+        if (not parsed.hostname or parsed.username is not None
+                or parsed.password is not None or parsed.path or parsed.query
+                or parsed.fragment or origin != f"https://{parsed.netloc.lower()}"):
+            print("CONFIG: BLOCKED (origin must be exact HTTPS scheme + host)")
+            return 2
+        _ = parsed.port  # Reject malformed ports before using credentials.
+    except (OSError, ValueError, TypeError):
+        print("CONFIG: MISSING or malformed (see identity-settings.json)")
+        return 2
+    print("CONFIG: PASS (enabled, private, HTTPS origin)")
+    token = keychain_token(origin)
+    if not token:
+        print("KEYCHAIN: BLOCKED (no user-scoped AIO token for exact origin)")
+        return 2
+    print("KEYCHAIN: PASS (token present; value hidden)")
+    try:
+        # A deliberately nonexistent item checks the live API/auth route
+        # without resolving a real stream or leaking media identity.
+        payload = json_get(origin, "/Items?Ids=00000000000000000000000000000000", token)
+        if not isinstance(payload, dict) or not isinstance(payload.get("Items"), list):
+            raise ValueError("unexpected shape")
+    except (HTTPError, URLError, OSError, TimeoutError, ValueError,
+            TypeError, UnicodeError, json.JSONDecodeError):
+        print("AIO API: BLOCKED (/jellyfin/Items unavailable or authorization failed)")
+        return 2
+    print("AIO API: PASS (read-only /jellyfin/Items; no media IDs requested)")
+    print("READY FOR LIVE PLAYBACK TEST; item/source identity and IINA URL hash remain unverified")
+    return 0
+
+
+if __name__ == "__main__":
+    if sys.argv[1:] == ["--preflight"]:
+        sys.exit(preflight_identity())
+    print("Usage: python3 identity_context.py --preflight", file=sys.stderr)
+    sys.exit(2)
