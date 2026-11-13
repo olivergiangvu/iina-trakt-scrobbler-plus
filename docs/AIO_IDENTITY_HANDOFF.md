@@ -17,7 +17,7 @@ Status: DRAFT / NOT DEPLOYED. Stable Trakt+ v0.2.9, EP+ v1.3.5 and Companion v0.
 ## Actual Mac opt-in prerequisites
 
 1. Companion PR #21 Mac CI builds and passes; keep exactly ONE active AIOIINABridge.app and unchanged AIOStreams Custom Link. No side-by-side beta app and no Docker changes.
-2. **Unverified production dependency:** confirm the actual AIOStreams origin supports authenticated Jellyfin-compatible /Items and /PlaybackInfo GET endpoints using a user-scoped token. If absent, the producer cannot emit a descriptor and this route cannot auto-match. Do not replace with title guesses.
+2. Upstream AIOStreams mounts its Jellyfin-compatible endpoints at **`/jellyfin/Items`** and **`/jellyfin/Items/{itemId}/PlaybackInfo`**, not root `/Items` (see `Viren070/AIOStreams` `packages/server/src/app.ts` and `packages/server/src/routes/jellyfin/playback.ts`). Companion PR #21 now uses this prefix. **Still unverified on the user's instance:** whether Jellyfin API is enabled, a user-scoped Keychain token is authorized, IDs/source remain resolvable and the signed URL hash matches IINA. If any check fails, the producer cannot emit a descriptor. Never replace with a title guess.
 3. Private config at ~/Library/Application Support/AIO-IINA-Bridge/identity-settings.json, chmod 0600: JSON object with enabled=true and exact HTTPS origin. Token belongs only to macOS Keychain service AIO-IINA-Identity-Token, account exact origin; NEVER paste credentials in logs or commit them.
 4. Confirm emitted 0600 sidecar has ID/year/provenance/hash/issued/expiry but contains NO signed stream URL, sign, hmac, returnUrl or token.
 5. Install GitHub Actions canary plugin packages only after Mac rollback plan, then smoke test. Existing stable cannot be silently promoted.
@@ -25,6 +25,8 @@ Status: DRAFT / NOT DEPLOYED. Stable Trakt+ v0.2.9, EP+ v1.3.5 and Companion v0.
 ## Acceptance matrix
 
 - Fired Up! 2026 S01E04: both plugins bind IMDb/TMDb/Trakt or independently TVmaze to 2026, exact episode; 1997 duplicate rejected.
+- Prior ambiguous S/E cache result (`-1`) then user Correct Match on the same trusted hostname: Trakt+ rechecks the verified alias and exact S/E before allowing a match; old negative cache cannot permanently block new evidence.
+- Two separately confirmed same-name shows from different production years on the same CDN: preserve both records, and refuse yearless auto-pick unless a fresh authenticated descriptor resolves the conflict.
 - Later S01E05: new episode independently verified, no blanket approval from S01E04.
 - CDN host/signature change without fresh descriptor: no cross-CDN auto-match; with new authenticated descriptor: match after provider recheck.
 - Descriptor absent, late, expired, disabled, conflicting ID/year/position: fail closed without affecting playback; bounded retry for late descriptor.
