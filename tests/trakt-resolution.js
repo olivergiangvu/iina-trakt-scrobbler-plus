@@ -885,7 +885,7 @@ async function run() {
         "make some noise|": {
           trakt: 196240, verified: true, identityVersion: 2,
           source: "manual", titleKey: "make some noise",
-          showYear: 0, imdb: ""
+          showYear: 0, imdb: "", season: 3, episode: 18
         }
       },
       movie: {}
