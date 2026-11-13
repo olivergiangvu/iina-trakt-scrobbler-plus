@@ -1,5 +1,6 @@
 """AIOStreams native Jellyfin API routes and exact item-to-source proof."""
 import io
+from contextlib import redirect_stdout
 import json
 from pathlib import Path
 import sys
@@ -62,6 +63,20 @@ class IdentityTests(unittest.TestCase):
         ])
         with self.assertRaises(ValueError):
             ic.json_get(ORIGIN, "/Users", "session-token")
+
+    def test_read_only_preflight_checks_auth_without_leaking_tokens(self):
+        buffer = io.StringIO()
+        with patch.object(ic, "keychain_token", return_value="sensitive-user-token"), \
+             patch.object(ic, "json_get", return_value={"Items": []}) as request, \
+             redirect_stdout(buffer):
+            self.assertEqual(ic.preflight_identity(), 0)
+        request.assert_called_once_with(ORIGIN, "/Items?Ids=00000000000000000000000000000000",
+                                        "sensitive-user-token")
+        self.assertIn("READY FOR LIVE PLAYBACK TEST", buffer.getvalue())
+        self.assertNotIn("sensitive-user-token", buffer.getvalue())
+        self.assertNotIn(ORIGIN, buffer.getvalue())
+        with patch.object(ic, "keychain_token", return_value=None), redirect_stdout(io.StringIO()):
+            self.assertEqual(ic.preflight_identity(), 2)
 
     def test_exact_episode_series_and_source_yields_private_descriptor(self):
         calls = []
