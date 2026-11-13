@@ -324,7 +324,7 @@ async function run() {
         "game changer|": {
           trakt: 153142, verified: true, identityVersion: 2,
           source: "manual", titleKey: "game changer",
-          showYear: 0, imdb: ""
+          showYear: 0, imdb: "", season: 5, episode: 4
         }
       }
     });
@@ -885,7 +885,7 @@ async function run() {
         "make some noise|": {
           trakt: 196240, verified: true, identityVersion: 2,
           source: "manual", titleKey: "make some noise",
-          showYear: 0, imdb: ""
+          showYear: 0, imdb: "", season: 3, episode: 18
         }
       },
       movie: {}

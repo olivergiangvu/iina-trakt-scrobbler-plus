@@ -3,8 +3,8 @@ const assert=require("node:assert/strict");
 const fs=require("node:fs"),path=require("node:path"),vm=require("node:vm");
 const source=fs.readFileSync(path.resolve(__dirname,"../sidebar.html"),"utf8");
 const manifest=require("../Info.json");
-assert.equal(manifest.version,"0.2.9");
-assert.equal(manifest.ghVersion,35);
+const versions={"0.2.9":35,"0.2.9-beta.7":36,"0.2.9-beta.8":37,"0.2.9-beta.9":38};
+assert.equal(manifest.ghVersion,versions[manifest.version],"Known Trakt+ stable or beta manifest");
 for(const t of [
  "--plus-glass-panel:rgba(16,22,32,.14)",
  "--plus-glass-border:rgba(255,255,255,.16)",

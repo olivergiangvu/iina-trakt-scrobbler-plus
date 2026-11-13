@@ -13,8 +13,9 @@ var resumeProtection = require("./resume-protection.js");
 var correctionMedia = require("./correction-media.js");
 var trakt = require("./trakt.js");
 var trustedSeriesAliases = require("./trusted-series-aliases.js");
+var aioIdentitySidecar = require("./aio-identity-sidecar.js");
 var debugLogBuffer = require("./debug-log-buffer.js");
-var PLUGIN_VERSION = "0.2.9";
+var PLUGIN_VERSION = "0.2.9-beta.9";
 var DEBUG_LOG_PATH = "@data/debug.log";
 var MAX_DEBUG_LOG_CHARS = 200000;
 var DEBUG_LOG_FLUSH_INTERVAL_MS = 10000;
@@ -25,6 +26,7 @@ var PLAYBACK_SIDEBAR_MIN_INTERVAL_MS = 1000;
 var PLUGIN_SIDEBAR_ID = "plugin:io.github.olivergiangvu.iinatraktscrobblerplus";
 var currentMedia = null;
 var lastSourceSignature = "";
+var aioIdentityRetryGeneration = 0;
 var playbackState = createPlaybackState();
 var pollTimer = null;
 var uiPollTimer = null;
@@ -434,6 +436,20 @@ function beginResumeCheck(target) {
       (target.mediaInfo.type==="episode" &&
        /^unknown series$/i.test(String(target.mediaInfo.showTitle||""))) ||
       ["resolving","conflict","rejected"].includes(target.freshState)) return;
+  var playbackSeconds=Number(core.status.duration||0);
+  if(Number.isFinite(playbackSeconds)&&playbackSeconds>=120)
+    target.mediaInfo.durationSeconds=playbackSeconds;
+  // A yearless opaque episode needs its actual IINA duration before runtime
+  // can distinguish two same-name Trakt series. Resume Protection remains
+  // blocked during this wait; no scrobble is ever sent without verification.
+  if(target.mediaInfo.type==="episode"&&!target.mediaInfo.year&&
+     !target.mediaInfo.imdb&&!Number(target.mediaInfo.manualTraktId||0)&&
+     !(Number(target.mediaInfo.durationSeconds||0)>=120)){
+    target.resumeAwaitingDuration=true;
+    queueSidebarRefresh(false);
+    return;
+  }
+  target.resumeAwaitingDuration=false;
   var gate=resumeProtection.create();
   target.resumeGate=gate;
   var inspectedInfo=target.mediaInfo;
@@ -1401,7 +1417,8 @@ function cloneMediaInfo(mediaInfo) {
     identitySource: mediaInfo.identitySource === "aiostreams-title-fragment" ? "aiostreams-title-fragment" : "",
     imdb: mediaInfo.imdb || "",
     tmdb: Number(mediaInfo.tmdb||0),
-    sourceHost: String(mediaInfo.sourceHost||"")
+    sourceHost: String(mediaInfo.sourceHost||""),
+    durationSeconds: Number(mediaInfo.durationSeconds||0)
   };
 }
 
@@ -1495,7 +1512,10 @@ async function verifyFreshPlayback(target,external) {
   try {
     var resolved=await trakt.resolveFreshIdentity(external);
     if (!currentMedia || currentMedia!==target || target.freshState!=="resolving")return;
-    if (!resolved) {
+    if (!resolved || (external&&external.provenance==="authenticated-aiostreams-item" &&
+        (resolved.kind!=="episode" || Number(resolved.year)!==Number(external.year) ||
+        (external.imdb&&String(resolved.imdb||"").toLowerCase()!==external.imdb) ||
+        (external.tmdb&&Number(resolved.tmdb)!==Number(external.tmdb))))) {
       target.freshState="rejected";
       setScrobbleStatus({status:"unmatched",mediaLabel:mediaLabel(target.mediaInfo),
         detail:"External ID could not be independently verified on Trakt. Use Correct Match.",
@@ -1508,6 +1528,7 @@ async function verifyFreshPlayback(target,external) {
       info.type="episode";
       info.title=resolved.title;info.showTitle=resolved.title;
       info.season=resolved.season;info.episode=resolved.episode;
+      if(external&&external.provenance==="authenticated-aiostreams-item")info.year=resolved.year;
       info.unresolvedShow=false;
       parsed.kind="episode";parsed.showTitle=resolved.title;
       parsed.season=resolved.season;parsed.episode=resolved.episode;
@@ -1552,6 +1573,30 @@ function identifyCurrentMedia() {
   var parsed = picked.parsed;
   var episodeRoute = picked.episodeRoute || null;
   var external=freshIdentity.inspect(source,episodeRoute);
+  // AIOIINABridge.app creates an authenticated, time-limited sidecar keyed by
+  // SHA-256 of this EXACT signed media URL. No filename or CDN hostname is proof.
+  var aiosContext=aioIdentitySidecar.find({file:file,resolvePath:function(p){
+    return utils.resolvePath(p);
+  }},source);
+  if(aiosContext){
+    var mismatch=!!(external&&external.conflict)||
+      !!(parsed&&parsed.kind&&parsed.kind!=="episode")||
+      !!(external&&external.kind&&external.kind!=="episode")||
+      !!(external&&external.kind==="episode"&&(
+        (external.imdb&&aiosContext.imdb&&
+          String(external.imdb).toLowerCase()!==aiosContext.imdb)||
+        (external.tmdb&&aiosContext.tmdb&&
+          Number(external.tmdb)!==aiosContext.tmdb)||
+        (Number.isInteger(external.year)&&external.year!==aiosContext.year)||
+        (Number.isInteger(external.season)&&external.season!==aiosContext.season)||
+        (Number.isInteger(external.episode)&&external.episode!==aiosContext.episode)));
+    external=mismatch ? {conflict:true} : {
+      kind:"episode",imdb:aiosContext.imdb,tmdb:aiosContext.tmdb,
+      season:aiosContext.season,episode:aiosContext.episode,year:aiosContext.year,
+      positionSource:"authenticated-aiostreams-item",
+      provenance:"authenticated-aiostreams-item"
+    };
+  }
   if (parsed && parsed.unresolvedShow && episodeRoute && !(external && external.conflict)) {
     var packMatch = mediaFusionShowCache.find(episodeRoute);
     if (packMatch) {
@@ -2266,6 +2311,9 @@ function handleStatusUpdate(reason) {
     return;
   }
 
+  if(currentMedia.resumeAwaitingDuration && currentSnapshot.duration>=120)
+    beginResumeCheck(currentMedia);
+
   var prevSnapshot = playbackState.prevSnapshot;
   if (prevSnapshot && monitor.shouldIgnoreEndRollover(prevSnapshot, currentSnapshot)) {
     log(
@@ -2361,6 +2409,26 @@ async function handleFileLoaded() {
   authRequiredNoticeShown = false;
   identifyCurrentMedia();
   scheduleBootstrapTicks();
+  // Companion writes the sidecar only after IINA launch. Retry the exact
+  // same, still-unresolved media twice; never restart a verified session,
+  // overwrite Correct Match, change Trakt writer, or relaunch playback.
+  var generation=++aioIdentityRetryGeneration;
+  [2200,5500].forEach(function(delay){
+    setTimeout(function(){
+      if(generation!==aioIdentityRetryGeneration||
+         signature!==lastSourceSignature||
+         (currentMedia&&(currentMedia.manuallyCorrected||
+           currentMedia.freshState==="verified"||
+           currentMedia.freshState==="resolving")))return;
+      var ctx=aioIdentitySidecar.find({file:file,resolvePath:function(p){
+        return utils.resolvePath(p);
+      }},getCurrentSource());
+      if(!ctx)return;
+      ++aioIdentityRetryGeneration;
+      identifyCurrentMedia();
+      scheduleBootstrapTicks();
+    },delay);
+  });
 }
 
 appendDebugLog("[IINATraktScrobbler] --------------------------------------------------");
