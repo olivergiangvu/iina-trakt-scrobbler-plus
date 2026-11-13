@@ -1174,8 +1174,8 @@ function isVerifiedEpisodeCacheEntry(value, mediaInfo) {
 	var year = episodeExpectedYear(mediaInfo);
 	if (year && value.source !== "manual" && Number(value.showYear || 0) !== year)
 		return false;
-	if (value.source === "manual" && value.originHost &&
-		value.originHost !== String(mediaInfo && mediaInfo.sourceHost || "")) return false;
+	if (value.source === "manual" &&
+		String(value.originHost || "") !== String(mediaInfo && mediaInfo.sourceHost || "")) return false;
 	// Invalidate stale reviewed entries if their registry proof disappears.
 	if (value.source === "reviewed-alias" || value.source === "learned-alias") {
 		var reviewed = trustedSeriesAliases.find(
