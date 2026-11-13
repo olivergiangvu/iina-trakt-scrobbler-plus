@@ -75,10 +75,15 @@ def keychain_token(origin):
 
 
 def json_get(origin, route, token):
-    """Only same-origin fixed Jellyfin item paths; never follow redirects."""
+    """Only same-origin AIOStreams Jellyfin API item paths; no redirects.
+
+    AIOStreams mounts its Jellyfin-compatible API below /jellyfin (the
+    app's web UI and callback may live at /jellyfin/web or at /). Root
+    /Items is not an AIOStreams API endpoint.
+    """
     if not route.startswith("/Items?") and not route.startswith("/Items/"):
         raise ValueError("non-item route")
-    url = origin + route
+    url = origin + "/jellyfin" + route
     req = Request(url, headers={
         "Accept": "application/json", "X-Emby-Token": token,
         "User-Agent": "AIO-IINA-Identity/0.7-canary",
