@@ -65,7 +65,11 @@ function learn(records,row){
   if(!item)throw Error("Cannot store an unverified/invalid show mapping");
   const current=(Array.isArray(records)?records:[]).map(clean)
     .filter(r=>r&&r.source==="user-confirmed"&&
-       !(norm(r.alias)===norm(item.alias)&&r.originHost===item.originHost));
+       !(norm(r.alias)===norm(item.alias)&&r.originHost===item.originHost&&
+         r.year===item.year));
+  // Preserve distinct verified production years, even on the same CDN.
+  // Without source year, find() must report ambiguity rather than silently
+  // letting the most recent user selection redefine a different series.
   current.push(item);
   return current.slice(-200);
 }
