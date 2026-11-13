@@ -34,6 +34,13 @@ assert.equal(registry.find("The Other Name",null,"episode",years,
  "https://cdn.example/stream"),null,"Without year, two distinct shows are ambiguous");
 assert.equal(registry.find("The Other Name",2025,"episode",years,
  "https://cdn.example/stream").tmdb,22222);
+const confirmedYears=registry.learn(registry.learn([],target),
+ row("The Other Name",2023,"tt33333333",44444,"cdn.example"));
+assert.equal(confirmedYears.length,2,"Correct Match must not erase another verified year on a shared CDN");
+assert.equal(registry.find("The Other Name",null,"episode",confirmedYears,
+ "https://cdn.example/stream"),null,"Multiple confirmed years without provenance remain ambiguous");
+assert.equal(registry.find("The Other Name",2023,"episode",confirmedYears,
+ "https://cdn.example/stream").tmdb,44444);
 const epUnknown=row("Name Without IMDB",2025,"",999,"cdn.example");
 assert.throws(()=>registry.learn([],epUnknown),/invalid/);
 assert.equal(registry.find("City of Splendour",2026,"episode",
