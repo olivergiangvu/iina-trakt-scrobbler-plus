@@ -29,8 +29,27 @@ function normalizeEpisodeMediaLabel(text) {
   return m[1].trim() + " " + m[2] + (m[3] ? " - " + m[3].trim() : "");
 }
 
+// AIOStreams built-in Xtream Live TV and archive URLs carry credentials and
+// numeric stream IDs, never authoritative movie/episode identities. Do not
+// infer Trakt media from `12345.ts` or an EPG programme title.
+function xtreamMode(source) {
+  var links = [source && source.path, source && source.url];
+  for (var i = 0; i < links.length; i++) {
+    var m = /^https?:\/\/[^/?#]+(\/[^?#]*)/i.exec(String(links[i] || ""));
+    if (!m) continue;
+    var path = m[1];
+    if (/\/timeshift\/[^/]+\/[^/]+\/[1-9]\d{0,3}\/[^/]+\/\d{1,15}\.(?:ts|m3u8)\/?$/i.test(path))
+      return "catchup";
+    if (/\/live\/[^/]+\/[^/]+\/\d{1,15}\.(?:ts|m3u8)\/?$/i.test(path))
+      return "live";
+  }
+  return "";
+}
+
 function identify(source, parser, streamSource) {
   var hints = source || {};
+  var iptvMode = xtreamMode(hints);
+  if (iptvMode) return {parsed:null,imdb:"",source:"xtream-"+iptvMode,iptvMode:iptvMode};
   var fragment = aiosFragment.inspect(hints);
   // If a fragment claims playback identity but is malformed, fail closed:
   // never let 'index.m3u8#aios_title=...' enter Guessit as a fabricated title.
@@ -110,4 +129,4 @@ function identify(source, parser, streamSource) {
   return movie || { parsed: null, imdb: stream.imdb, source: "unidentified" };
 }
 
-module.exports = { identify: identify, isOpaque: isOpaque };
+module.exports = { identify: identify, isOpaque: isOpaque, xtreamMode: xtreamMode };
