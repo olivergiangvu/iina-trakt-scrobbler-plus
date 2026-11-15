@@ -15,7 +15,7 @@ var trakt = require("./trakt.js");
 var trustedSeriesAliases = require("./trusted-series-aliases.js");
 var aioIdentitySidecar = require("./aio-identity-sidecar.js");
 var debugLogBuffer = require("./debug-log-buffer.js");
-var PLUGIN_VERSION = "0.2.9-beta.10";
+var PLUGIN_VERSION = "0.2.9-beta.11";
 var DEBUG_LOG_PATH = "@data/debug.log";
 var MAX_DEBUG_LOG_CHARS = 200000;
 var DEBUG_LOG_FLUSH_INTERVAL_MS = 10000;
@@ -25,6 +25,8 @@ var UI_POLL_INTERVAL_MS = 2000;
 var PLAYBACK_SIDEBAR_MIN_INTERVAL_MS = 1000;
 var PLUGIN_SIDEBAR_ID = "plugin:io.github.olivergiangvu.iinatraktscrobblerplus";
 var currentMedia = null;
+// Display-only EPG state. This is intentionally NEVER a Trakt media identity.
+var iptvPlayback = null;
 var lastSourceSignature = "";
 var aioIdentityRetryGeneration = 0;
 var playbackState = createPlaybackState();
@@ -499,6 +501,30 @@ function restoreRemoteResume() {
 
 function buildSidebarPlayback() {
   var snapshot = buildLiveSnapshot();
+  if (iptvPlayback) {
+    var duration = Number(core.status.duration || 0);
+    var position = Number(core.status.position || 0);
+    if (!Number.isFinite(duration) || duration < 0) duration = 0;
+    if (!Number.isFinite(position) || position < 0) position = 0;
+    return {
+      available: true,
+      mediaLabel: iptvPlayback.label,
+      parserSource: iptvPlayback.verified ? "authenticated-aiostreams-epg" : "mpv-media-title",
+      state: stateName(null),
+      progress: duration > 0 ? Math.max(0,Math.min(100,position/duration*100)) : 0,
+      position: position, duration: duration,
+      preview: false,fastPause: false,
+      iptv: true,allowCorrection: false,
+      epgSchedule: iptvPlayback.schedule,
+      matchProvenance: {
+        code: iptvPlayback.verified ? "aiostreams-epg" : "iptv-unverified",
+        label: iptvPlayback.verified ? "AIOStreams EPG (verified; Trakt disabled)" :
+          "IPTV player title (Trakt disabled)"
+      },
+      resumeProtection: {status:"idle",blocked:false,canRestore:false,message:""},
+      identifiedAt: iptvPlayback.identifiedAt
+    };
+  }
   return {
     available: !!(currentMedia && currentMedia.mediaInfo),
     mediaLabel: currentMedia && currentMedia.mediaInfo ? mediaLabel(currentMedia.mediaInfo) : "",
@@ -1575,17 +1601,38 @@ function identifyCurrentMedia() {
   // Guard BEFORE sidecars/external IDs so no later fallback can scrobble it.
   if (picked.iptvMode) {
     currentMedia = null;
+    // Catch-up is an AIO `Program`, not a Trakt movie/episode. The private
+    // sidecar can authenticate the current EPG through played+source context.
+    var epg = picked.iptvMode === "catchup" ? aioIdentitySidecar.findProgramme({
+      file:file,resolvePath:function(p){return utils.resolvePath(p);}
+    },source) : null;
+    var title = String(source.mediaTitle || source.title || "IPTV").replace(/[\x00-\x1f\x7f]/g," ").slice(0,180);
+    var schedule = "";
+    if (epg) {
+      var startTime = new Date(epg.startAtUtc);
+      var endTime = new Date(epg.endAtUtc);
+      schedule = startTime.toLocaleString(undefined,{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"})+
+        " – "+endTime.toLocaleTimeString(undefined,{hour:"2-digit",minute:"2-digit"});
+    }
+    iptvPlayback = {
+      mode:picked.iptvMode,
+      label:epg ? epg.channelName+" · "+epg.programTitle : title,
+      verified:!!epg,
+      schedule:schedule,
+      identifiedAt:new Date().toISOString()
+    };
     lastScrobbleStatus = createScrobbleStatus();
     setScrobbleStatus({
-      status: "idle", verb: "",
-      mediaLabel: String(source.mediaTitle || source.title || "IPTV"),
+      status: "disabled", verb: "", mediaLabel: "",
       detail: "Xtream " + (picked.iptvMode === "catchup" ? "Catch-up" : "Live TV") +
-        ": EPG metadata only. Trakt auto-scrobbling is disabled.",
+        (epg ? ": authenticated AIO programme." : ": awaiting EPG identity.")+
+        " Trakt auto-scrobbling is disabled.",
       reason: ""
     });
     log("Xtream " + picked.iptvMode + " playback; Trakt identity disabled.");
     return;
   }
+  iptvPlayback = null;
   var episodeRoute = picked.episodeRoute || null;
   var external=freshIdentity.inspect(source,episodeRoute);
   // AIOIINABridge.app creates an authenticated, time-limited sidecar keyed by
@@ -2345,6 +2392,7 @@ function handleStatusUpdate(reason) {
 }
 
 async function finalizeCurrentMedia(reason) {
+  iptvPlayback = null;
   if (!playbackState.prevSnapshot) {
     currentMedia = null;
     lastSourceSignature = "";
@@ -2416,6 +2464,7 @@ async function handleFileLoaded() {
   } else {
     resetPlaybackTracking();
     currentMedia = null;
+    iptvPlayback = null;
     resetCorrectionState();
   }
 
@@ -2435,9 +2484,13 @@ async function handleFileLoaded() {
          (currentMedia&&(currentMedia.manuallyCorrected||
            currentMedia.freshState==="verified"||
            currentMedia.freshState==="resolving")))return;
-      var ctx=aioIdentitySidecar.find({file:file,resolvePath:function(p){
+      var proofDeps={file:file,resolvePath:function(p){
         return utils.resolvePath(p);
-      }},getCurrentSource());
+      }};
+      var nowSource=getCurrentSource();
+      var ctx=aioIdentitySidecar.find(proofDeps,nowSource) ||
+        (playbackIdentity.xtreamMode(nowSource)==="catchup" ?
+          aioIdentitySidecar.findProgramme(proofDeps,nowSource) : null);
       if(!ctx)return;
       ++aioIdentityRetryGeneration;
       identifyCurrentMedia();

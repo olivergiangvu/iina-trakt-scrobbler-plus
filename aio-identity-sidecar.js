@@ -79,7 +79,37 @@ function asIdentity(row,origin,digest,now){
     canonicalTitle:name,origin,provenance:"authenticated-aiostreams-item",
     issuedAt:issued};
 }
-function find(deps,source,nowMs){
+function asProgramme(row,origin,digest,now){
+  if(!row||row.schema!==1||row.kind!=="iptv-catchup"||
+    row.provenance!=="authenticated-aiostreams-program"||
+    row.origin!==origin||row.media_sha256!==digest||
+    row.trakt_eligible!==false)return null;
+  const issued=row.issued_at_ms,expires=row.expires_at_ms;
+  if(!Number.isSafeInteger(issued)||!Number.isSafeInteger(expires)||
+    issued>now+30000||issued<now-MAX_AGE_MS||
+    expires<=now||expires>issued+MAX_AGE_MS||expires<=issued)return null;
+  for(const key of ["item_id","media_source_id","channel_id"])
+    if(!/^[a-zA-Z0-9-]{8,128}$/.test(String(row[key]||"")))return null;
+  const clean=function(v){
+    return typeof v==="string"&&v.length>0&&v.length<=160&&
+      !/[\x00-\x1f\x7f\u200e\u200f\u202a-\u202e\u2066-\u2069]/.test(v);
+  };
+  if(!clean(row.channel_name)||!clean(row.program_title))return null;
+  const start=String(row.start_at_utc||""),end=String(row.end_at_utc||"");
+  const utc=/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,6})?Z$/;
+  if(!utc.test(start)||!utc.test(end))return null;
+  const a=Date.parse(start),b=Date.parse(end);
+  if(!Number.isFinite(a)||!Number.isFinite(b)||b-a<60000||b-a>48*3600000)return null;
+  const season=row.season===null?null:Number(row.season);
+  const episode=row.episode===null?null:Number(row.episode);
+  if(season!==null&&(!Number.isInteger(season)||season<0||season>999))return null;
+  if(episode!==null&&(!Number.isInteger(episode)||episode<1||episode>9999))return null;
+  return {kind:"iptv-catchup",channelName:row.channel_name,
+    programTitle:row.program_title,startAtUtc:start,endAtUtc:end,
+    season,episode,provenance:row.provenance,issuedAt:issued,
+    traktEligible:false};
+}
+function findWith(deps,source,nowMs,convert,identityKey){
   const io=deps&&deps.file,resolve=deps&&deps.resolvePath;
   if(!io||typeof io.read!=="function"||typeof io.list!=="function"||
     typeof resolve!=="function")return null;
@@ -104,16 +134,24 @@ function find(deps,source,nowMs){
       const raw=io.read(full);
       if(typeof raw!=="string"||raw.length>MAX_RECORD_BYTES)continue;
       const parsed=JSON.parse(raw);
-      const candidate=digests.map(function(d){return asIdentity(parsed,config.origin,d,now);})
+      const candidate=digests.map(function(d){return convert(parsed,config.origin,d,now);})
         .filter(Boolean)[0]||null;
       if(!candidate)continue;
-      if(match&&(match.imdb!==candidate.imdb||match.tmdb!==candidate.tmdb||
-        match.season!==candidate.season||match.episode!==candidate.episode||
-        match.year!==candidate.year||match.canonicalTitle!==candidate.canonicalTitle))
+      if(match&&identityKey(match)!==identityKey(candidate))
         return null; // Two different claims for ONE signed URL: fail closed.
       match=candidate;
     }
     return match;
   }catch(_){return null;}
 }
-module.exports={sha256,find,asIdentity,validOrigin};
+function find(deps,source,nowMs){
+  return findWith(deps,source,nowMs,asIdentity,function(v){
+    return JSON.stringify([v.imdb,v.tmdb,v.season,v.episode,v.year,v.canonicalTitle]);
+  });
+}
+function findProgramme(deps,source,nowMs){
+  return findWith(deps,source,nowMs,asProgramme,function(v){
+    return JSON.stringify([v.channelName,v.programTitle,v.startAtUtc,v.endAtUtc,v.season,v.episode]);
+  });
+}
+module.exports={sha256,find,findProgramme,asIdentity,asProgramme,validOrigin};
