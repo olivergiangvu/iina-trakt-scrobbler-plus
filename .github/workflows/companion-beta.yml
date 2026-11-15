@@ -2,7 +2,7 @@ name: AIO-IINA Companion beta build
 
 on:
   push:
-    branches: ['fix/aio-iina-single-active-v071']
+    branches: ['fix/aio-iina-single-active-v071', 'feat/aio-catchup-program-epg-20261115']
     paths:
       - 'companion/aiostreams-iina/**'
       - '.github/workflows/companion-beta.yml'
@@ -58,7 +58,7 @@ jobs:
           if-no-files-found: error
           retention-days: 7
       - name: Publish directly installable Companion prerelease
-        if: github.event_name == 'push' && github.ref == 'refs/heads/fix/aio-iina-single-active-v071'
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/fix/aio-iina-single-active-v071' || github.ref == 'refs/heads/feat/aio-catchup-program-epg-20261115')
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
