@@ -44,7 +44,10 @@ HEADERS = {
 
 
 def api_json(route: str, *, post: dict | None = None) -> dict:
-    if not route.startswith("/") or "://" in route or "\\" in route:
+    approved = (route in ("/QuickConnect/Initiate",
+                          "/Users/AuthenticateWithQuickConnect") or
+                route.startswith("/QuickConnect/Connect?secret="))
+    if not approved or "://" in route or "\\" in route or route.startswith("//"):
         raise ValueError("invalid API route")
     data = None if post is None else json.dumps(
         post, separators=(",", ":")).encode("utf-8")
