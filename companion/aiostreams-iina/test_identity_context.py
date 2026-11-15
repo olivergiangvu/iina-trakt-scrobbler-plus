@@ -37,6 +37,11 @@ def fixture(origin, route, token):
 
 
 def check():
+    # The player must never launch the separately authorized `security` CLI
+    # for a Keychain read; only native API access is permitted.
+    with patch.object(m, "keychain_token_native", return_value="mock-user-session-token") as native:
+        assert m.keychain_token("https://aio.example") == "mock-user-session-token"
+        native.assert_called_once_with("https://aio.example")
     with tempfile.TemporaryDirectory() as d:
         root = Path(d)
         cfg = root / "identity-settings.json"
