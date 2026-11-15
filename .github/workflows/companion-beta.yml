@@ -31,6 +31,8 @@ jobs:
         run: (cd companion/aiostreams-iina && python3 -m unittest test_setup_quickconnect -v)
       - name: VOD episode and Catch-up EPG identity tests
         run: (cd companion/aiostreams-iina && python3 test_identity_context.py && python3 -m unittest test_catchup_identity -v)
+      - name: Read-only deployed EPG preflight tests
+        run: (cd companion/aiostreams-iina && python3 -m unittest test_inspect_catchup -v)
       - name: Shell syntax
         run: sh -n companion/aiostreams-iina/launcher.sh && bash -n companion/aiostreams-iina/scripts/build-macos.sh && bash -n companion/aiostreams-iina/scripts/install-single-macos.sh
 

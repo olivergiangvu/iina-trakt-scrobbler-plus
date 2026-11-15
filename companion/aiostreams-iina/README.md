@@ -264,3 +264,12 @@ python3 companion/aiostreams-iina/test_identity_context.py
 Not installed. Trakt+ needs the separate EPG-only reader beta and a Mac
 field test for exact AIO 2.38 `Program`/selected-source values before this
 is considered end-to-end validated.
+
+To prove that source contract without replacing the active Mac app, the
+standalone `inspect_catchup.py` only reads the latest private callback
+descriptors, user-scoped Keychain token and AIO `/jellyfin/Items` and
+`PlaybackInfo` endpoints. It never prints an item/source ID, signed URL or
+token. Open a Catch-up programme in AIOStreams and then run the standalone
+file on the Mac. Expected: `EPG_READY: YES`; `BLOCKED` means investigate
+without installing the beta yet. This probe does not alter any config,
+IINA plugin, playback URL, server or Trakt state.
