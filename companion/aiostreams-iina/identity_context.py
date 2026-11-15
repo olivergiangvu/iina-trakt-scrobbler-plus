@@ -7,13 +7,13 @@ The original signed media/return URLs and Jellyfin tokens are never persisted.
 from __future__ import annotations
 
 import hashlib
+import ctypes
 from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
 import re
 import secrets
-import subprocess
 import sys
 import tempfile
 import time
@@ -64,15 +64,42 @@ def config_enabled(origin):
 
 def keychain_token(origin):
     """User-scoped Jellyfin session token, never an admin/API master key."""
+    # Quick Connect saved the item via native Security.framework. Invoking the
+    # distinct /usr/bin/security binary for every Play triggers a separate ACL
+    # request (and may time out); never fall back to it automatically.
+    return keychain_token_native(origin)
+
+
+def keychain_token_native(origin):
+    """Retrieve a generic password via macOS Security.framework, never argv."""
+    if sys.platform != "darwin" or not isinstance(origin, str):
+        return None
     try:
-        result = subprocess.run(
-            ["/usr/bin/security", "find-generic-password", "-w",
-             "-s", KEYCHAIN_SERVICE, "-a", origin],
-            capture_output=True, text=True, timeout=3, check=False
-        )
-        value = result.stdout.strip()
-        return value if result.returncode == 0 and 20 <= len(value) <= 4096 else None
-    except (OSError, subprocess.TimeoutExpired):
+        security = ctypes.CDLL("/System/Library/Frameworks/Security.framework/Security")
+        find = security.SecKeychainFindGenericPassword
+        find.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_char_p,
+                         ctypes.c_uint32, ctypes.c_char_p,
+                         ctypes.POINTER(ctypes.c_uint32),
+                         ctypes.POINTER(ctypes.c_void_p), ctypes.c_void_p]
+        find.restype = ctypes.c_int32
+        release = security.SecKeychainItemFreeContent
+        release.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+        release.restype = ctypes.c_int32
+        service, account = KEYCHAIN_SERVICE.encode("utf-8"), origin.encode("utf-8")
+        count = ctypes.c_uint32(0)
+        pointer = ctypes.c_void_p()
+        code = find(None, len(service), service, len(account), account,
+                    ctypes.byref(count), ctypes.byref(pointer), None)
+        if code != 0 or not pointer.value:
+            return None
+        try:
+            if count.value < 20 or count.value > 4096:
+                return None
+            token = ctypes.string_at(pointer, count.value).decode("utf-8")
+            return token if 20 <= len(token) <= 4096 else None
+        finally:
+            release(None, pointer)
+    except (OSError, AttributeError, TypeError, ValueError, UnicodeError):
         return None
 
 

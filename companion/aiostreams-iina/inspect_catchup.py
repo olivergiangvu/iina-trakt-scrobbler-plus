@@ -7,10 +7,10 @@ or callback-session data. No playback, IINA, Trakt or configuration mutations.
 """
 from __future__ import annotations
 
+import ctypes
 import json
 from pathlib import Path
 import re
-import subprocess
 import sys
 import time
 from urllib.error import HTTPError, URLError
@@ -57,15 +57,43 @@ def configured_origin() -> str | None:
     return origin
 
 
-def user_token(origin: str) -> str | None:
+def user_token(origin: str) -> tuple[str | None, int | None]:
+    """Read via the same macOS Keychain API as Quick Connect setup.
+
+    Return a non-secret OSStatus for debugging. Never spawn /usr/bin/security:
+    its distinct ACL identity caused recurring password dialogs and timeouts.
+    """
+    if sys.platform != "darwin":
+        return None, None
     try:
-        found = subprocess.run(
-            ["/usr/bin/security", "find-generic-password", "-w", "-s", SERVICE,
-             "-a", origin], capture_output=True, text=True, timeout=3, check=False)
-        token = found.stdout.strip()
-        return token if found.returncode == 0 and 20 <= len(token) <= 4096 else None
-    except (OSError, subprocess.TimeoutExpired):
-        return None
+        security = ctypes.CDLL("/System/Library/Frameworks/Security.framework/Security")
+        find = security.SecKeychainFindGenericPassword
+        find.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_char_p,
+                         ctypes.c_uint32, ctypes.c_char_p,
+                         ctypes.POINTER(ctypes.c_uint32),
+                         ctypes.POINTER(ctypes.c_void_p), ctypes.c_void_p]
+        find.restype = ctypes.c_int32
+        release = security.SecKeychainItemFreeContent
+        release.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+        release.restype = ctypes.c_int32
+        service, account = SERVICE.encode("utf-8"), origin.encode("utf-8")
+        length = ctypes.c_uint32(0)
+        pointer = ctypes.c_void_p()
+        status = find(None, len(service), service, len(account), account,
+                      ctypes.byref(length), ctypes.byref(pointer), None)
+        if status != 0:
+            return None, status
+        if not pointer.value:
+            return None, None
+        try:
+            if not 20 <= length.value <= 4096:
+                return None, None
+            token = ctypes.string_at(pointer, length.value).decode("utf-8")
+            return (token, 0) if 20 <= len(token) <= 4096 else (None, None)
+        finally:
+            release(None, pointer)
+    except (OSError, AttributeError, TypeError, ValueError, UnicodeError):
+        return None, None
 
 
 def markers(return_url: str, origin: str) -> tuple[str, str] | None:
@@ -167,9 +195,11 @@ def main() -> int:
     if not origin:
         print("CONFIG: BLOCKED")
         return 2
-    token = user_token(origin)
+    token, keychain_status = user_token(origin)
     if not token:
-        print("KEYCHAIN: BLOCKED")
+        diagnostic = (" (native OSStatus=" + str(keychain_status) + ")"
+                      if keychain_status is not None else " (native API unavailable or invalid token)")
+        print("CONFIG: PASS; KEYCHAIN: BLOCKED" + diagnostic)
         return 2
     print("CONFIG: PASS; KEYCHAIN: PASS; probe is read-only")
     try:
