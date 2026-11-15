@@ -1571,6 +1571,21 @@ function identifyCurrentMedia() {
   var source = getCurrentSource();
   var picked = playbackIdentity.identify(source, parser, streamSource);
   var parsed = picked.parsed;
+  // A Live TV channel or Xtream archive is EPG content, not verified Trakt VOD.
+  // Guard BEFORE sidecars/external IDs so no later fallback can scrobble it.
+  if (picked.iptvMode) {
+    currentMedia = null;
+    lastScrobbleStatus = createScrobbleStatus();
+    setScrobbleStatus({
+      status: "idle", verb: "",
+      mediaLabel: String(source.mediaTitle || source.title || "IPTV"),
+      detail: "Xtream " + (picked.iptvMode === "catchup" ? "Catch-up" : "Live TV") +
+        ": EPG metadata only. Trakt auto-scrobbling is disabled.",
+      reason: ""
+    });
+    log("Xtream " + picked.iptvMode + " playback; Trakt identity disabled.");
+    return;
+  }
   var episodeRoute = picked.episodeRoute || null;
   var external=freshIdentity.inspect(source,episodeRoute);
   // AIOIINABridge.app creates an authenticated, time-limited sidecar keyed by
