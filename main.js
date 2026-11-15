@@ -15,7 +15,7 @@ var trakt = require("./trakt.js");
 var trustedSeriesAliases = require("./trusted-series-aliases.js");
 var aioIdentitySidecar = require("./aio-identity-sidecar.js");
 var debugLogBuffer = require("./debug-log-buffer.js");
-var PLUGIN_VERSION = "0.2.9-beta.9";
+var PLUGIN_VERSION = "0.2.9-beta.10";
 var DEBUG_LOG_PATH = "@data/debug.log";
 var MAX_DEBUG_LOG_CHARS = 200000;
 var DEBUG_LOG_FLUSH_INTERVAL_MS = 10000;
@@ -1571,6 +1571,21 @@ function identifyCurrentMedia() {
   var source = getCurrentSource();
   var picked = playbackIdentity.identify(source, parser, streamSource);
   var parsed = picked.parsed;
+  // A Live TV channel or Xtream archive is EPG content, not verified Trakt VOD.
+  // Guard BEFORE sidecars/external IDs so no later fallback can scrobble it.
+  if (picked.iptvMode) {
+    currentMedia = null;
+    lastScrobbleStatus = createScrobbleStatus();
+    setScrobbleStatus({
+      status: "idle", verb: "",
+      mediaLabel: String(source.mediaTitle || source.title || "IPTV"),
+      detail: "Xtream " + (picked.iptvMode === "catchup" ? "Catch-up" : "Live TV") +
+        ": EPG metadata only. Trakt auto-scrobbling is disabled.",
+      reason: ""
+    });
+    log("Xtream " + picked.iptvMode + " playback; Trakt identity disabled.");
+    return;
+  }
   var episodeRoute = picked.episodeRoute || null;
   var external=freshIdentity.inspect(source,episodeRoute);
   // AIOIINABridge.app creates an authenticated, time-limited sidecar keyed by
