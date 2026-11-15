@@ -15,12 +15,29 @@ import re
 import sys
 import time
 from urllib.error import HTTPError, URLError
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 from uuid import uuid4
 
-ORIGIN = "https://olivergiangvu.asuscomm.com:18447"
-API = ORIGIN + "/jellyfin"
+ORIGIN = ""
+API = ""
+
+
+def configure_origin(value: str) -> None:
+    """Accept a bare HTTPS origin or the public non-secret /jellyfin URL."""
+    global ORIGIN, API
+    origin = value.strip().rstrip("/")
+    if origin.endswith("/jellyfin"):
+        origin = origin[:-len("/jellyfin")]
+    if not re.fullmatch(r"https://[a-z0-9.-]+(?::[0-9]{1,5})?", origin, re.I):
+        raise ValueError("expected exact HTTPS AIOStreams server address")
+    if ".." in origin:
+        raise ValueError("invalid hostname")
+    parts = urlsplit(origin)
+    if not parts.hostname or parts.port is not None and not 1 <= parts.port <= 65535:
+        raise ValueError("invalid port")
+    ORIGIN = origin.lower()
+    API = ORIGIN + "/jellyfin"
 SERVICE = "AIO-IINA-Identity-Token"
 CONFIG = Path.home() / "Library/Application Support/AIO-IINA-Bridge/identity-settings.json"
 MAX_JSON = 192 * 1024
@@ -146,6 +163,11 @@ def save_private_config() -> None:
 
 def main() -> int:
     print("AIO-IINA Companion: user-scoped Quick Connect identity setup")
+    try:
+        configure_origin(input("AIOStreams Server address (HTTPS, no token): "))
+    except (ValueError, EOFError):
+        print("BLOCKED: invalid or missing HTTPS address")
+        return 2
     print("Server:", API)
     print("No Trakt writes, video changes, API keys or raw token output.")
     if CONFIG.exists() or CONFIG.is_symlink():
