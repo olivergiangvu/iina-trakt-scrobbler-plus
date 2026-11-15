@@ -1,6 +1,7 @@
 var mediaFusion = require("./mediafusion-identity.js");
 var freshIdentity = require("./fresh-identity.js");
 var streamSource = require("./stream-source.js");
+var playbackIdentity = require("./playback-identity.js");
 // Shareable IINA playback diagnostics. Never include stream URLs, path tokens,
 // auth headers, query values (except IDs), or bearer credentials.
 function compact(value, max) {
@@ -79,6 +80,10 @@ function build(source, parsed, target, version) {
       source: compact(p.parserSource, 48)
     },
     traktTarget: compact(target || ""),
+    playbackType: (function() {
+      var mode = playbackIdentity.xtreamMode(s);
+      return mode ? "xtream-" + mode : "";
+    })(),
     freshExternalId: (function(){
       var match=freshIdentity.inspect(s,mediaFusion.fromSource(s));
       return match ? {conflict:!!match.conflict,kind:match.kind,
