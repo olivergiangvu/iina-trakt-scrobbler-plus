@@ -13,6 +13,17 @@ import setup_quickconnect as m
 
 
 class SetupTests(unittest.TestCase):
+    def setUp(self):
+        m.configure_origin("https://aio.example:18447/jellyfin")
+
+    def test_approved_origin_requires_https_and_no_secret(self):
+        self.assertEqual(m.ORIGIN, "https://aio.example:18447")
+        for invalid in ("http://aio.example", "https://user:secret@aio.example",
+                        "https://aio.example/path", "https://aio.example:99999",
+                        "https://aio..example"):
+            with self.assertRaises(ValueError):
+                m.configure_origin(invalid)
+
     def test_quick_connect_hides_secret_and_token(self):
         calls = []
         def fake_api(route, *, post=None):
