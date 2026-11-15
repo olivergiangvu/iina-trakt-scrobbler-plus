@@ -2,9 +2,9 @@ name: Validate IINA plugin pull request
 
 on:
   push:
-    branches: ['fix/xtream-live-catchup-identity-20261115']
+    branches: ['fix/xtream-live-catchup-identity-20261115', 'feat/trakt-iptv-epg-display-20261115']
   pull_request:
-    branches: [main, 'fix/verified-episode-identity-20261113']
+    branches: [main, 'fix/verified-episode-identity-20261113', 'fix/xtream-live-catchup-identity-20261115']
   workflow_dispatch:
 
 permissions:

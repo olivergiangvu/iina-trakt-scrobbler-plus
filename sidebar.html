@@ -1502,7 +1502,7 @@
         var showMainSections = connected || reauthInFlight;
         var showScrobbleControl = connected || reauthInFlight;
         var showStatusOsdControl = connected || reauthInFlight;
-        var showCorrectionSection = showMainSections && !!(state.playback && state.playback.available);
+        var showCorrectionSection = showMainSections && !!(state.playback && state.playback.available && !state.playback.iptv);
         var showHistorySection = showMainSections && !(state.correction && state.correction.active);
 
         if (!connected || auth.busy) {
@@ -1575,6 +1575,11 @@
 
         if (!playback.available) {
           mediaMeta.textContent = "Load a movie or episode.";
+          mediaMeta.hidden = false;
+        } else if (playback.iptv) {
+          mediaMeta.textContent = playback.epgSchedule
+            ? "EPG: " + playback.epgSchedule + " · Trakt disabled"
+            : "IPTV: EPG display only · Trakt disabled";
           mediaMeta.hidden = false;
         } else if (!state.scrobblingEnabled) {
           mediaMeta.textContent = "Scrobbling is off.";

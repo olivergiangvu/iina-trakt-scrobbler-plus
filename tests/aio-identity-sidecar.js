@@ -58,3 +58,31 @@ assert.equal(sidecar.find(conflict.deps,{url},now),null,"Conflicting contexts ca
 assert(!f.calls.some(([_,p])=>p.includes("hdnts")||p.includes("sign=")),
  "Reader must never pass full URL to filesystem I/O");
 console.log("AIO read-only sidecar: URL digest/TTL/HTTPS origin/IDs/conflicts/Unicode SHA-256 PASS");
+
+// Live TV Catch-up is a Jellyfin `Program`, never a confirmed Trakt episode.
+// The exact same URL digest, origin, TTL and source proof apply to display EPG.
+const programme={
+  ...record,kind:"iptv-catchup",provenance:"authenticated-aiostreams-program",
+  channel_id:"channel12345678",channel_name:"US: Cooking Channel",
+  program_title:"Man Fire Food",start_at_utc:"2026-11-15T15:00:00Z",
+  end_at_utc:"2026-11-15T15:30:00Z",season:null,episode:null,
+  trakt_eligible:false
+};
+const tv=fixture(programme);
+const info=sidecar.findProgramme(tv.deps,{url},now);
+assert.equal(info.programTitle,"Man Fire Food");
+assert.equal(info.channelName,"US: Cooking Channel");
+assert.equal(info.traktEligible,false);
+assert.equal(sidecar.find(tv.deps,{url},now),null,
+  "EPG must never enter the episode Trakt consumer");
+assert.equal(sidecar.findProgramme(tv.deps,{url:url+"&wrong=1"},now),null);
+assert.equal(sidecar.findProgramme(fixture({...programme,trakt_eligible:true}).deps,{url},now),null);
+assert.equal(sidecar.findProgramme(fixture({...programme,origin:"https://evil.example"}).deps,{url},now),null);
+assert.equal(sidecar.findProgramme(fixture({...programme,expires_at_ms:now+600000}).deps,{url},now),null);
+assert.equal(sidecar.findProgramme(fixture({...programme,channel_name:"Bad\nChannel"}).deps,{url},now),null);
+assert.equal(sidecar.findProgramme(fixture({...programme,end_at_utc:"2026-11-15T14:00:00Z"}).deps,{url},now),null);
+const tvConflict=fixture(programme);
+tvConflict.data[dir+"/identity-fedcba9876543210fedcba9876543210.json"]=
+  JSON.stringify({...programme,program_title:"Not Man Fire Food"});
+assert.equal(sidecar.findProgramme(tvConflict.deps,{url},now),null);
+console.log("AIO Catch-up EPG sidecar: authenticated Program, no Trakt, TTL/hash/conflict PASS");
