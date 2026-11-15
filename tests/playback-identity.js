@@ -85,3 +85,25 @@ const noHlsTitle = plugin.identify({
   mediaTitle:"index.m3u8", metadataTitle:""
 }, parser, stream);
 assert.equal(noHlsTitle.parsed, null);
+
+
+const catchupUrl = "https://iptv.example/timeshift/user/secret/30/2026-11-15:15-00/100450.ts";
+const catchup = plugin.identify({
+  url: catchupUrl, path: catchupUrl,
+  filename: "100450.ts", mediaTitle: "Man Fire Food",
+  title: "Man Fire Food", metadataTitle: ""
+}, parser, stream);
+assert.equal(catchup.parsed, null, "Xtream archive EPG title cannot be inferred as a Trakt movie");
+assert.equal(catchup.iptvMode, "catchup");
+assert.equal(catchup.source, "xtream-catchup");
+const liveUrl = "https://iptv.example/live/user/secret/98765.m3u8";
+const live = plugin.identify({
+  url: liveUrl, path: liveUrl,
+  filename: "98765.m3u8", mediaTitle: "US: Cooking Channel · Iron Chef America"
+}, parser, stream);
+assert.equal(live.parsed, null, "Xtream Live TV cannot be scrobbled by EPG title");
+assert.equal(live.iptvMode, "live");
+assert.equal(plugin.xtreamMode({url:"https://iptv.example/movie/user/pass/100450.ts"}), "");
+assert.equal(plugin.xtreamMode({url:"https://iptv.example/series/user/pass/100450.ts"}), "");
+assert.equal(plugin.xtreamMode({url:"https://iptv.example/files/Man.Fire.Food.2024.ts"}), "");
+assert.equal(plugin.xtreamMode({url:"https://iptv.example/timeshift/too-short/100450.ts"}), "");
