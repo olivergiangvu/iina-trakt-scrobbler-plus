@@ -236,3 +236,31 @@ python3 companion/aiostreams-iina/test_identity_context.py
 
 No new Docker container, HomeDocker Trakt Bridge change, AIOStreams image
 patch, Trakt writer or background service is required.
+
+## v0.7.4-beta.1 candidate: authenticated Catch-up guide identity
+
+AIOStreams v2.38 represents an archive programme as a Jellyfin `Program`,
+**not** an `Episode` or `Movie`. The existing opt-in `identity_context.py`
+now also accepts such a programme when `aiostreams.catchup` is true and
+the exact AIO `played` item, selected `source` PlaybackInfo, channel,
+programme and bounded UTC broadcast times all validate.
+
+It writes a short-lived `kind: iptv-catchup` sidecar bound to the exact
+original signed media URL SHA-256. The envelope carries only the programme
+and channel names, UTC start/end, optional guide season/episode and an
+explicit `trakt_eligible: false`. Upstream guide IMDb IDs are **never**
+promoted to Trakt identity by this code. `Episode` handoff, Live TV,
+the existing custom link and original media bytes remain unchanged.
+
+Requires the one-time user-scoped Quick Connect setup from the preceding
+draft PR (same config and Keychain service); do not run setup twice or
+overwrite an existing token. Run the new offline regression before field use:
+
+```bash
+python3 companion/aiostreams-iina/test_identity_context.py
+( cd companion/aiostreams-iina && python3 -m unittest test_catchup_identity -v )
+```
+
+Not installed. Trakt+ needs the separate EPG-only reader beta and a Mac
+field test for exact AIO 2.38 `Program`/selected-source values before this
+is considered end-to-end validated.

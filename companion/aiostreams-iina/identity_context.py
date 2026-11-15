@@ -7,6 +7,7 @@ The original signed media/return URLs and Jellyfin tokens are never persisted.
 from __future__ import annotations
 
 import hashlib
+from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
@@ -165,6 +166,77 @@ def context_info(return_url):
     return origin, item, source
 
 
+def epg_text(value, maximum=160):
+    """Display-only guide label; reject control characters and opaque IDs."""
+    if not isinstance(value, str) or not value or len(value) > maximum:
+        return None
+    if any(ord(char) < 32 or ord(char) == 127 for char in value):
+        return None
+    cleaned = " ".join(value.split())
+    return cleaned if cleaned and len(cleaned) <= maximum else None
+
+
+def epg_utc(value):
+    """Canonical UTC timestamp, never inferred from an Xtream archive URL."""
+    if not isinstance(value, str) or len(value) > 48:
+        return None
+    try:
+        instant = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if instant.utcoffset() is None:
+            return None
+        return instant.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
+def selected_source_confirmed(fetch, origin, item_id, source_id, token):
+    playback = fetch(origin, "/Items/" + item_id + "/PlaybackInfo?" +
+                     urlencode({"MediaSourceId": source_id}), token)
+    sources = playback.get("MediaSources") if isinstance(playback, dict) else None
+    return isinstance(sources, list) and any(
+        isinstance(x, dict) and str(x.get("Id", "")).lower() == source_id.lower()
+        for x in sources[:32]
+    )
+
+
+def catchup_identity(info, media, origin, item_id, source_id, token, fetch, issued):
+    """AIO `Program` is EPG information, NEVER a Trakt movie or episode ID."""
+    if info.get("Type") != "Program":
+        return None
+    extension = info.get("aiostreams")
+    if not isinstance(extension, dict) or extension.get("catchup") is not True:
+        return None
+    title = epg_text(info.get("Name"))
+    channel = epg_text(info.get("ChannelName"))
+    channel_id = info.get("ChannelId")
+    start = epg_utc(info.get("StartDate"))
+    end = epg_utc(info.get("EndDate"))
+    if not title or not channel or not ID_RE.fullmatch(channel_id or "") or not start or not end:
+        return None
+    first = datetime.fromisoformat(start.replace("Z", "+00:00"))
+    last = datetime.fromisoformat(end.replace("Z", "+00:00"))
+    if not (60 <= (last - first).total_seconds() <= 48 * 3600):
+        return None
+    if not selected_source_confirmed(fetch, origin, item_id, source_id, token):
+        return None
+    season = safe_int(info.get("ParentIndexNumber"), 0, 999)
+    episode = safe_int(info.get("IndexNumber"), 1, 9999)
+    return {
+        "schema": 1,
+        "kind": "iptv-catchup",
+        "provenance": "authenticated-aiostreams-program",
+        "origin": origin,
+        "media_sha256": hashlib.sha256(media.encode("utf-8")).hexdigest(),
+        "item_id": item_id, "media_source_id": source_id,
+        "channel_id": channel_id,
+        "channel_name": channel, "program_title": title,
+        "start_at_utc": start, "end_at_utc": end,
+        "season": season, "episode": episode,
+        "trakt_eligible": False,
+        "issued_at_ms": issued, "expires_at_ms": issued + TTL_MS,
+    }
+
+
 def obtain_identity(media, title, return_url, *, token=None, fetch=None, now_ms=None):
     """Resolve an exact AIO episode+parent and verify the selected source.
 
@@ -185,7 +257,15 @@ def obtain_identity(media, title, return_url, *, token=None, fetch=None, now_ms=
         info = exactly_one_item(fetch(origin, "/Items?" + urlencode({
             "Ids": item_id, "Fields": "ProviderIds,ParentId"
         }), token), item_id)
-        if not info or info.get("Type") != "Episode":
+        if not info:
+            return None
+        issued = int(now_ms if now_ms is not None else time.time() * 1000)
+        if not isinstance(media, str) or not media.startswith(("https://", "http://")):
+            return None
+        if info.get("Type") == "Program":
+            return catchup_identity(info, media, origin, item_id, source_id,
+                                    token, fetch, issued)
+        if info.get("Type") != "Episode":
             return None
         show_id = str(info.get("SeriesId", ""))
         if not ID_RE.fullmatch(show_id):
@@ -208,16 +288,7 @@ def obtain_identity(media, title, return_url, *, token=None, fetch=None, now_ms=
         year = safe_int(show.get("ProductionYear"), 1900, 2100)
         if not year:
             return None
-        playback = fetch(origin, "/Items/" + item_id + "/PlaybackInfo?" +
-                         urlencode({"MediaSourceId": source_id}), token)
-        sources = playback.get("MediaSources") if isinstance(playback, dict) else None
-        if not isinstance(sources, list) or not any(
-            isinstance(x, dict) and str(x.get("Id", "")).lower() == source_id.lower()
-            for x in sources[:32]
-        ):
-            return None
-        issued = int(now_ms if now_ms is not None else time.time() * 1000)
-        if not isinstance(media, str) or not media.startswith(("https://", "http://")):
+        if not selected_source_confirmed(fetch, origin, item_id, source_id, token):
             return None
         return {
             "schema": 1,
