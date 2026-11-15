@@ -4,7 +4,7 @@ on:
   push:
     branches: ['fix/xtream-live-catchup-identity-20261115']
   pull_request:
-    branches: [main]
+    branches: [main, 'fix/verified-episode-identity-20261113']
   workflow_dispatch:
 
 permissions:
